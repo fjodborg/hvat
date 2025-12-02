@@ -389,7 +389,7 @@ impl Application for HvatApp {
         let text_color = self.theme.text_color();
 
         // Header with title and navigation
-        let header = row()
+        let header_row = row()
             .push(Element::new(
                 text("HVAT")
                     .size(20.0)
@@ -422,6 +422,11 @@ impl Application for HvatApp {
                     .color(Color::rgb(0.5, 0.8, 0.5)),
             ))
             .spacing(10.0);
+
+        // Wrap header in container with background to cover any content that bleeds through
+        let header = container(Element::new(header_row))
+            .padding(5.0)
+            .background(self.theme.background_color());
 
         // Content based on current tab
         let content = match self.current_tab {

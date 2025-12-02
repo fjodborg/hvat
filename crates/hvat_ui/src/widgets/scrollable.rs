@@ -110,10 +110,23 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
 
-        // Calculate content area width (excluding scrollbar)
-        let content_width = bounds.width - SCROLLBAR_AREA;
+        // Determine if scrollbar is needed
+        let needs_scrollbar = {
+            // Calculate content height to check if scrollbar is needed
+            let content_width = bounds.width - SCROLLBAR_AREA;
+            let content_limits = Limits::with_range(0.0, content_width, 0.0, 100000.0);
+            let content_layout = self.child.widget().layout(&content_limits);
+            content_layout.size().height > bounds.height
+        };
 
-        // Get the content size - use unconstrained height so content can be taller than viewport
+        // Calculate content area width (exclude scrollbar area only if scrollbar is needed)
+        let content_width = if needs_scrollbar {
+            bounds.width - SCROLLBAR_AREA
+        } else {
+            bounds.width
+        };
+
+        // Get the content size
         let content_limits = Limits::with_range(0.0, content_width, 0.0, 100000.0);
         let content_layout = self.child.widget().layout(&content_limits);
         let content_height = content_layout.size().height;
@@ -127,23 +140,30 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         );
         let visible_layout = Layout::new(visible_bounds);
 
-        // Draw the child
+        // Push clip rect to limit child drawing to our viewport bounds
+        // This ensures scrolled content is clipped at the scrollable's boundaries
+        let clip_bounds = Rectangle::new(bounds.x, bounds.y, content_width, bounds.height);
+        renderer.push_clip(clip_bounds);
+
+        // Draw the child (will be clipped to our bounds)
         self.child.widget().draw(renderer, &visible_layout);
 
-        // Scrollbar position - at the right edge of our bounds
-        let scrollbar_x = bounds.x + bounds.width - SCROLLBAR_WIDTH - SCROLLBAR_PADDING;
+        // Pop the clip rect
+        renderer.pop_clip();
 
-        // Track background - always visible
-        let track_bounds = Rectangle::new(
-            scrollbar_x,
-            bounds.y,
-            SCROLLBAR_WIDTH,
-            bounds.height,
-        );
-        renderer.fill_rect(track_bounds, Color::rgb(0.25, 0.25, 0.25));
+        // Only draw scrollbar if content is larger than viewport
+        if needs_scrollbar {
+            let scrollbar_x = bounds.x + bounds.width - SCROLLBAR_WIDTH - SCROLLBAR_PADDING;
 
-        // Draw scrollbar thumb if content is larger than viewport
-        if content_height > bounds.height {
+            // Track background
+            let track_bounds = Rectangle::new(
+                scrollbar_x,
+                bounds.y,
+                SCROLLBAR_WIDTH,
+                bounds.height,
+            );
+            renderer.fill_rect(track_bounds, Color::rgb(0.25, 0.25, 0.25));
+
             // Thumb size proportional to visible content
             let thumb_height = (bounds.height / content_height * bounds.height).max(30.0);
             let max_scroll = content_height - bounds.height;
@@ -168,15 +188,6 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
                 thumb_height,
             );
             renderer.fill_rect(thumb_bounds, thumb_color);
-        } else {
-            // Content fits - draw full-size thumb to indicate no scrolling needed
-            let thumb_bounds = Rectangle::new(
-                scrollbar_x,
-                bounds.y,
-                SCROLLBAR_WIDTH,
-                bounds.height,
-            );
-            renderer.fill_rect(thumb_bounds, Color::rgb(0.35, 0.35, 0.35));
         }
     }
 
@@ -202,15 +213,20 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
 
         let max_scroll = (content_height - bounds.height).max(0.0);
 
-        // Helper to create child layout
-        let make_child_layout = |scroll_offset: f32| {
-            let visible_bounds = Rectangle::new(
+        // Helper to create child layout for event handling
+        // The child content is logically positioned starting at bounds.y, but the content
+        // extends beyond the viewport. We need to:
+        // 1. Position child at bounds.y (top of viewport)
+        // 2. Transform mouse Y by subtracting scroll_offset to get position in content space
+        // This way, when scrolled down 100px, a click at viewport y=50 maps to content y=150
+        let make_child_layout = || {
+            let child_bounds = Rectangle::new(
                 bounds.x,
-                bounds.y - scroll_offset,
+                bounds.y,  // Child starts at viewport top for event handling
                 content_width,
                 content_height,
             );
-            Layout::new(visible_bounds)
+            Layout::new(child_bounds)
         };
 
         match event {
@@ -257,11 +273,14 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
 
                 // Pass to child (click is in content area)
                 if bounds.contains(*position) && position.x < scrollbar_x - 4.0 {
+                    // Transform mouse position: add scroll_offset to map viewport coords to content coords
+                    // When scrolled down 100px, a click at viewport y=50 should hit content at y=150
+                    let content_y = position.y + self.scroll_offset;
                     let transformed = Event::MousePressed {
                         button: MouseButton::Left,
-                        position: Point::new(position.x, position.y + self.scroll_offset),
+                        position: Point::new(position.x, content_y),
                     };
-                    let child_layout = make_child_layout(self.scroll_offset);
+                    let child_layout = make_child_layout();
                     return self.child.widget_mut().on_event(&transformed, &child_layout);
                 }
                 None
@@ -274,12 +293,13 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
                     }
                 }
 
-                // Pass to child
+                // Pass to child with transformed coordinates
+                let content_y = position.y + self.scroll_offset;
                 let transformed = Event::MouseReleased {
                     button: MouseButton::Left,
-                    position: Point::new(position.x, position.y + self.scroll_offset),
+                    position: Point::new(position.x, content_y),
                 };
-                let child_layout = make_child_layout(self.scroll_offset);
+                let child_layout = make_child_layout();
                 return self.child.widget_mut().on_event(&transformed, &child_layout);
             }
             Event::MouseMoved { position } => {
@@ -298,21 +318,22 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
                     }
                 }
 
-                // Pass to child
+                // Pass to child with transformed coordinates
+                let content_y = position.y + self.scroll_offset;
                 let transformed = Event::MouseMoved {
-                    position: Point::new(position.x, position.y + self.scroll_offset),
+                    position: Point::new(position.x, content_y),
                 };
-                let child_layout = make_child_layout(self.scroll_offset);
+                let child_layout = make_child_layout();
                 return self.child.widget_mut().on_event(&transformed, &child_layout);
             }
             Event::MouseWheel { .. } => {
                 // Pass mouse wheel to children (for zoom support)
-                let child_layout = make_child_layout(self.scroll_offset);
+                let child_layout = make_child_layout();
                 return self.child.widget_mut().on_event(event, &child_layout);
             }
             _ => {
                 // Pass other events to child
-                let child_layout = make_child_layout(self.scroll_offset);
+                let child_layout = make_child_layout();
                 return self.child.widget_mut().on_event(event, &child_layout);
             }
         }

@@ -25,6 +25,8 @@ pub enum DrawCommand {
         position: crate::Point,
         color: Color,
         size: f32,
+        /// Optional clip rect - text outside this rect will be hidden
+        clip_rect: Option<Rectangle>,
     },
     DrawImage {
         handle: crate::ImageHandle,
@@ -38,6 +40,12 @@ pub enum DrawCommand {
         /// Optional scissor rect to clip the image (in screen pixels)
         clip_rect: Option<Rectangle>,
     },
+    /// Push a clip rectangle onto the clip stack
+    PushClip {
+        rect: Rectangle,
+    },
+    /// Pop the top clip rectangle from the stack
+    PopClip,
 }
 
 /// The renderer abstracts away GPU rendering details from widgets.
@@ -53,6 +61,8 @@ pub struct Renderer {
     draw_commands: Vec<DrawCommand>,
     /// Cache for GPU textures, keyed by ImageHandle data pointer
     texture_cache: HashMap<usize, (Texture, wgpu::BindGroup)>,
+    /// Stack of clip rectangles for nested clipping (e.g., scrollable containers)
+    clip_stack: Vec<Rectangle>,
 }
 
 impl Renderer {
@@ -118,6 +128,7 @@ impl Renderer {
             height,
             draw_commands: Vec::new(),
             texture_cache: HashMap::new(),
+            clip_stack: Vec::new(),
         })
     }
 
@@ -161,10 +172,21 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         // Queue text sections before rendering
+        // Filter out text that's outside clip rects
         let text_sections: Vec<Section> = self.draw_commands
             .iter()
             .filter_map(|cmd| {
-                if let DrawCommand::DrawText { text, position, color, size } = cmd {
+                if let DrawCommand::DrawText { text, position, color, size, clip_rect } = cmd {
+                    // Check if text position is within clip rect (if any)
+                    // We use a simple bounds check - text starting position must be within clip
+                    // and we estimate text height based on font size
+                    if let Some(clip) = clip_rect {
+                        let text_height = *size * 1.2; // Approximate line height
+                        // Skip if text is completely above or below clip rect
+                        if position.y + text_height < clip.y || position.y > clip.y + clip.height {
+                            return None;
+                        }
+                    }
                     Some(Section::default()
                         .add_text(GlyphText::new(text)
                             .with_scale(*size)
@@ -399,6 +421,20 @@ impl Renderer {
                     DrawCommand::DrawText { .. } | DrawCommand::DrawImage { .. } => {
                         // Text is handled separately, images already rendered
                     }
+                    DrawCommand::PushClip { rect } => {
+                        // Set scissor rect to clip subsequent draws
+                        let x = rect.x.max(0.0) as u32;
+                        let y = rect.y.max(0.0) as u32;
+                        let w = (rect.width as u32).min(self.width.saturating_sub(x));
+                        let h = (rect.height as u32).min(self.height.saturating_sub(y));
+                        if w > 0 && h > 0 {
+                            render_pass.set_scissor_rect(x, y, w, h);
+                        }
+                    }
+                    DrawCommand::PopClip => {
+                        // Reset scissor rect to full viewport
+                        render_pass.set_scissor_rect(0, 0, self.width, self.height);
+                    }
                 }
             }
 
@@ -446,6 +482,7 @@ impl Renderer {
             position,
             color,
             size,
+            clip_rect: self.current_clip(),
         });
     }
 
@@ -502,14 +539,49 @@ impl Renderer {
         zoom: f32,
         adjustments: ImageAdjustments,
     ) {
+        // Use current clip rect if set, otherwise use widget bounds
+        // If clip rect is set, intersect it with the widget bounds
+        let clip_rect = if let Some(clip) = self.current_clip() {
+            Some(clip.intersect(&rect))
+        } else {
+            Some(rect)
+        };
+
         self.draw_commands.push(DrawCommand::DrawImage {
             handle: handle.clone(),
             rect,
             pan,
             zoom,
             adjustments,
-            clip_rect: Some(rect), // Default: clip to widget bounds
+            clip_rect,
         });
+    }
+
+    /// Push a clip rectangle onto the clip stack.
+    /// All subsequent draw commands will be clipped to this rectangle.
+    /// The actual clip rect is the intersection of all rects on the stack.
+    pub fn push_clip(&mut self, rect: Rectangle) {
+        // Calculate effective clip by intersecting with current clip
+        let effective = if let Some(current) = self.clip_stack.last() {
+            current.intersect(&rect)
+        } else {
+            rect
+        };
+        self.clip_stack.push(effective);
+        self.draw_commands.push(DrawCommand::PushClip { rect: effective });
+    }
+
+    /// Pop the top clip rectangle from the stack.
+    /// Restores the previous clip rectangle (or full viewport if stack is empty).
+    pub fn pop_clip(&mut self) {
+        self.clip_stack.pop();
+        self.draw_commands.push(DrawCommand::PopClip);
+    }
+
+    /// Get the current clip rectangle (intersection of all pushed clips).
+    /// Returns None if no clip is active.
+    pub fn current_clip(&self) -> Option<Rectangle> {
+        self.clip_stack.last().copied()
     }
 }
 

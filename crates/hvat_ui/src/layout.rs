@@ -134,6 +134,21 @@ impl Rectangle {
     pub fn size(&self) -> Size {
         Size::new(self.width, self.height)
     }
+
+    /// Compute the intersection of two rectangles.
+    /// Returns a rectangle representing the overlapping area.
+    /// If there's no overlap, returns a zero-sized rectangle at the origin.
+    pub fn intersect(&self, other: &Rectangle) -> Rectangle {
+        let x1 = self.x.max(other.x);
+        let y1 = self.y.max(other.y);
+        let x2 = (self.x + self.width).min(other.x + other.width);
+        let y2 = (self.y + self.height).min(other.y + other.height);
+
+        let width = (x2 - x1).max(0.0);
+        let height = (y2 - y1).max(0.0);
+
+        Rectangle::new(x1, y1, width, height)
+    }
 }
 
 /// The layout of a widget - its position and size.

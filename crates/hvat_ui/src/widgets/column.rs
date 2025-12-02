@@ -60,6 +60,9 @@ impl<'a, Message> Widget<Message> for Column<'a, Message> {
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
+
+        // First, calculate all child positions
+        let mut child_layouts: Vec<(Rectangle, &Element<'a, Message>)> = Vec::new();
         let mut y = bounds.y;
 
         for child in &self.children {
@@ -67,13 +70,16 @@ impl<'a, Message> Widget<Message> for Column<'a, Message> {
             let child_layout = child.widget().layout(&child_limits);
             let child_size = child_layout.size();
 
-            // Position child at current y
             let child_bounds = Rectangle::new(bounds.x, y, child_size.width, child_size.height);
-            let positioned_layout = Layout::new(child_bounds);
-
-            child.widget().draw(renderer, &positioned_layout);
+            child_layouts.push((child_bounds, child));
 
             y += child_size.height + self.spacing;
+        }
+
+        // Draw in reverse order so first child (e.g., header) draws on top
+        for (child_bounds, child) in child_layouts.into_iter().rev() {
+            let positioned_layout = Layout::new(child_bounds);
+            child.widget().draw(renderer, &positioned_layout);
         }
     }
 
