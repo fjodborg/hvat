@@ -122,103 +122,64 @@ impl Application for HvatApp {
         match message {
             // Navigation
             Message::SwitchTab(tab) => {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("🔄 Switching to tab: {:?}", tab).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🔄 Switching to tab: {:?}", tab);
+                log::debug!("🔄 Switching to tab: {:?}", tab);
                 self.current_tab = tab;
             }
 
             // Counter
             Message::Increment => {
                 self.counter += 1;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("➕ Counter incremented: {}", self.counter).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("➕ Counter incremented: {}", self.counter);
+                log::debug!("➕ Counter incremented: {}", self.counter);
             }
             Message::Decrement => {
                 self.counter -= 1;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("➖ Counter decremented: {}", self.counter).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("➖ Counter decremented: {}", self.counter);
+                log::debug!("➖ Counter decremented: {}", self.counter);
             }
             Message::Reset => {
                 self.counter = 0;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&"🔄 Counter reset".into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🔄 Counter reset");
+                log::debug!("🔄 Counter reset");
             }
 
             // Image viewer
             Message::ZoomIn => {
                 self.zoom = (self.zoom * 1.2).min(5.0);
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("🔍 Zoom in: {:.2}x", self.zoom).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🔍 Zoom in: {:.2}x", self.zoom);
+                log::debug!("🔍 Zoom in: {:.2}x", self.zoom);
             }
             Message::ZoomOut => {
                 self.zoom = (self.zoom / 1.2).max(0.2);
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("🔍 Zoom out: {:.2}x", self.zoom).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🔍 Zoom out: {:.2}x", self.zoom);
+                log::debug!("🔍 Zoom out: {:.2}x", self.zoom);
             }
             Message::ResetView => {
                 self.zoom = 1.0;
                 self.pan_x = 0.0;
                 self.pan_y = 0.0;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&"🔄 View reset".into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🔄 View reset");
+                log::debug!("🔄 View reset");
             }
             Message::PanLeft => {
                 self.pan_x -= 10.0;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("⬅️  Pan left: ({:.0}, {:.0})", self.pan_x, self.pan_y).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("⬅️  Pan left: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+                log::debug!("⬅️  Pan left: ({:.0}, {:.0})", self.pan_x, self.pan_y);
             }
             Message::PanRight => {
                 self.pan_x += 10.0;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("➡️  Pan right: ({:.0}, {:.0})", self.pan_x, self.pan_y).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("➡️  Pan right: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+                log::debug!("➡️  Pan right: ({:.0}, {:.0})", self.pan_x, self.pan_y);
             }
             Message::PanUp => {
                 self.pan_y -= 10.0;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("⬆️  Pan up: ({:.0}, {:.0})", self.pan_x, self.pan_y).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("⬆️  Pan up: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+                log::debug!("⬆️  Pan up: ({:.0}, {:.0})", self.pan_x, self.pan_y);
             }
             Message::PanDown => {
                 self.pan_y += 10.0;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("⬇️  Pan down: ({:.0}, {:.0})", self.pan_x, self.pan_y).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("⬇️  Pan down: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+                log::debug!("⬇️  Pan down: ({:.0}, {:.0})", self.pan_x, self.pan_y);
             }
 
             // Settings
             Message::ToggleDebugInfo => {
                 self.show_debug_info = !self.show_debug_info;
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("🐛 Debug info: {}", if self.show_debug_info { "ON" } else { "OFF" }).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🐛 Debug info: {}", if self.show_debug_info { "ON" } else { "OFF" });
+                log::debug!("🐛 Debug info: {}", if self.show_debug_info { "ON" } else { "OFF" });
             }
             Message::SetTheme(theme) => {
                 self.theme = theme.clone();
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("🎨 Theme changed to: {:?}", self.theme.choice).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                println!("🎨 Theme changed to: {:?}", self.theme.choice);
+                log::debug!("🎨 Theme changed to: {:?}", self.theme.choice);
             }
         }
     }

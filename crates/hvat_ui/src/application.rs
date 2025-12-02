@@ -38,6 +38,9 @@ pub struct Settings {
 
     /// Whether the window should be resizable
     pub resizable: bool,
+
+    /// Log level (default: Debug)
+    pub log_level: log::LevelFilter,
 }
 
 impl Default for Settings {
@@ -46,6 +49,7 @@ impl Default for Settings {
             window_title: None,
             window_size: (800, 600),
             resizable: true,
+            log_level: log::LevelFilter::Debug,
         }
     }
 }
@@ -58,6 +62,26 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
     use winit::event::{Event as WinitEvent, WindowEvent};
     use winit::event_loop::{ControlFlow, EventLoop};
     use winit::window::WindowBuilder;
+
+    // Initialize logger based on platform
+    #[cfg(target_arch = "wasm32")]
+    {
+        // console_log expects a Level, not LevelFilter. Use to_level() with fallback for Off.
+        if let Some(level) = settings.log_level.to_level() {
+            console_log::init_with_level(level)
+                .map_err(|e| format!("Failed to initialize logger: {:?}", e))?;
+        }
+        // If log_level is Off, don't initialize the logger (no logging)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        env_logger::Builder::from_default_env()
+            .filter_level(settings.log_level)
+            .init();
+    }
+
+    log::info!("Starting hvat_ui application");
+    log::debug!("Window size: {}x{}", settings.window_size.0, settings.window_size.1);
 
     // Create event loop
     let event_loop = EventLoop::new().map_err(|e| format!("Failed to create event loop: {:?}", e))?;

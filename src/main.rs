@@ -3,14 +3,13 @@
 fn main() {
     use hvat::HvatApp;
     use hvat_ui::{run, Settings};
-    
-    env_logger::init();
 
-    // Create and run the application
+    // Create and run the application with logging configured in Settings
     let settings = Settings {
         window_title: Some("HVAT - Hyperspectral Annotation Tool".to_string()),
         window_size: (1200, 800),
         resizable: true,
+        log_level: log::LevelFilter::Debug,
     };
 
     if let Err(e) = run::<HvatApp>(settings) {
