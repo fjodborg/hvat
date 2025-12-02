@@ -1,3 +1,10 @@
+// Shared application logic
+mod app;
+
+// HVAT application (shared between native and WASM)
+mod hvat_app;
+pub use hvat_app::HvatApp;
+
 // WASM entry point for hvat
 #[cfg(target_arch = "wasm32")]
 mod wasm;

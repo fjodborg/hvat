@@ -1,2 +1,31 @@
-// Placeholder for hvat_ui - will be implemented in later phases
+//! hvat_ui - A GPU-accelerated immediate-mode UI framework
+//!
+//! This crate provides a simple, immediate-mode UI framework built on top of wgpu.
+//! It follows the Elm Architecture pattern with Applications, Messages, and Views.
+
+// Re-export hvat_gpu for convenience
 pub use hvat_gpu;
+
+// Core modules
+mod application;
+mod color_pipeline;
+mod element;
+mod event;
+mod image;
+mod layout;
+mod length;
+mod renderer;
+mod widget;
+
+// Widget implementations
+pub mod widgets;
+
+// Public API
+pub use application::{run, Application, Settings};
+pub use element::Element;
+pub use event::{Event, Key, Modifiers, MouseButton};
+pub use image::ImageHandle;
+pub use layout::{Layout, Limits, Point, Rectangle, Size};
+pub use length::Length;
+pub use renderer::{Color, Renderer};
+pub use widget::Widget;
