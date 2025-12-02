@@ -3,6 +3,7 @@
 use hvat_ui::{
     widgets::*, Application, Color, Element, ImageAdjustments, ImageHandle, Length,
 };
+use web_time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
@@ -83,6 +84,12 @@ pub struct HvatApp {
     image_last_drag_pos: Option<(f32, f32)>,
     /// Which slider is currently being dragged (if any)
     active_slider: Option<SliderId>,
+    /// Frame count for FPS calculation
+    frame_count: u32,
+    /// Last FPS update time
+    last_fps_time: Instant,
+    /// Current FPS value
+    fps: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +132,9 @@ pub enum Message {
     // Settings
     ToggleDebugInfo,
     SetTheme(Theme),
+
+    // FPS counter
+    Tick,
 }
 
 
@@ -132,8 +142,10 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn new() -> Self {
-        // Create a test image (gradient pattern)
-        let test_image = create_test_image(512, 512);
+        // Create a larger test image for performance testing (4096x4096 = 64MB RGBA)
+        log::info!("Creating 4096x4096 test image...");
+        let test_image = create_test_image(4096, 4096);
+        log::info!("Test image created");
 
         Self {
             current_tab: Tab::Home,
@@ -151,6 +163,9 @@ impl Application for HvatApp {
             image_dragging: false,
             image_last_drag_pos: None,
             active_slider: None,
+            frame_count: 0,
+            last_fps_time: Instant::now(),
+            fps: 0.0,
         }
     }
 
@@ -288,7 +303,23 @@ impl Application for HvatApp {
                 self.theme = theme.clone();
                 log::debug!("🎨 Theme changed to: {:?}", self.theme.choice);
             }
+
+            // FPS counter - called every frame
+            Message::Tick => {
+                self.frame_count += 1;
+                let elapsed = self.last_fps_time.elapsed();
+                // Update FPS every second
+                if elapsed.as_secs_f32() >= 1.0 {
+                    self.fps = self.frame_count as f32 / elapsed.as_secs_f32();
+                    self.frame_count = 0;
+                    self.last_fps_time = Instant::now();
+                }
+            }
         }
+    }
+
+    fn tick(&self) -> Option<Self::Message> {
+        Some(Message::Tick)
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -321,6 +352,12 @@ impl Application for HvatApp {
                 button("Settings")
                     .on_press(Message::SwitchTab(Tab::Settings))
                     .width(100.0),
+            ))
+            // FPS counter
+            .push(Element::new(
+                text(format!("FPS: {:.0}", self.fps))
+                    .size(14.0)
+                    .color(Color::rgb(0.5, 0.8, 0.5)),
             ))
             .spacing(10.0);
 
@@ -463,7 +500,9 @@ impl HvatApp {
             // Image display area with border
             .push(Element::new(
                 container(Element::new(image_widget))
-                    .padding(2.0),
+                    .padding(4.0)
+                    .border(Color::rgb(0.4, 0.4, 0.4))
+                    .border_width(2.0),
             ))
             .push(Element::new(
                 text("Drag to pan, scroll to zoom")

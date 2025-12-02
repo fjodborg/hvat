@@ -5,6 +5,8 @@ pub struct Container<'a, Message> {
     child: Element<'a, Message>,
     padding: f32,
     background: Option<Color>,
+    border_color: Option<Color>,
+    border_width: f32,
 }
 
 impl<'a, Message> Container<'a, Message> {
@@ -14,6 +16,8 @@ impl<'a, Message> Container<'a, Message> {
             child,
             padding: 0.0,
             background: None,
+            border_color: None,
+            border_width: 1.0,
         }
     }
 
@@ -26,6 +30,18 @@ impl<'a, Message> Container<'a, Message> {
     /// Set the background color.
     pub fn background(mut self, color: Color) -> Self {
         self.background = Some(color);
+        self
+    }
+
+    /// Set the border color (enables border).
+    pub fn border(mut self, color: Color) -> Self {
+        self.border_color = Some(color);
+        self
+    }
+
+    /// Set the border width (default: 1.0).
+    pub fn border_width(mut self, width: f32) -> Self {
+        self.border_width = width;
         self
     }
 }
@@ -60,6 +76,11 @@ impl<'a, Message> Widget<Message> for Container<'a, Message> {
         // Draw background if specified
         if let Some(color) = self.background {
             renderer.fill_rect(bounds, color);
+        }
+
+        // Draw border if specified
+        if let Some(color) = self.border_color {
+            renderer.stroke_rect(bounds, color, self.border_width);
         }
 
         // Draw child with offset for padding

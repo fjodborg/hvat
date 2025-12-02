@@ -35,6 +35,8 @@ pub enum DrawCommand {
         zoom: f32,
         /// Image adjustments (brightness, contrast, gamma, hue)
         adjustments: ImageAdjustments,
+        /// Optional scissor rect to clip the image (in screen pixels)
+        clip_rect: Option<Rectangle>,
     },
 }
 
@@ -186,8 +188,8 @@ impl Renderer {
         let image_commands: Vec<_> = self.draw_commands
             .iter()
             .filter_map(|cmd| {
-                if let DrawCommand::DrawImage { handle, rect, pan, zoom, adjustments } = cmd {
-                    Some((handle.clone(), *rect, *pan, *zoom, *adjustments))
+                if let DrawCommand::DrawImage { handle, rect, pan, zoom, adjustments, clip_rect } = cmd {
+                    Some((handle.clone(), *rect, *pan, *zoom, *adjustments, *clip_rect))
                 } else {
                     None
                 }
@@ -195,7 +197,7 @@ impl Renderer {
             .collect();
 
         // Create/cache GPU textures for images
-        for (handle, _, _, _, _) in &image_commands {
+        for (handle, _, _, _, _, _) in &image_commands {
             let cache_key = handle.data().as_ptr() as usize;
             if !self.texture_cache.contains_key(&cache_key) {
                 // Create GPU texture from ImageHandle
@@ -250,7 +252,7 @@ impl Renderer {
         }
 
         // Second pass: Render images using texture pipeline
-        for (handle, rect, pan, zoom, adjustments) in &image_commands {
+        for (handle, rect, pan, zoom, adjustments, clip_rect) in &image_commands {
             let cache_key = handle.data().as_ptr() as usize;
             if let Some((_texture, bind_group)) = self.texture_cache.get(&cache_key) {
                 // Calculate transform for pan/zoom within the widget bounds
@@ -313,6 +315,18 @@ impl Renderer {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
+
+                    // Set scissor rect to clip image to widget bounds
+                    if let Some(clip) = clip_rect {
+                        // Clamp scissor rect to viewport bounds
+                        let x = clip.x.max(0.0) as u32;
+                        let y = clip.y.max(0.0) as u32;
+                        let w = (clip.width as u32).min(self.width.saturating_sub(x));
+                        let h = (clip.height as u32).min(self.height.saturating_sub(y));
+                        if w > 0 && h > 0 {
+                            render_pass.set_scissor_rect(x, y, w, h);
+                        }
+                    }
 
                     render_pass.set_pipeline(&self.texture_pipeline.render_pipeline);
                     render_pass.set_bind_group(0, &self.texture_pipeline.uniform_bind_group, &[]);
@@ -457,6 +471,7 @@ impl Renderer {
             pan: (0.0, 0.0),
             zoom: 1.0,
             adjustments: ImageAdjustments::new(),
+            clip_rect: None,
         });
     }
 
@@ -474,6 +489,7 @@ impl Renderer {
             pan,
             zoom,
             adjustments: ImageAdjustments::new(),
+            clip_rect: None,
         });
     }
 
@@ -492,6 +508,7 @@ impl Renderer {
             pan,
             zoom,
             adjustments,
+            clip_rect: Some(rect), // Default: clip to widget bounds
         });
     }
 }

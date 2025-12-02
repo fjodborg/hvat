@@ -26,6 +26,13 @@ pub trait Application: Sized {
     /// Produce the view tree for the current application state.
     /// The view is a tree of Elements that describe the UI.
     fn view(&self) -> Element<Self::Message>;
+
+    /// Called every frame for timing/animation purposes.
+    /// Override to return a message for frame-by-frame updates.
+    /// Default implementation returns None.
+    fn tick(&self) -> Option<Self::Message> {
+        None
+    }
 }
 
 /// Settings for running an application.
@@ -157,7 +164,13 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         window.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {
+                        // Call tick for frame timing
+                        if let Some(tick_msg) = app_state.app.tick() {
+                            app_state.app.update(tick_msg);
+                        }
                         app_state.render();
+                        // Request next frame for continuous rendering
+                        window.request_redraw();
                     }
                     WindowEvent::CursorMoved { position, .. } => {
                         mouse_position = crate::Point::new(position.x as f32, position.y as f32);
