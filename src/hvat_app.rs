@@ -90,6 +90,10 @@ pub struct HvatApp {
     last_fps_time: Instant,
     /// Current FPS value
     fps: f32,
+    /// Scroll offset for the main content
+    scroll_offset: f32,
+    /// Whether the scrollbar is being dragged
+    scrollbar_dragging: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -113,7 +117,8 @@ pub enum Message {
 
     // Image viewer - from widget callbacks
     ImagePan((f32, f32)),
-    ImageZoom(f32),
+    /// (new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y)
+    ImageZoomAtPoint(f32, f32, f32, f32, f32),
     ImageDragStart((f32, f32)),
     ImageDragMove((f32, f32)),
     ImageDragEnd,
@@ -135,6 +140,11 @@ pub enum Message {
 
     // FPS counter
     Tick,
+
+    // Scrolling
+    Scroll(f32),
+    ScrollbarDragStart,
+    ScrollbarDragEnd,
 }
 
 
@@ -166,6 +176,8 @@ impl Application for HvatApp {
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
+            scroll_offset: 0.0,
+            scrollbar_dragging: false,
         }
     }
 
@@ -233,9 +245,41 @@ impl Application for HvatApp {
                 self.pan_y = pan.1;
                 // Don't log every pan event to avoid spam
             }
-            Message::ImageZoom(zoom) => {
-                self.zoom = zoom;
-                log::debug!("🔍 Zoom from widget: {:.2}x", self.zoom);
+            Message::ImageZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y) => {
+                // Zoom-to-cursor algorithm:
+                // The point under the cursor should stay in the same position after zooming.
+                //
+                // Current image point under cursor (in image-space relative to widget center):
+                //   img_x = (cursor_x - widget_center_x - pan_x) / old_zoom
+                //   img_y = (cursor_y - widget_center_y - pan_y) / old_zoom
+                //
+                // After zoom, we want the same image point to be under the cursor:
+                //   cursor_x - widget_center_x = img_x * new_zoom + new_pan_x
+                //   cursor_y - widget_center_y = img_y * new_zoom + new_pan_y
+                //
+                // Solving for new_pan:
+                //   new_pan_x = (cursor_x - widget_center_x) - img_x * new_zoom
+                //   new_pan_y = (cursor_y - widget_center_y) - img_y * new_zoom
+
+                let old_zoom = self.zoom;
+
+                // Cursor position relative to widget center
+                let cursor_rel_x = cursor_x - widget_center_x;
+                let cursor_rel_y = cursor_y - widget_center_y;
+
+                // Image-space point under cursor
+                let img_x = (cursor_rel_x - self.pan_x) / old_zoom;
+                let img_y = (cursor_rel_y - self.pan_y) / old_zoom;
+
+                // Update zoom
+                self.zoom = new_zoom;
+
+                // Calculate new pan to keep the image point under cursor
+                self.pan_x = cursor_rel_x - img_x * new_zoom;
+                self.pan_y = cursor_rel_y - img_y * new_zoom;
+
+                log::debug!("🔍 Zoom-to-cursor: {:.2}x at ({:.1}, {:.1}), pan: ({:.1}, {:.1})",
+                    self.zoom, cursor_x, cursor_y, self.pan_x, self.pan_y);
             }
             Message::ImageDragStart(pos) => {
                 self.image_dragging = true;
@@ -250,6 +294,10 @@ impl Application for HvatApp {
                         self.pan_x += dx;
                         self.pan_y += dy;
                         self.image_last_drag_pos = Some(pos);
+                        // Log pan movement (delta)
+                        if dx.abs() > 1.0 || dy.abs() > 1.0 {
+                            log::debug!("🖐️ Panning: delta({:.1}, {:.1}) -> pan({:.1}, {:.1})", dx, dy, self.pan_x, self.pan_y);
+                        }
                     }
                 }
             }
@@ -315,6 +363,20 @@ impl Application for HvatApp {
                     self.last_fps_time = Instant::now();
                 }
             }
+
+            // Scrolling
+            Message::Scroll(offset) => {
+                self.scroll_offset = offset;
+                log::debug!("📜 Scroll offset: {:.1}", self.scroll_offset);
+            }
+            Message::ScrollbarDragStart => {
+                self.scrollbar_dragging = true;
+                log::debug!("📜 Scrollbar drag started");
+            }
+            Message::ScrollbarDragEnd => {
+                self.scrollbar_dragging = false;
+                log::debug!("📜 Scrollbar drag ended");
+            }
         }
     }
 
@@ -369,11 +431,21 @@ impl Application for HvatApp {
             Tab::Settings => self.view_settings(text_color),
         };
 
+        // Wrap content in scrollable with a fixed viewport size
+        let scrollable_content = scrollable(Element::new(content))
+            .scroll_offset(self.scroll_offset)
+            .dragging(self.scrollbar_dragging)
+            .width(800.0)  // Fixed width viewport (includes scrollbar)
+            .height(600.0) // Fixed height viewport
+            .on_scroll(Message::Scroll)
+            .on_drag_start(|| Message::ScrollbarDragStart)
+            .on_drag_end(|| Message::ScrollbarDragEnd);
+
         Element::new(
             container(Element::new(
                 column()
                     .push(Element::new(header))
-                    .push(Element::new(content))
+                    .push(Element::new(scrollable_content))
                     .spacing(20.0),
             ))
             .padding(30.0),
@@ -484,7 +556,9 @@ impl HvatApp {
             .on_drag_start(Message::ImageDragStart)
             .on_drag_move(Message::ImageDragMove)
             .on_drag_end(|| Message::ImageDragEnd)
-            .on_zoom(Message::ImageZoom);
+            .on_zoom(|new_zoom, cursor_x, cursor_y, widget_cx, widget_cy| {
+                Message::ImageZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_cx, widget_cy)
+            });
 
         column()
             .push(Element::new(

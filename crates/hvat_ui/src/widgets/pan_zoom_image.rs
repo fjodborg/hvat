@@ -21,8 +21,8 @@ pub struct PanZoomImage<Message> {
     on_drag_move: Option<Box<dyn Fn((f32, f32)) -> Message>>,
     /// Callback when drag ends
     on_drag_end: Option<Box<dyn Fn() -> Message>>,
-    /// Callback when zoom changes
-    on_zoom: Option<Box<dyn Fn(f32) -> Message>>,
+    /// Callback when zoom changes (new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y)
+    on_zoom: Option<Box<dyn Fn(f32, f32, f32, f32, f32) -> Message>>,
 }
 
 impl<Message> PanZoomImage<Message> {
@@ -107,9 +107,10 @@ impl<Message> PanZoomImage<Message> {
     }
 
     /// Set the callback when zoom changes.
+    /// Callback receives: (new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y)
     pub fn on_zoom<F>(mut self, f: F) -> Self
     where
-        F: Fn(f32) -> Message + 'static,
+        F: Fn(f32, f32, f32, f32, f32) -> Message + 'static,
     {
         self.on_zoom = Some(Box::new(f));
         self
@@ -174,11 +175,16 @@ impl<Message: Clone> Widget<Message> for PanZoomImage<Message> {
                     let zoom_factor = if *delta > 0.0 { 1.1 } else { 0.9 };
                     let new_zoom = (self.zoom * zoom_factor).clamp(0.1, 10.0);
 
-                    log::debug!("Zoom: {:.2}x at {:?}", new_zoom, position);
+                    // Calculate widget center
+                    let widget_center_x = bounds.x + bounds.width / 2.0;
+                    let widget_center_y = bounds.y + bounds.height / 2.0;
+
+                    log::debug!("Zoom: {:.2}x at ({:.1}, {:.1}), widget center: ({:.1}, {:.1})",
+                        new_zoom, position.x, position.y, widget_center_x, widget_center_y);
 
                     // Emit message if callback is set
                     if let Some(ref on_zoom) = self.on_zoom {
-                        return Some(on_zoom(new_zoom));
+                        return Some(on_zoom(new_zoom, position.x, position.y, widget_center_x, widget_center_y));
                     }
                 }
                 None
