@@ -1,0 +1,9 @@
+[package]
+name = "hvat_ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hvat_gpu = { path = "../hvat_gpu" }
+winit = "0.30"
+thiserror = "1.0"

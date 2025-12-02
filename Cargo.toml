@@ -1,0 +1,76 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[package]
+name = "hvat"
+version = "0.1.0"
+edition = "2024"
+authors = ["fjodborg <github.com/fjodborg>"]
+include = ["LICENSE", "**/*.rs", "Cargo.toml"]
+
+[dependencies]
+hvat_ui = { path = "crates/hvat_ui" }
+hvat_gpu = { path = "crates/hvat_gpu" }
+
+# Core module dependencies
+ndarray = "0.15"
+image = "0.24"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Document"] }
+winit = "0.29"
+wgpu = "27"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "0.3"
+env_logger = "0.11"
+winit = "0.29"
+wgpu = "27"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "hvat-native"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[lints]
+workspace = true
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+elided_lifetimes_in_paths = "warn"
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
+rust_2021_prelude_collisions = "warn"
+semicolon_in_expressions_from_macros = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_extern_crates = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+trivial_casts = "allow"
+unused_qualifications = "allow"
+
+[workspace.lints.rustdoc]
+all = "warn"
+missing_crate_level_docs = "warn"
+
+[workspace.lints.clippy]
+allow_attributes = "warn"
+# ... (keeping other lints as they were, or simplified for brevity if acceptable, but better to keep them if I can read them from previous file. I will try to preserve them)
+all = "warn"

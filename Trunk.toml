@@ -1,0 +1,21 @@
+[build]
+# The index HTML file to build
+target = "index.html"
+# The public URL from which assets are served
+public_url = "/"
+# Whether to include hash values in the output file names
+filehash = true
+
+[watch]
+# Paths to watch for changes
+watch = ["src", "crates"]
+# Paths to ignore
+ignore = ["target"]
+
+[serve]
+# The addresses to serve on
+addresses = ["127.0.0.1"]
+# The port to serve on
+port = 8080
+# Open the browser automatically
+open = false
