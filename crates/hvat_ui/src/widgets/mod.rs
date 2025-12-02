@@ -5,7 +5,9 @@ mod canvas;
 mod column;
 mod container;
 mod image;
+mod pan_zoom_image;
 mod row;
+mod slider;
 mod text;
 
 pub use button::{button, Button};
@@ -13,5 +15,7 @@ pub use canvas::{canvas, Canvas, Program};
 pub use column::{column, Column};
 pub use container::{container, Container};
 pub use image::{image, Image};
+pub use pan_zoom_image::{pan_zoom_image, PanZoomImage};
 pub use row::{row, Row};
+pub use slider::{slider, Slider, SliderId};
 pub use text::{text, Text};

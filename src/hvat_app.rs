@@ -1,7 +1,7 @@
 // The main HVAT application - shared between native and WASM builds
 
 use hvat_ui::{
-    widgets::*, Application, Color, Element, ImageHandle,
+    widgets::*, Application, Color, Element, ImageAdjustments, ImageHandle, Length,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -70,7 +70,19 @@ pub struct HvatApp {
     pan_y: f32,
     show_debug_info: bool,
     theme: Theme,
-    image_handle: Option<ImageHandle>,
+    /// The test image for the image viewer
+    test_image: ImageHandle,
+    /// Image manipulation settings
+    brightness: f32,
+    contrast: f32,
+    gamma: f32,
+    hue_shift: f32,
+    /// Whether the image is currently being dragged
+    image_dragging: bool,
+    /// Last drag position for calculating delta
+    image_last_drag_pos: Option<(f32, f32)>,
+    /// Which slider is currently being dragged (if any)
+    active_slider: Option<SliderId>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,7 +95,7 @@ pub enum Message {
     Decrement,
     Reset,
 
-    // Image viewer
+    // Image viewer - button controls
     ZoomIn,
     ZoomOut,
     ResetView,
@@ -91,6 +103,24 @@ pub enum Message {
     PanRight,
     PanUp,
     PanDown,
+
+    // Image viewer - from widget callbacks
+    ImagePan((f32, f32)),
+    ImageZoom(f32),
+    ImageDragStart((f32, f32)),
+    ImageDragMove((f32, f32)),
+    ImageDragEnd,
+
+    // Image manipulation - slider drag
+    SliderDragStart(SliderId),
+    SliderDragEnd,
+
+    // Image manipulation - value changes
+    SetBrightness(f32),
+    SetContrast(f32),
+    SetGamma(f32),
+    SetHueShift(f32),
+    ResetImageSettings,
 
     // Settings
     ToggleDebugInfo,
@@ -102,6 +132,9 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn new() -> Self {
+        // Create a test image (gradient pattern)
+        let test_image = create_test_image(512, 512);
+
         Self {
             current_tab: Tab::Home,
             counter: 0,
@@ -110,7 +143,14 @@ impl Application for HvatApp {
             pan_y: 0.0,
             show_debug_info: false,
             theme: Theme::dark(),
-            image_handle: None,
+            test_image,
+            brightness: 0.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            hue_shift: 0.0,
+            image_dragging: false,
+            image_last_drag_pos: None,
+            active_slider: None,
         }
     }
 
@@ -170,6 +210,73 @@ impl Application for HvatApp {
             Message::PanDown => {
                 self.pan_y += 10.0;
                 log::debug!("⬇️  Pan down: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+            }
+
+            // Image viewer - from widget callbacks
+            Message::ImagePan(pan) => {
+                self.pan_x = pan.0;
+                self.pan_y = pan.1;
+                // Don't log every pan event to avoid spam
+            }
+            Message::ImageZoom(zoom) => {
+                self.zoom = zoom;
+                log::debug!("🔍 Zoom from widget: {:.2}x", self.zoom);
+            }
+            Message::ImageDragStart(pos) => {
+                self.image_dragging = true;
+                self.image_last_drag_pos = Some(pos);
+                log::debug!("Pan drag started at ({:.1}, {:.1})", pos.0, pos.1);
+            }
+            Message::ImageDragMove(pos) => {
+                if self.image_dragging {
+                    if let Some(last_pos) = self.image_last_drag_pos {
+                        let dx = pos.0 - last_pos.0;
+                        let dy = pos.1 - last_pos.1;
+                        self.pan_x += dx;
+                        self.pan_y += dy;
+                        self.image_last_drag_pos = Some(pos);
+                    }
+                }
+            }
+            Message::ImageDragEnd => {
+                self.image_dragging = false;
+                self.image_last_drag_pos = None;
+                log::debug!("Pan drag ended");
+            }
+
+            // Slider drag state
+            Message::SliderDragStart(id) => {
+                self.active_slider = Some(id);
+                log::debug!("Slider drag started: {:?}", id);
+            }
+            Message::SliderDragEnd => {
+                self.active_slider = None;
+                log::debug!("Slider drag ended");
+            }
+
+            // Image manipulation
+            Message::SetBrightness(value) => {
+                self.brightness = value;
+                log::debug!("☀️  Brightness: {:.2}", self.brightness);
+            }
+            Message::SetContrast(value) => {
+                self.contrast = value;
+                log::debug!("🎛️  Contrast: {:.2}", self.contrast);
+            }
+            Message::SetGamma(value) => {
+                self.gamma = value;
+                log::debug!("📊 Gamma: {:.2}", self.gamma);
+            }
+            Message::SetHueShift(value) => {
+                self.hue_shift = value;
+                log::debug!("🎨 Hue shift: {:.2}", self.hue_shift);
+            }
+            Message::ResetImageSettings => {
+                self.brightness = 0.0;
+                self.contrast = 1.0;
+                self.gamma = 1.0;
+                self.hue_shift = 0.0;
+                log::debug!("🔄 Image settings reset");
             }
 
             // Settings
@@ -320,7 +427,28 @@ impl HvatApp {
             .spacing(30.0)
     }
 
-    fn view_image_viewer(&self, text_color: Color) -> Column<'static, Message> {
+    fn view_image_viewer(&self, text_color: Color) -> Column<'_, Message> {
+        // Create image adjustments from current settings
+        let adjustments = ImageAdjustments {
+            brightness: self.brightness,
+            contrast: self.contrast,
+            gamma: self.gamma,
+            hue_shift: self.hue_shift,
+        };
+
+        // Create the pan/zoom image widget
+        let image_widget = pan_zoom_image(self.test_image.clone())
+            .pan((self.pan_x, self.pan_y))
+            .zoom(self.zoom)
+            .dragging(self.image_dragging)
+            .adjustments(adjustments)
+            .width(Length::Units(600.0))
+            .height(Length::Units(400.0))
+            .on_drag_start(Message::ImageDragStart)
+            .on_drag_move(Message::ImageDragMove)
+            .on_drag_end(|| Message::ImageDragEnd)
+            .on_zoom(Message::ImageZoom);
+
         column()
             .push(Element::new(
                 text("Image Viewer")
@@ -328,64 +456,129 @@ impl HvatApp {
                     .color(text_color),
             ))
             .push(Element::new(
-                text(format!("Zoom: {:.1}x | Pan: ({:.0}, {:.0})", self.zoom, self.pan_x, self.pan_y))
+                text(format!("Zoom: {:.2}x | Pan: ({:.0}, {:.0})", self.zoom, self.pan_x, self.pan_y))
                     .size(14.0)
                     .color(text_color),
             ))
+            // Image display area with border
+            .push(Element::new(
+                container(Element::new(image_widget))
+                    .padding(2.0),
+            ))
+            .push(Element::new(
+                text("Drag to pan, scroll to zoom")
+                    .size(12.0)
+                    .color(Color::rgb(0.6, 0.6, 0.6)),
+            ))
+            // Zoom/pan button controls
             .push(Element::new(
                 row()
                     .push(Element::new(
                         button("Zoom In")
                             .on_press(Message::ZoomIn)
-                            .width(100.0),
+                            .width(90.0),
                     ))
                     .push(Element::new(
                         button("Zoom Out")
                             .on_press(Message::ZoomOut)
-                            .width(100.0),
+                            .width(90.0),
                     ))
                     .push(Element::new(
-                        button("Reset View")
+                        button("Reset")
                             .on_press(Message::ResetView)
-                            .width(100.0),
+                            .width(90.0),
                     ))
                     .spacing(10.0),
             ))
+            // Image manipulation controls with sliders
             .push(Element::new(
-                text("Pan Controls:")
+                text("Image Settings:")
                     .size(14.0)
-                    .color(text_color),
+                    .color(self.theme.accent_color()),
             ))
+            // Brightness slider
             .push(Element::new(
                 row()
                     .push(Element::new(
-                        button("← Left")
-                            .on_press(Message::PanLeft)
-                            .width(80.0),
+                        text(format!("Brightness: {:.2}", self.brightness))
+                            .size(12.0)
+                            .color(text_color),
                     ))
                     .push(Element::new(
-                        button("↑ Up")
-                            .on_press(Message::PanUp)
-                            .width(80.0),
-                    ))
-                    .push(Element::new(
-                        button("↓ Down")
-                            .on_press(Message::PanDown)
-                            .width(80.0),
-                    ))
-                    .push(Element::new(
-                        button("→ Right")
-                            .on_press(Message::PanRight)
-                            .width(80.0),
+                        slider(-1.0, 1.0, self.brightness)
+                            .id(SliderId::Brightness)
+                            .dragging(self.active_slider == Some(SliderId::Brightness))
+                            .width(Length::Units(200.0))
+                            .on_drag_start(Message::SliderDragStart)
+                            .on_change(Message::SetBrightness)
+                            .on_drag_end(|| Message::SliderDragEnd),
                     ))
                     .spacing(10.0),
             ))
+            // Contrast slider
             .push(Element::new(
-                text("Note: Image rendering not yet fully implemented")
-                    .size(12.0)
-                    .color(Color::rgb(0.8, 0.5, 0.2)),
+                row()
+                    .push(Element::new(
+                        text(format!("Contrast:   {:.2}", self.contrast))
+                            .size(12.0)
+                            .color(text_color),
+                    ))
+                    .push(Element::new(
+                        slider(0.1, 3.0, self.contrast)
+                            .id(SliderId::Contrast)
+                            .dragging(self.active_slider == Some(SliderId::Contrast))
+                            .width(Length::Units(200.0))
+                            .on_drag_start(Message::SliderDragStart)
+                            .on_change(Message::SetContrast)
+                            .on_drag_end(|| Message::SliderDragEnd),
+                    ))
+                    .spacing(10.0),
             ))
-            .spacing(20.0)
+            // Gamma slider
+            .push(Element::new(
+                row()
+                    .push(Element::new(
+                        text(format!("Gamma:      {:.2}", self.gamma))
+                            .size(12.0)
+                            .color(text_color),
+                    ))
+                    .push(Element::new(
+                        slider(0.1, 3.0, self.gamma)
+                            .id(SliderId::Gamma)
+                            .dragging(self.active_slider == Some(SliderId::Gamma))
+                            .width(Length::Units(200.0))
+                            .on_drag_start(Message::SliderDragStart)
+                            .on_change(Message::SetGamma)
+                            .on_drag_end(|| Message::SliderDragEnd),
+                    ))
+                    .spacing(10.0),
+            ))
+            // Hue shift slider
+            .push(Element::new(
+                row()
+                    .push(Element::new(
+                        text(format!("Hue Shift:  {:.0}", self.hue_shift))
+                            .size(12.0)
+                            .color(text_color),
+                    ))
+                    .push(Element::new(
+                        slider(-180.0, 180.0, self.hue_shift)
+                            .id(SliderId::HueShift)
+                            .dragging(self.active_slider == Some(SliderId::HueShift))
+                            .width(Length::Units(200.0))
+                            .on_drag_start(Message::SliderDragStart)
+                            .on_change(Message::SetHueShift)
+                            .on_drag_end(|| Message::SliderDragEnd),
+                    ))
+                    .spacing(10.0),
+            ))
+            // Reset button
+            .push(Element::new(
+                button("Reset Image Settings")
+                    .on_press(Message::ResetImageSettings)
+                    .width(180.0),
+            ))
+            .spacing(8.0)
     }
 
     fn view_settings(&self, text_color: Color) -> Column<'static, Message> {
@@ -444,4 +637,54 @@ impl HvatApp {
             ))
             .spacing(20.0)
     }
+}
+
+/// Create a test image with a gradient pattern for demonstration.
+fn create_test_image(width: u32, height: u32) -> ImageHandle {
+    let mut data = Vec::with_capacity((width * height * 4) as usize);
+
+    for y in 0..height {
+        for x in 0..width {
+            // Create a colorful gradient pattern
+            let fx = x as f32 / width as f32;
+            let fy = y as f32 / height as f32;
+
+            // Create a checkerboard pattern with gradients
+            let checker = ((x / 32) + (y / 32)) % 2 == 0;
+
+            let r = if checker {
+                (fx * 255.0) as u8
+            } else {
+                ((1.0 - fx) * 255.0) as u8
+            };
+            let g = (fy * 255.0) as u8;
+            let b = if checker {
+                ((fx + fy) / 2.0 * 255.0) as u8
+            } else {
+                (((1.0 - fx) + (1.0 - fy)) / 2.0 * 255.0) as u8
+            };
+
+            // Add some circular pattern in the center
+            let cx = (x as f32 - width as f32 / 2.0) / (width as f32 / 2.0);
+            let cy = (y as f32 - height as f32 / 2.0) / (height as f32 / 2.0);
+            let dist = (cx * cx + cy * cy).sqrt();
+
+            let (r, g, b) = if dist < 0.3 {
+                // Inner circle - bright color
+                (255, 200, 100)
+            } else if dist < 0.5 {
+                // Ring
+                (100, 150, 255)
+            } else {
+                (r, g, b)
+            };
+
+            data.push(r);
+            data.push(g);
+            data.push(b);
+            data.push(255); // Alpha
+        }
+    }
+
+    ImageHandle::from_rgba8(data, width, height)
 }

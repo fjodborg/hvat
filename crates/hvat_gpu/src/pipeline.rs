@@ -56,6 +56,27 @@ impl TransformUniform {
     }
 }
 
+/// Image adjustment parameters
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct ImageAdjustments {
+    pub brightness: f32,
+    pub contrast: f32,
+    pub gamma: f32,
+    pub hue_shift: f32,
+}
+
+impl ImageAdjustments {
+    pub fn new() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            hue_shift: 0.0,
+        }
+    }
+}
+
 /// Texture rendering pipeline
 pub struct TexturePipeline {
     pub render_pipeline: wgpu::RenderPipeline,
@@ -63,6 +84,7 @@ pub struct TexturePipeline {
     pub index_buffer: wgpu::Buffer,
     pub num_indices: u32,
     pub uniform_buffer: wgpu::Buffer,
+    pub adjustments_buffer: wgpu::Buffer,
     pub uniform_bind_group: wgpu::BindGroup,
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -77,11 +99,18 @@ impl TexturePipeline {
                 source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
             });
 
-        // Create uniform buffer
+        // Create uniform buffers
         let transform_uniform = TransformUniform::new();
         let uniform_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Transform Uniform Buffer"),
             contents: bytemuck::cast_slice(&[transform_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let adjustments = ImageAdjustments::new();
+        let adjustments_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Image Adjustments Buffer"),
+            contents: bytemuck::cast_slice(&[adjustments]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -90,16 +119,28 @@ impl TexturePipeline {
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Uniform Bind Group Layout"),
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
                         },
-                        count: None,
-                    }],
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
                 });
 
         let texture_bind_group_layout =
@@ -130,10 +171,16 @@ impl TexturePipeline {
         let uniform_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Uniform Bind Group"),
             layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: adjustments_buffer.as_entire_binding(),
+                },
+            ],
         });
 
         // Create pipeline layout
@@ -228,6 +275,7 @@ impl TexturePipeline {
             index_buffer,
             num_indices: indices.len() as u32,
             uniform_buffer,
+            adjustments_buffer,
             uniform_bind_group,
             texture_bind_group_layout,
         }
@@ -255,6 +303,12 @@ impl TexturePipeline {
     pub fn update_transform(&self, ctx: &GpuContext, transform: TransformUniform) {
         ctx.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[transform]));
+    }
+
+    /// Update image adjustments
+    pub fn update_adjustments(&self, ctx: &GpuContext, adjustments: ImageAdjustments) {
+        ctx.queue
+            .write_buffer(&self.adjustments_buffer, 0, bytemuck::cast_slice(&[adjustments]));
     }
 
     /// Render textured quad

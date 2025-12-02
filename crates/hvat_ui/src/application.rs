@@ -202,8 +202,8 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                             position: mouse_position,
                         };
 
-                        // TODO: Send event to widgets and get messages
-                        let _ = ui_event;
+                        // Send event to widgets
+                        app_state.handle_event(ui_event);
                         window.request_redraw();
                     }
                     _ => {}

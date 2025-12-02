@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use winit::window::Window;
 
-use hvat_gpu::{GpuContext, TexturePipeline, Texture};
+use hvat_gpu::{GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform};
 use wgpu_text::{BrushBuilder, TextBrush, glyph_brush::{Section, Text as GlyphText, ab_glyph::FontArc}};
 
 use crate::{Element, Limits, Rectangle};
@@ -28,6 +29,12 @@ pub enum DrawCommand {
     DrawImage {
         handle: crate::ImageHandle,
         rect: Rectangle,
+        /// Pan offset in pixels
+        pan: (f32, f32),
+        /// Zoom level (1.0 = 100%)
+        zoom: f32,
+        /// Image adjustments (brightness, contrast, gamma, hue)
+        adjustments: ImageAdjustments,
     },
 }
 
@@ -42,6 +49,8 @@ pub struct Renderer {
     width: u32,
     height: u32,
     draw_commands: Vec<DrawCommand>,
+    /// Cache for GPU textures, keyed by ImageHandle data pointer
+    texture_cache: HashMap<usize, (Texture, wgpu::BindGroup)>,
 }
 
 impl Renderer {
@@ -106,6 +115,7 @@ impl Renderer {
             width,
             height,
             draw_commands: Vec::new(),
+            texture_cache: HashMap::new(),
         })
     }
 
@@ -139,10 +149,7 @@ impl Renderer {
         let frame = match self.gpu_ctx.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(e) => {
-                #[cfg(target_arch = "wasm32")]
-                web_sys::console::log_1(&format!("Failed to get frame: {:?}", e).into());
-                #[cfg(not(target_arch = "wasm32"))]
-                eprintln!("Failed to get frame: {:?}", e);
+                log::error!("Failed to get frame: {:?}", e);
                 return;
             }
         };
@@ -171,7 +178,42 @@ impl Renderer {
         let text_section_refs: Vec<&Section> = text_sections.iter().collect();
         if !text_section_refs.is_empty() {
             if let Err(e) = self.text_brush.queue(&self.gpu_ctx.device, &self.gpu_ctx.queue, text_section_refs) {
-                eprintln!("Failed to queue text: {:?}", e);
+                log::error!("Failed to queue text: {:?}", e);
+            }
+        }
+
+        // Pre-process image commands: create/cache textures
+        let image_commands: Vec<_> = self.draw_commands
+            .iter()
+            .filter_map(|cmd| {
+                if let DrawCommand::DrawImage { handle, rect, pan, zoom, adjustments } = cmd {
+                    Some((handle.clone(), *rect, *pan, *zoom, *adjustments))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Create/cache GPU textures for images
+        for (handle, _, _, _, _) in &image_commands {
+            let cache_key = handle.data().as_ptr() as usize;
+            if !self.texture_cache.contains_key(&cache_key) {
+                // Create GPU texture from ImageHandle
+                match Texture::from_rgba8(
+                    &self.gpu_ctx,
+                    handle.data(),
+                    handle.width(),
+                    handle.height(),
+                ) {
+                    Ok(texture) => {
+                        let bind_group = self.texture_pipeline.create_texture_bind_group(&self.gpu_ctx, &texture);
+                        self.texture_cache.insert(cache_key, (texture, bind_group));
+                        log::debug!("Created GPU texture for image ({}x{})", handle.width(), handle.height());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to create texture: {:?}", e);
+                    }
+                }
             }
         }
 
@@ -183,10 +225,10 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
-        // Clear the screen and execute draw commands
+        // First pass: Clear screen
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Main Render Pass"),
+            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Clear Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -205,10 +247,104 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+        }
+
+        // Second pass: Render images using texture pipeline
+        for (handle, rect, pan, zoom, adjustments) in &image_commands {
+            let cache_key = handle.data().as_ptr() as usize;
+            if let Some((_texture, bind_group)) = self.texture_cache.get(&cache_key) {
+                // Calculate transform for pan/zoom within the widget bounds
+                // Convert widget rect to NDC coordinates
+                let ndc_x = (rect.x / self.width as f32) * 2.0 - 1.0;
+                let ndc_y = 1.0 - (rect.y / self.height as f32) * 2.0;
+                let ndc_w = (rect.width / self.width as f32) * 2.0;
+                let ndc_h = (rect.height / self.height as f32) * 2.0;
+
+                // Calculate image aspect ratio and fit it within the rect
+                let img_aspect = handle.width() as f32 / handle.height() as f32;
+                let rect_aspect = rect.width / rect.height;
+
+                let (scale_x, scale_y) = if img_aspect > rect_aspect {
+                    // Image is wider - fit to width
+                    (ndc_w / 2.0, (ndc_w / 2.0) / img_aspect)
+                } else {
+                    // Image is taller - fit to height
+                    (ndc_h / 2.0 * img_aspect, ndc_h / 2.0)
+                };
+
+                // Apply zoom
+                let scale_x = scale_x * zoom;
+                let scale_y = scale_y * zoom;
+
+                // Apply pan (convert pixel pan to NDC)
+                let pan_ndc_x = (pan.0 / self.width as f32) * 2.0;
+                let pan_ndc_y = -(pan.1 / self.height as f32) * 2.0;
+
+                // Center of the widget in NDC
+                let center_x = ndc_x + ndc_w / 2.0 + pan_ndc_x;
+                let center_y = ndc_y - ndc_h / 2.0 + pan_ndc_y;
+
+                // Create transform matrix
+                let transform = TransformUniform {
+                    matrix: [
+                        [scale_x, 0.0, 0.0, 0.0],
+                        [0.0, scale_y, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [center_x, center_y, 0.0, 1.0],
+                    ],
+                };
+                self.texture_pipeline.update_transform(&self.gpu_ctx, transform);
+                self.texture_pipeline.update_adjustments(&self.gpu_ctx, *adjustments);
+
+                // Render image
+                {
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Image Render Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load, // Don't clear, preserve previous content
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    render_pass.set_pipeline(&self.texture_pipeline.render_pipeline);
+                    render_pass.set_bind_group(0, &self.texture_pipeline.uniform_bind_group, &[]);
+                    render_pass.set_bind_group(1, bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, self.texture_pipeline.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(self.texture_pipeline.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    render_pass.draw_indexed(0..self.texture_pipeline.num_indices, 0, 0..1);
+                }
+            }
+        }
+
+        // Third pass: Render UI elements (rects, text) on top
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // Preserve image layer
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
             render_pass.set_pipeline(&self.color_pipeline.render_pipeline);
 
-            // Execute all draw commands
+            // Execute UI draw commands (not images)
             for command in &self.draw_commands {
                 match command {
                     DrawCommand::FillRect { rect, color } => {
@@ -246,12 +382,8 @@ impl Renderer {
                         render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                         render_pass.draw_indexed(0..num_indices, 0, 0..1);
                     }
-                    DrawCommand::DrawText { text, position, color, size } => {
-                        // Text is queued separately - skip in this loop
-                        let _ = (text, position, color, size);
-                    }
-                    DrawCommand::DrawImage { .. } => {
-                        // TODO: Implement image rendering
+                    DrawCommand::DrawText { .. } | DrawCommand::DrawImage { .. } => {
+                        // Text is handled separately, images already rendered
                     }
                 }
             }
@@ -322,6 +454,44 @@ impl Renderer {
         self.draw_commands.push(DrawCommand::DrawImage {
             handle: handle.clone(),
             rect,
+            pan: (0.0, 0.0),
+            zoom: 1.0,
+            adjustments: ImageAdjustments::new(),
+        });
+    }
+
+    /// Draw an image with pan and zoom transform.
+    pub fn draw_image_transformed(
+        &mut self,
+        handle: &crate::ImageHandle,
+        rect: Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+    ) {
+        self.draw_commands.push(DrawCommand::DrawImage {
+            handle: handle.clone(),
+            rect,
+            pan,
+            zoom,
+            adjustments: ImageAdjustments::new(),
+        });
+    }
+
+    /// Draw an image with pan, zoom, and image adjustments.
+    pub fn draw_image_with_adjustments(
+        &mut self,
+        handle: &crate::ImageHandle,
+        rect: Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+        adjustments: ImageAdjustments,
+    ) {
+        self.draw_commands.push(DrawCommand::DrawImage {
+            handle: handle.clone(),
+            rect,
+            pan,
+            zoom,
+            adjustments,
         });
     }
 }

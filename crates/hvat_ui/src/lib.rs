@@ -28,4 +28,5 @@ pub use image::ImageHandle;
 pub use layout::{Layout, Limits, Point, Rectangle, Size};
 pub use length::Length;
 pub use renderer::{Color, Renderer};
+pub use hvat_gpu::ImageAdjustments;
 pub use widget::Widget;
