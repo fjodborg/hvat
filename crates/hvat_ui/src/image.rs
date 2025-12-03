@@ -1,12 +1,23 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for generating unique image IDs.
+static NEXT_IMAGE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// A handle to an image texture.
 ///
 /// ImageHandle provides a way to reference image data that will be uploaded
 /// to the GPU. Multiple widgets can share the same handle, and the framework
 /// will cache the GPU texture to avoid redundant uploads.
+///
+/// Each ImageHandle has a unique ID that is used for GPU texture caching.
+/// This ensures that when new image data is created (even if it happens to
+/// be allocated at the same memory address as previous data), it will get
+/// a fresh GPU texture upload rather than returning stale cached data.
 #[derive(Clone, Debug)]
 pub struct ImageHandle {
+    /// Unique identifier for this image (used for GPU texture caching)
+    id: u64,
     /// The raw RGBA8 image data
     data: Arc<Vec<u8>>,
     /// Width in pixels
@@ -16,6 +27,11 @@ pub struct ImageHandle {
 }
 
 impl ImageHandle {
+    /// Generate a unique ID for a new image handle.
+    fn new_id() -> u64 {
+        NEXT_IMAGE_ID.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// Create a new image handle from RGBA8 data.
     ///
     /// # Arguments
@@ -33,6 +49,7 @@ impl ImageHandle {
         );
 
         Self {
+            id: Self::new_id(),
             data: Arc::new(data),
             width,
             height,
@@ -50,10 +67,19 @@ impl ImageHandle {
         );
 
         Self {
+            id: Self::new_id(),
             data,
             width,
             height,
         }
+    }
+
+    /// Get the unique ID of this image handle.
+    ///
+    /// This ID is used for GPU texture caching and is guaranteed to be unique
+    /// for each image handle created during the application's lifetime.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// Get the image data.

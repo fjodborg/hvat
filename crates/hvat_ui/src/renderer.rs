@@ -199,8 +199,8 @@ pub struct Renderer {
     commands: Vec<DrawCommand>,
     /// Render state for coordinate transforms
     state: RenderState,
-    /// Cache for GPU textures
-    texture_cache: HashMap<usize, (Texture, wgpu::BindGroup)>,
+    /// Cache for GPU textures (keyed by ImageHandle unique ID)
+    texture_cache: HashMap<u64, (Texture, wgpu::BindGroup)>,
 }
 
 impl Renderer {
@@ -590,7 +590,10 @@ impl Renderer {
     fn prepare_textures(&mut self) {
         for cmd in &self.commands {
             if let DrawCommand::DrawImage { handle, .. } = cmd {
-                let key = handle.data().as_ptr() as usize;
+                // Use the unique image ID as cache key instead of memory pointer.
+                // This ensures that new image data always gets a fresh GPU texture,
+                // even if the allocator reuses the same memory address.
+                let key = handle.id();
                 if !self.texture_cache.contains_key(&key) {
                     match Texture::from_rgba8(&self.gpu_ctx, handle.data(), handle.width(), handle.height()) {
                         Ok(texture) => {
@@ -617,7 +620,7 @@ impl Renderer {
                     clip_stack.pop();
                 }
                 DrawCommand::DrawImage { handle, rect, pan, zoom, adjustments } => {
-                    let cache_key = handle.data().as_ptr() as usize;
+                    let cache_key = handle.id();
                     if let Some((_texture, bind_group)) = self.texture_cache.get(&cache_key) {
                         // Calculate transform
                         let transform = self.calculate_image_transform(handle, rect, *pan, *zoom);

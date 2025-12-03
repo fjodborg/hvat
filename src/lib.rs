@@ -28,6 +28,12 @@ pub use annotation::{
     Polygon, Shape,
 };
 
+// Hyperspectral image support
+mod hyperspectral;
+pub use hyperspectral::{
+    generate_test_hyperspectral, BandSelection, HyperspectralImage,
+};
+
 // ============================================================================
 // Application Modules (modularized from hvat_app.rs)
 // ============================================================================
@@ -35,8 +41,8 @@ pub use annotation::{
 // Message types and constructors
 mod message;
 pub use message::{
-    AnnotationMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage, ImageViewMessage,
-    Message, NavigationMessage, Tab, UIMessage,
+    AnnotationMessage, BandMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage,
+    ImageViewMessage, Message, NavigationMessage, Tab, UIMessage,
 };
 
 // Theme system
@@ -53,8 +59,8 @@ pub use views::{
 // Message handlers
 mod handlers;
 pub use handlers::{
-    handle_annotation, handle_counter, handle_image_load, handle_image_settings, handle_image_view,
-    handle_navigation, handle_ui, AnnotationState, ImageLoadState,
+    handle_annotation, handle_band, handle_counter, handle_image_load, handle_image_settings,
+    handle_image_view, handle_navigation, handle_ui, AnnotationState, ImageLoadState,
 };
 
 // WASM file loading utilities

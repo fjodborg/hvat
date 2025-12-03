@@ -9,6 +9,10 @@ pub enum SliderId {
     Contrast,
     Gamma,
     HueShift,
+    /// Band selection sliders for hyperspectral RGB composite
+    BandRed,
+    BandGreen,
+    BandBlue,
     Custom(u32),
 }
 
@@ -28,8 +32,8 @@ pub struct Slider<Message> {
     width: Length,
     /// Whether this slider is currently being dragged (from external state)
     is_dragging: bool,
-    /// Callback when drag starts
-    on_drag_start: Option<Box<dyn Fn(SliderId) -> Message>>,
+    /// Callback when drag starts (receives slider ID and initial value at click position)
+    on_drag_start: Option<Box<dyn Fn(SliderId, f32) -> Message>>,
     /// Callback when value changes during drag
     on_change: Option<Box<dyn Fn(f32) -> Message>>,
     /// Callback when drag ends
@@ -94,9 +98,10 @@ impl<Message> Slider<Message> {
     }
 
     /// Set the callback when drag starts.
+    /// The callback receives the slider ID and the initial value at the click position.
     pub fn on_drag_start<F>(mut self, f: F) -> Self
     where
-        F: Fn(SliderId) -> Message + 'static,
+        F: Fn(SliderId, f32) -> Message + 'static,
     {
         self.on_drag_start = Some(Box::new(f));
         self
@@ -209,32 +214,23 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
         match event {
             Event::MousePressed { button: MouseButton::Left, position } => {
                 if bounds.contains(*position) {
-                    // Calculate value from click position and emit change
+                    // Calculate value from click position
                     let new_value = self.x_to_value(position.x, &bounds);
+                    log::debug!("🎚️ Slider {:?} MousePressed at value {:.2}", self.id, new_value);
 
-                    // First emit drag start
+                    // Emit drag start with both ID and initial value
+                    // This allows the handler to start the drag state AND set the initial value
                     if let Some(ref on_drag_start) = self.on_drag_start {
-                        // We'll emit the value change separately
-                        let start_msg = on_drag_start(self.id);
-
-                        // Also emit the value change for the click
-                        if let Some(ref on_change) = self.on_change {
-                            // Return the start message, the app will handle updating the value
-                            // based on position in the drag move handler
-                            return Some(start_msg);
-                        }
-                        return Some(start_msg);
-                    }
-
-                    // Fallback: just emit value change
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(new_value));
+                        return Some(on_drag_start(self.id, new_value));
                     }
                 }
                 None
             }
             Event::MouseReleased { button: MouseButton::Left, .. } => {
+                // Fire on_drag_end if this slider was being dragged
+                // This handles mouse release anywhere on screen, not just within bounds
                 if self.is_dragging {
+                    log::info!("🎚️ Slider {:?} MouseReleased while dragging, firing on_drag_end", self.id);
                     if let Some(ref on_drag_end) = self.on_drag_end {
                         return Some(on_drag_end());
                     }
@@ -243,6 +239,7 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
             }
             Event::MouseMoved { position } => {
                 if self.is_dragging {
+                    // Clamp value to slider range even if mouse is outside bounds
                     let new_value = self.x_to_value(position.x, &bounds);
                     if let Some(ref on_change) = self.on_change {
                         return Some(on_change(new_value));

@@ -4,10 +4,11 @@
 //! keeping the main HvatApp update function clean and organized.
 
 use crate::annotation::{AnnotationStore, AnnotationTool, Category, DrawingState, Point, Shape};
+use crate::hyperspectral::{BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
 use crate::message::{
-    AnnotationMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage, ImageViewMessage,
-    NavigationMessage, Tab, UIMessage,
+    AnnotationMessage, BandMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage,
+    ImageViewMessage, NavigationMessage, Tab, UIMessage,
 };
 use crate::theme::Theme;
 use crate::widget_state::WidgetState;
@@ -143,6 +144,12 @@ pub fn handle_image_settings(
 ) {
     match msg {
         ImageSettingsMessage::SliderDragStart(id) => {
+            // Safety: if there's already a drag in progress, end it first
+            // This handles cases where MouseReleased was missed
+            if widget_state.slider.active_slider.is_some() {
+                log::warn!("Starting new drag while previous drag still active - forcing end");
+                widget_state.slider.end_drag();
+            }
             widget_state.slider.start_drag(id);
             log::debug!("Slider drag started: {:?}", id);
         }
@@ -181,6 +188,8 @@ pub struct ImageLoadState<'a> {
     pub image_cache: &'a mut ImageCache,
     pub current_image_index: &'a mut usize,
     pub current_image: &'a mut ImageHandle,
+    pub hyperspectral_image: &'a mut HyperspectralImage,
+    pub band_selection: &'a mut BandSelection,
     pub status_message: &'a mut Option<String>,
     pub zoom: &'a mut f32,
     pub pan_x: &'a mut f32,
@@ -264,14 +273,30 @@ pub fn handle_image_load(msg: ImageLoadMessage, state: &mut ImageLoadState) {
 fn load_current_image(state: &mut ImageLoadState) {
     let index = *state.current_image_index;
 
-    // Load the current image
+    // Load the current image and convert to hyperspectral
     if let Some(handle) = state.image_cache.get_or_load(index) {
-        *state.current_image = handle;
+        // Convert loaded RGBA image to hyperspectral (3 bands: R, G, B)
+        let hyper = HyperspectralImage::from_rgba(handle.data(), handle.width(), handle.height());
+
+        // Reset band selection to default (0, 1, 2 for RGB)
+        *state.band_selection = BandSelection::default_rgb();
+
+        // Generate the composite image
+        if let Some(composite) = hyper.to_rgb_composite(
+            state.band_selection.red,
+            state.band_selection.green,
+            state.band_selection.blue,
+        ) {
+            *state.current_image = composite;
+        }
+
+        // Store the hyperspectral data
+        *state.hyperspectral_image = hyper;
 
         // Update status message
         let name = state.image_cache.get_name(index).unwrap_or_default();
         *state.status_message = Some(format!(
-            "Image {}/{}: {}",
+            "Image {}/{}: {} (3 bands)",
             index + 1,
             state.image_cache.len(),
             name
@@ -536,6 +561,101 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             state.annotations_mut().clear();
             log::info!("🗑️ Cleared {} annotations", count);
             *state.status_message = Some(format!("Cleared {} annotations", count));
+        }
+    }
+}
+
+/// Handle band selection messages for hyperspectral images.
+/// Returns true if the composite should be regenerated.
+pub fn handle_band(
+    msg: BandMessage,
+    band_selection: &mut BandSelection,
+    num_bands: usize,
+    widget_state: &mut WidgetState,
+) -> bool {
+    use hvat_ui::widgets::SliderId;
+    let max_band = num_bands.saturating_sub(1);
+    match msg {
+        BandMessage::SetRedBand(band) => {
+            let new_value = band.min(max_band);
+            if band_selection.red != new_value {
+                band_selection.red = new_value;
+                log::debug!("🔴 Red band changed to: {}", band_selection.red);
+                true // Only regenerate when value actually changed
+            } else {
+                false // No change, skip regeneration
+            }
+        }
+        BandMessage::SetGreenBand(band) => {
+            let new_value = band.min(max_band);
+            if band_selection.green != new_value {
+                band_selection.green = new_value;
+                log::debug!("🟢 Green band changed to: {}", band_selection.green);
+                true
+            } else {
+                false
+            }
+        }
+        BandMessage::SetBlueBand(band) => {
+            let new_value = band.min(max_band);
+            if band_selection.blue != new_value {
+                band_selection.blue = new_value;
+                log::debug!("🔵 Blue band changed to: {}", band_selection.blue);
+                true
+            } else {
+                false
+            }
+        }
+        BandMessage::StartRedBand(band) => {
+            // Start drag AND set initial value (called on mouse press)
+            widget_state.slider.start_drag(SliderId::BandRed);
+            let new_value = band.min(max_band);
+            if band_selection.red != new_value {
+                band_selection.red = new_value;
+                log::debug!("🔴 Red band drag started at: {}", band_selection.red);
+                true
+            } else {
+                log::debug!("🔴 Red band drag started (no change)");
+                false
+            }
+        }
+        BandMessage::StartGreenBand(band) => {
+            widget_state.slider.start_drag(SliderId::BandGreen);
+            let new_value = band.min(max_band);
+            if band_selection.green != new_value {
+                band_selection.green = new_value;
+                log::debug!("🟢 Green band drag started at: {}", band_selection.green);
+                true
+            } else {
+                log::debug!("🟢 Green band drag started (no change)");
+                false
+            }
+        }
+        BandMessage::StartBlueBand(band) => {
+            widget_state.slider.start_drag(SliderId::BandBlue);
+            let new_value = band.min(max_band);
+            if band_selection.blue != new_value {
+                band_selection.blue = new_value;
+                log::debug!("🔵 Blue band drag started at: {}", band_selection.blue);
+                true
+            } else {
+                log::debug!("🔵 Blue band drag started (no change)");
+                false
+            }
+        }
+        BandMessage::ApplyBands => {
+            // Clear slider drag state since this is called on drag end
+            widget_state.slider.end_drag();
+            log::debug!("📊 ApplyBands: drag ended (R={}, G={}, B={})",
+                band_selection.red, band_selection.green, band_selection.blue);
+            false // Don't regenerate - we already regenerated on value change
+        }
+        BandMessage::ResetBands => {
+            *band_selection = BandSelection::default_rgb().clamp(num_bands);
+            widget_state.slider.end_drag(); // Also clear any drag state
+            log::info!("🔄 Bands reset to default: R={}, G={}, B={}",
+                band_selection.red, band_selection.green, band_selection.blue);
+            true // Regenerate on reset
         }
     }
 }

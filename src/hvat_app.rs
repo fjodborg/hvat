@@ -10,9 +10,10 @@
 
 use crate::annotation::{AnnotationStore, DrawingState};
 use crate::handlers::{
-    handle_annotation, handle_counter, handle_image_load, handle_image_settings, handle_image_view,
-    handle_navigation, handle_ui, AnnotationState, ImageLoadState,
+    handle_annotation, handle_band, handle_counter, handle_image_load, handle_image_settings,
+    handle_image_view, handle_navigation, handle_ui, AnnotationState, ImageLoadState,
 };
+use crate::hyperspectral::{generate_test_hyperspectral, BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
 use crate::message::{Message, Tab};
 use crate::theme::Theme;
@@ -52,8 +53,15 @@ pub struct HvatApp {
     theme: Theme,
 
     // === Image data ===
-    /// The current image for the image viewer (either test image or loaded image)
+    /// The raw hyperspectral/multi-band image data (source of truth)
+    hyperspectral_image: HyperspectralImage,
+    /// The rendered composite image (generated from band selection)
     current_image: ImageHandle,
+    /// Current band selection for RGB composite (UI state, may be ahead of applied)
+    band_selection: BandSelection,
+    /// The band selection that was actually applied to generate current_image
+    /// Used to detect when composite needs regeneration after missed drag end
+    applied_band_selection: BandSelection,
     /// Image cache for loading/preloading (unified native/WASM)
     image_cache: ImageCache,
     /// Current index in the loaded images list
@@ -80,9 +88,14 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn new() -> Self {
-        // Create a test image for initial display
-        log::info!("Creating 512x512 test image...");
-        let test_image = create_test_image(512, 512);
+        // Create a test hyperspectral image (8 bands)
+        log::info!("Creating 512x512 test hyperspectral image (8 bands)...");
+        let hyper_image = generate_test_hyperspectral(512, 512, 8);
+        let band_selection = BandSelection::default_rgb();
+        // Generate initial composite from default band selection
+        let current_image = hyper_image
+            .to_rgb_composite(band_selection.red, band_selection.green, band_selection.blue)
+            .expect("Failed to create initial composite");
         log::info!("Test image created");
 
         Self {
@@ -97,7 +110,10 @@ impl Application for HvatApp {
             hue_shift: 0.0,
             show_debug_info: false,
             theme: Theme::dark(),
-            current_image: test_image,
+            hyperspectral_image: hyper_image,
+            current_image,
+            band_selection,
+            applied_band_selection: band_selection, // Initially in sync
             image_cache: ImageCache::new(1), // Preload 1 image before and after
             current_image_index: 0,
             status_message: None,
@@ -146,6 +162,8 @@ impl Application for HvatApp {
                     image_cache: &mut self.image_cache,
                     current_image_index: &mut self.current_image_index,
                     current_image: &mut self.current_image,
+                    hyperspectral_image: &mut self.hyperspectral_image,
+                    band_selection: &mut self.band_selection,
                     status_message: &mut self.status_message,
                     zoom: &mut self.zoom,
                     pan_x: &mut self.pan_x,
@@ -172,6 +190,19 @@ impl Application for HvatApp {
                 };
                 handle_annotation(msg, &mut state);
             }
+            Message::Band(msg) => {
+                let num_bands = self.hyperspectral_image.num_bands();
+                let should_update = handle_band(
+                    msg,
+                    &mut self.band_selection,
+                    num_bands,
+                    &mut self.widget_state,
+                );
+                // Only regenerate composite on drag end or reset (not during drag)
+                if should_update {
+                    self.update_hyperspectral_composite();
+                }
+            }
             Message::Tick => {
                 self.frame_count += 1;
                 let elapsed = self.last_fps_time.elapsed();
@@ -179,6 +210,19 @@ impl Application for HvatApp {
                     self.fps = self.frame_count as f32 / elapsed.as_secs_f32();
                     self.frame_count = 0;
                     self.last_fps_time = Instant::now();
+                }
+
+                // Safety check: if band selection differs from applied AND we're not dragging,
+                // regenerate the composite. This catches cases where drag end was missed.
+                if self.band_selection != self.applied_band_selection
+                    && self.widget_state.slider.active_slider.is_none()
+                {
+                    log::warn!(
+                        "Band mismatch detected (UI: {:?}, Applied: {:?}) - regenerating",
+                        self.band_selection,
+                        self.applied_band_selection
+                    );
+                    self.update_hyperspectral_composite();
                 }
             }
         }
@@ -256,6 +300,8 @@ impl Application for HvatApp {
                 &self.drawing_state,
                 self.annotations(),
                 self.status_message.as_deref(),
+                &self.band_selection,
+                self.num_bands(),
             )),
             Tab::Settings => Element::new(view_settings(
                 &self.theme,
@@ -301,54 +347,32 @@ impl HvatApp {
             .get(&key)
             .unwrap_or_else(|| EMPTY.get_or_init(AnnotationStore::new))
     }
-}
 
-/// Create a test image with a gradient pattern for demonstration.
-fn create_test_image(width: u32, height: u32) -> ImageHandle {
-    let mut data = Vec::with_capacity((width * height * 4) as usize);
-
-    for y in 0..height {
-        for x in 0..width {
-            // Create a colorful gradient pattern
-            let fx = x as f32 / width as f32;
-            let fy = y as f32 / height as f32;
-
-            // Create a checkerboard pattern with gradients
-            let checker = ((x / 32) + (y / 32)) % 2 == 0;
-
-            let r = if checker {
-                (fx * 255.0) as u8
-            } else {
-                ((1.0 - fx) * 255.0) as u8
-            };
-            let g = (fy * 255.0) as u8;
-            let b = if checker {
-                ((fx + fy) / 2.0 * 255.0) as u8
-            } else {
-                (((1.0 - fx) + (1.0 - fy)) / 2.0 * 255.0) as u8
-            };
-
-            // Add some circular pattern in the center
-            let cx = (x as f32 - width as f32 / 2.0) / (width as f32 / 2.0);
-            let cy = (y as f32 - height as f32 / 2.0) / (height as f32 / 2.0);
-            let dist = (cx * cx + cy * cy).sqrt();
-
-            let (r, g, b) = if dist < 0.3 {
-                // Inner circle - bright color
-                (255, 200, 100)
-            } else if dist < 0.5 {
-                // Ring
-                (100, 150, 255)
-            } else {
-                (r, g, b)
-            };
-
-            data.push(r);
-            data.push(g);
-            data.push(b);
-            data.push(255); // Alpha
+    /// Update the displayed image from current band selection.
+    fn update_hyperspectral_composite(&mut self) {
+        log::info!(
+            "🔄 Regenerating composite: R={}, G={}, B={} (num_bands={})",
+            self.band_selection.red,
+            self.band_selection.green,
+            self.band_selection.blue,
+            self.hyperspectral_image.num_bands()
+        );
+        if let Some(composite) = self.hyperspectral_image.to_rgb_composite(
+            self.band_selection.red,
+            self.band_selection.green,
+            self.band_selection.blue,
+        ) {
+            self.current_image = composite;
+            // Track what we actually applied so we can detect mismatches
+            self.applied_band_selection = self.band_selection;
+            log::info!("✅ Composite updated");
+        } else {
+            log::error!("❌ Failed to generate composite - invalid band indices");
         }
     }
 
-    ImageHandle::from_rgba8(data, width, height)
+    /// Get the number of bands in the hyperspectral image.
+    fn num_bands(&self) -> usize {
+        self.hyperspectral_image.num_bands()
+    }
 }

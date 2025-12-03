@@ -96,6 +96,27 @@ pub enum UIMessage {
     SetTheme(Theme),
 }
 
+/// Messages for hyperspectral band selection.
+#[derive(Debug, Clone)]
+pub enum BandMessage {
+    /// Set the red channel band index (during drag - doesn't regenerate composite)
+    SetRedBand(usize),
+    /// Set the green channel band index (during drag - doesn't regenerate composite)
+    SetGreenBand(usize),
+    /// Set the blue channel band index (during drag - doesn't regenerate composite)
+    SetBlueBand(usize),
+    /// Start dragging red band slider with initial value (starts drag state AND sets value)
+    StartRedBand(usize),
+    /// Start dragging green band slider with initial value (starts drag state AND sets value)
+    StartGreenBand(usize),
+    /// Start dragging blue band slider with initial value (starts drag state AND sets value)
+    StartBlueBand(usize),
+    /// Apply band changes and regenerate composite (called on drag end)
+    ApplyBands,
+    /// Reset to default RGB (bands 0, 1, 2)
+    ResetBands,
+}
+
 /// Messages for annotation tools and operations.
 #[derive(Debug, Clone)]
 pub enum AnnotationMessage {
@@ -136,6 +157,8 @@ pub enum Message {
     ImageLoad(ImageLoadMessage),
     /// UI state (scroll, theme, debug)
     UI(UIMessage),
+    /// Hyperspectral band selection
+    Band(BandMessage),
     /// Annotation tools and operations
     Annotation(AnnotationMessage),
     /// FPS tick (called every frame)
@@ -184,7 +207,8 @@ impl Message {
     }
 
     // Image settings shortcuts
-    pub fn slider_drag_start(id: SliderId) -> Self {
+    /// Slider drag start - ignores the initial value (used for non-band sliders)
+    pub fn slider_drag_start(id: SliderId, _value: f32) -> Self {
         Message::ImageSettings(ImageSettingsMessage::SliderDragStart(id))
     }
     pub fn slider_drag_end() -> Self {
@@ -264,5 +288,31 @@ impl Message {
     }
     pub fn clear_annotations() -> Self {
         Message::Annotation(AnnotationMessage::ClearAll)
+    }
+
+    // Band selection shortcuts
+    pub fn set_red_band(band: usize) -> Self {
+        Message::Band(BandMessage::SetRedBand(band))
+    }
+    pub fn set_green_band(band: usize) -> Self {
+        Message::Band(BandMessage::SetGreenBand(band))
+    }
+    pub fn set_blue_band(band: usize) -> Self {
+        Message::Band(BandMessage::SetBlueBand(band))
+    }
+    pub fn start_red_band(band: usize) -> Self {
+        Message::Band(BandMessage::StartRedBand(band))
+    }
+    pub fn start_green_band(band: usize) -> Self {
+        Message::Band(BandMessage::StartGreenBand(band))
+    }
+    pub fn start_blue_band(band: usize) -> Self {
+        Message::Band(BandMessage::StartBlueBand(band))
+    }
+    pub fn apply_bands() -> Self {
+        Message::Band(BandMessage::ApplyBands)
+    }
+    pub fn reset_bands() -> Self {
+        Message::Band(BandMessage::ResetBands)
     }
 }

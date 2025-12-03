@@ -1,6 +1,7 @@
 //! Image viewer view - main image viewing and annotation interface.
 
 use crate::annotation::{AnnotationStore, AnnotationTool, DrawingState, Shape};
+use crate::hyperspectral::BandSelection;
 use crate::message::Message;
 use crate::theme::Theme;
 use crate::widget_state::WidgetState;
@@ -160,6 +161,9 @@ pub fn view_image_viewer<'a>(
     drawing_state: &'a DrawingState,
     annotations: &'a AnnotationStore,
     status_message: Option<&'a str>,
+    // Band selection (always shown)
+    band_selection: &BandSelection,
+    num_bands: usize,
 ) -> Column<'a, Message> {
     // Create image adjustments from current settings
     let adjustments = ImageAdjustments {
@@ -371,5 +375,100 @@ pub fn view_image_viewer<'a>(
             .size(12.0)
             .color(text_color),
         ))
+        // Band selection (always visible)
+        .push(Element::new(
+            text("Band Selection (RGB Mapping):")
+                .size(14.0)
+                .color(theme.accent_color()),
+        ))
+        .push(Element::new(view_band_selector(
+            text_color,
+            widget_state,
+            band_selection,
+            num_bands,
+        )))
         .spacing(8.0)
+}
+
+/// Build the band selector UI.
+/// Always visible - allows mapping any band to R/G/B channels.
+fn view_band_selector(
+    text_color: Color,
+    widget_state: &WidgetState,
+    band_selection: &BandSelection,
+    num_bands: usize,
+) -> Column<'static, Message> {
+    let max_band = num_bands.saturating_sub(1) as f32;
+
+    // Band sliders - always active
+    // Note: on_drag_end triggers apply_bands() to regenerate the composite
+    let red_slider = row()
+        .push(Element::new(
+            text(format!("R <- Band {}", band_selection.red))
+                .size(12.0)
+                .color(Color::rgb(1.0, 0.3, 0.3)),
+        ))
+        .push(Element::new(
+            slider(0.0, max_band, band_selection.red as f32)
+                .id(SliderId::BandRed)
+                .step(1.0)
+                .dragging(widget_state.slider.is_dragging(SliderId::BandRed))
+                .width(Length::Units(150.0))
+                .on_drag_start(|_id, value| Message::start_red_band(value as usize))
+                .on_change(|v| Message::set_red_band(v as usize))
+                .on_drag_end(Message::apply_bands),
+        ))
+        .spacing(10.0);
+
+    let green_slider = row()
+        .push(Element::new(
+            text(format!("G <- Band {}", band_selection.green))
+                .size(12.0)
+                .color(Color::rgb(0.3, 1.0, 0.3)),
+        ))
+        .push(Element::new(
+            slider(0.0, max_band, band_selection.green as f32)
+                .id(SliderId::BandGreen)
+                .step(1.0)
+                .dragging(widget_state.slider.is_dragging(SliderId::BandGreen))
+                .width(Length::Units(150.0))
+                .on_drag_start(|_id, value| Message::start_green_band(value as usize))
+                .on_change(|v| Message::set_green_band(v as usize))
+                .on_drag_end(Message::apply_bands),
+        ))
+        .spacing(10.0);
+
+    let blue_slider = row()
+        .push(Element::new(
+            text(format!("B <- Band {}", band_selection.blue))
+                .size(12.0)
+                .color(Color::rgb(0.3, 0.3, 1.0)),
+        ))
+        .push(Element::new(
+            slider(0.0, max_band, band_selection.blue as f32)
+                .id(SliderId::BandBlue)
+                .step(1.0)
+                .dragging(widget_state.slider.is_dragging(SliderId::BandBlue))
+                .width(Length::Units(150.0))
+                .on_drag_start(|_id, value| Message::start_blue_band(value as usize))
+                .on_change(|v| Message::set_blue_band(v as usize))
+                .on_drag_end(Message::apply_bands),
+        ))
+        .spacing(10.0);
+
+    let reset_btn = button("Reset (0,1,2)")
+        .on_press(Message::reset_bands())
+        .width(110.0);
+
+    column()
+        .push(Element::new(
+            text(format!("{} channels available", num_bands))
+                .size(12.0)
+                .color(text_color),
+        ))
+        .push(Element::new(red_slider))
+        .push(Element::new(green_slider))
+        .push(Element::new(blue_slider))
+        .push(Element::new(reset_btn))
+        .spacing(5.0)
 }
