@@ -4,6 +4,11 @@ use crate::annotation::{AnnotationStore, AnnotationTool, DrawingState, Shape};
 use crate::hyperspectral::BandSelection;
 use crate::message::Message;
 use crate::theme::Theme;
+use crate::ui_constants::{
+    annotation as ann_const, button as btn_const, colors, image_viewer as img_const, padding,
+    slider as slider_const, spacing, text as text_const,
+};
+use crate::views::helpers::tool_button;
 use crate::widget_state::WidgetState;
 use hvat_ui::widgets::{
     button, column, container, pan_zoom_image, row, slider, text, Column, Element, Row, SliderId,
@@ -20,13 +25,13 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
         let cat_color = annotations
             .get_category(ann.category_id)
             .map(|c| Color::new(c.color[0], c.color[1], c.color[2], c.color[3]))
-            .unwrap_or(Color::rgb(0.7, 0.7, 0.7));
+            .unwrap_or(colors::DEFAULT_GRAY);
 
         let shape = match &ann.shape {
             Shape::Point(p) => OverlayShape::Point {
                 x: p.x,
                 y: p.y,
-                radius: 6.0,
+                radius: ann_const::POINT_RADIUS,
             },
             Shape::BoundingBox(b) => OverlayShape::Rect {
                 x: b.x,
@@ -48,14 +53,14 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
     if let Some(preview_shape) = drawing_state.preview() {
         let cat_color = annotations
             .get_category(drawing_state.current_category)
-            .map(|c| Color::new(c.color[0], c.color[1], c.color[2], 0.5))
-            .unwrap_or(Color::new(0.7, 0.7, 0.7, 0.5));
+            .map(|c| Color::new(c.color[0], c.color[1], c.color[2], ann_const::PREVIEW_ALPHA))
+            .unwrap_or(Color::new(0.7, 0.7, 0.7, ann_const::PREVIEW_ALPHA));
 
         let shape = match preview_shape {
             Shape::Point(p) => OverlayShape::Point {
                 x: p.x,
                 y: p.y,
-                radius: 6.0,
+                radius: ann_const::POINT_RADIUS,
             },
             Shape::BoundingBox(b) => OverlayShape::Rect {
                 x: b.x,
@@ -77,68 +82,27 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
 
 /// Build the annotation toolbar.
 pub fn view_annotation_toolbar(tool: AnnotationTool, _text_color: Color) -> Row<'static, Message> {
-    // Tool selection buttons with visual indication of active tool
-    let select_btn = if tool == AnnotationTool::Select {
-        button("Select *")
-            .on_press(Message::set_annotation_tool(AnnotationTool::Select))
-            .width(80.0)
-    } else {
-        button("Select")
-            .on_press(Message::set_annotation_tool(AnnotationTool::Select))
-            .width(80.0)
-    };
-
-    let bbox_btn = if tool == AnnotationTool::BoundingBox {
-        button("BBox *")
-            .on_press(Message::set_annotation_tool(AnnotationTool::BoundingBox))
-            .width(80.0)
-    } else {
-        button("BBox")
-            .on_press(Message::set_annotation_tool(AnnotationTool::BoundingBox))
-            .width(80.0)
-    };
-
-    let poly_btn = if tool == AnnotationTool::Polygon {
-        button("Polygon *")
-            .on_press(Message::set_annotation_tool(AnnotationTool::Polygon))
-            .width(80.0)
-    } else {
-        button("Polygon")
-            .on_press(Message::set_annotation_tool(AnnotationTool::Polygon))
-            .width(80.0)
-    };
-
-    let point_btn = if tool == AnnotationTool::Point {
-        button("Point *")
-            .on_press(Message::set_annotation_tool(AnnotationTool::Point))
-            .width(80.0)
-    } else {
-        button("Point")
-            .on_press(Message::set_annotation_tool(AnnotationTool::Point))
-            .width(80.0)
-    };
-
     row()
-        .push(Element::new(select_btn))
-        .push(Element::new(bbox_btn))
-        .push(Element::new(poly_btn))
-        .push(Element::new(point_btn))
+        .push(tool_button("Select", AnnotationTool::Select, tool))
+        .push(tool_button("BBox", AnnotationTool::BoundingBox, tool))
+        .push(tool_button("Polygon", AnnotationTool::Polygon, tool))
+        .push(tool_button("Point", AnnotationTool::Point, tool))
         .push(Element::new(
             button("Delete")
                 .on_press(Message::delete_selected_annotation())
-                .width(70.0),
+                .width(btn_const::COMPACT_WIDTH),
         ))
         .push(Element::new(
             button("Export")
                 .on_press(Message::export_annotations())
-                .width(70.0),
+                .width(btn_const::COMPACT_WIDTH),
         ))
         .push(Element::new(
             button("Clear")
                 .on_press(Message::clear_annotations())
-                .width(60.0),
+                .width(btn_const::XCOMPACT_WIDTH),
         ))
-        .spacing(5.0)
+        .spacing(spacing::TIGHT)
 }
 
 /// Build the image viewer view.
@@ -184,8 +148,8 @@ pub fn view_image_viewer<'a>(
         .drawing(drawing_state.is_drawing)
         .adjustments(adjustments)
         .overlay(overlay)
-        .width(Length::Units(600.0))
-        .height(Length::Units(400.0))
+        .width(Length::Units(img_const::WIDTH))
+        .height(Length::Units(img_const::HEIGHT))
         .on_drag_start(Message::image_drag_start)
         .on_drag_move(Message::image_drag_move)
         .on_drag_end(Message::image_drag_end)
@@ -201,7 +165,7 @@ pub fn view_image_viewer<'a>(
 
     column()
         .push(Element::new(
-            text("Image Viewer").size(24.0).color(text_color),
+            text("Image Viewer").size(text_const::TITLE).color(text_color),
         ))
         // File loading controls
         .push(Element::new(
@@ -209,151 +173,123 @@ pub fn view_image_viewer<'a>(
                 .push(Element::new(
                     button("Load Folder")
                         .on_press(Message::load_folder())
-                        .width(120.0),
+                        .width(btn_const::STANDARD_WIDTH),
                 ))
                 .push(Element::new(
                     button("< Prev")
                         .on_press(Message::previous_image())
-                        .width(80.0),
+                        .width(btn_const::TOOL_WIDTH),
                 ))
                 .push(Element::new(
                     button("Next >")
                         .on_press(Message::next_image())
-                        .width(80.0),
+                        .width(btn_const::TOOL_WIDTH),
                 ))
                 .push(Element::new(
-                    text(status_text).size(12.0).color(text_color),
+                    text(status_text).size(text_const::SMALL).color(text_color),
                 ))
-                .spacing(10.0),
+                .spacing(spacing::STANDARD),
         ))
         .push(Element::new(
             text(format!(
                 "Zoom: {:.2}x | Pan: ({:.0}, {:.0})",
                 zoom, pan_x, pan_y
             ))
-            .size(14.0)
+            .size(text_const::BODY)
             .color(text_color),
         ))
         // Image display area with border
         .push(Element::new(
             container(Element::new(image_widget))
-                .padding(4.0)
-                .border(Color::rgb(0.4, 0.4, 0.4))
-                .border_width(2.0),
+                .padding(padding::MINIMAL)
+                .border(colors::BORDER)
+                .border_width(img_const::BORDER_WIDTH),
         ))
         .push(Element::new(
             text("Middle-click drag to pan, scroll to zoom")
-                .size(12.0)
-                .color(Color::rgb(0.6, 0.6, 0.6)),
+                .size(text_const::SMALL)
+                .color(colors::MUTED_TEXT),
         ))
         // Zoom/pan button controls
         .push(Element::new(
             row()
                 .push(Element::new(
-                    button("Zoom In").on_press(Message::zoom_in()).width(90.0),
+                    button("Zoom In")
+                        .on_press(Message::zoom_in())
+                        .width(btn_const::ZOOM_WIDTH),
                 ))
                 .push(Element::new(
-                    button("Zoom Out").on_press(Message::zoom_out()).width(90.0),
+                    button("Zoom Out")
+                        .on_press(Message::zoom_out())
+                        .width(btn_const::ZOOM_WIDTH),
                 ))
                 .push(Element::new(
                     button("Reset View")
                         .on_press(Message::reset_view())
-                        .width(90.0),
+                        .width(btn_const::ZOOM_WIDTH),
                 ))
-                .spacing(10.0),
+                .spacing(spacing::STANDARD),
         ))
         // Image manipulation controls with sliders
         .push(Element::new(
             text("Image Settings:")
-                .size(14.0)
+                .size(text_const::BODY)
                 .color(theme.accent_color()),
         ))
         // Brightness slider
-        .push(Element::new(
-            row()
-                .push(Element::new(
-                    text(format!("Brightness: {:.2}", brightness))
-                        .size(12.0)
-                        .color(text_color),
-                ))
-                .push(Element::new(
-                    slider(-1.0, 1.0, brightness)
-                        .id(SliderId::Brightness)
-                        .dragging(widget_state.slider.is_dragging(SliderId::Brightness))
-                        .width(Length::Units(200.0))
-                        .on_drag_start(Message::slider_drag_start)
-                        .on_change(Message::set_brightness)
-                        .on_drag_end(Message::slider_drag_end),
-                ))
-                .spacing(10.0),
-        ))
+        .push(Element::new(view_slider_row(
+            &format!("Brightness: {:.2}", brightness),
+            text_color,
+            -1.0,
+            1.0,
+            brightness,
+            SliderId::Brightness,
+            widget_state.slider.is_dragging(SliderId::Brightness),
+            Message::set_brightness,
+        )))
         // Contrast slider
-        .push(Element::new(
-            row()
-                .push(Element::new(
-                    text(format!("Contrast:   {:.2}", contrast))
-                        .size(12.0)
-                        .color(text_color),
-                ))
-                .push(Element::new(
-                    slider(0.1, 3.0, contrast)
-                        .id(SliderId::Contrast)
-                        .dragging(widget_state.slider.is_dragging(SliderId::Contrast))
-                        .width(Length::Units(200.0))
-                        .on_drag_start(Message::slider_drag_start)
-                        .on_change(Message::set_contrast)
-                        .on_drag_end(Message::slider_drag_end),
-                ))
-                .spacing(10.0),
-        ))
+        .push(Element::new(view_slider_row(
+            &format!("Contrast:   {:.2}", contrast),
+            text_color,
+            0.1,
+            3.0,
+            contrast,
+            SliderId::Contrast,
+            widget_state.slider.is_dragging(SliderId::Contrast),
+            Message::set_contrast,
+        )))
         // Gamma slider
-        .push(Element::new(
-            row()
-                .push(Element::new(
-                    text(format!("Gamma:      {:.2}", gamma))
-                        .size(12.0)
-                        .color(text_color),
-                ))
-                .push(Element::new(
-                    slider(0.1, 3.0, gamma)
-                        .id(SliderId::Gamma)
-                        .dragging(widget_state.slider.is_dragging(SliderId::Gamma))
-                        .width(Length::Units(200.0))
-                        .on_drag_start(Message::slider_drag_start)
-                        .on_change(Message::set_gamma)
-                        .on_drag_end(Message::slider_drag_end),
-                ))
-                .spacing(10.0),
-        ))
+        .push(Element::new(view_slider_row(
+            &format!("Gamma:      {:.2}", gamma),
+            text_color,
+            0.1,
+            3.0,
+            gamma,
+            SliderId::Gamma,
+            widget_state.slider.is_dragging(SliderId::Gamma),
+            Message::set_gamma,
+        )))
         // Hue shift slider
-        .push(Element::new(
-            row()
-                .push(Element::new(
-                    text(format!("Hue Shift:  {:.0}", hue_shift))
-                        .size(12.0)
-                        .color(text_color),
-                ))
-                .push(Element::new(
-                    slider(-180.0, 180.0, hue_shift)
-                        .id(SliderId::HueShift)
-                        .dragging(widget_state.slider.is_dragging(SliderId::HueShift))
-                        .width(Length::Units(200.0))
-                        .on_drag_start(Message::slider_drag_start)
-                        .on_change(Message::set_hue_shift)
-                        .on_drag_end(Message::slider_drag_end),
-                ))
-                .spacing(10.0),
-        ))
+        .push(Element::new(view_slider_row(
+            &format!("Hue Shift:  {:.0}", hue_shift),
+            text_color,
+            -180.0,
+            180.0,
+            hue_shift,
+            SliderId::HueShift,
+            widget_state.slider.is_dragging(SliderId::HueShift),
+            Message::set_hue_shift,
+        )))
         // Reset button
         .push(Element::new(
             button("Reset Image Settings")
                 .on_press(Message::reset_image_settings())
-                .width(180.0),
+                .width(btn_const::WIDE_WIDTH),
         ))
         // Annotation toolbar
         .push(Element::new(
             text("Annotation Tools:")
-                .size(14.0)
+                .size(text_const::BODY)
                 .color(theme.accent_color()),
         ))
         .push(Element::new(view_annotation_toolbar(
@@ -372,13 +308,13 @@ pub fn view_image_viewer<'a>(
                     "Ready"
                 }
             ))
-            .size(12.0)
+            .size(text_const::SMALL)
             .color(text_color),
         ))
         // Band selection (always visible)
         .push(Element::new(
             text("Band Selection (RGB Mapping):")
-                .size(14.0)
+                .size(text_const::BODY)
                 .color(theme.accent_color()),
         ))
         .push(Element::new(view_band_selector(
@@ -387,7 +323,37 @@ pub fn view_image_viewer<'a>(
             band_selection,
             num_bands,
         )))
-        .spacing(8.0)
+        .spacing(spacing::TIGHT + 3.0) // 8.0 = TIGHT(5) + 3
+}
+
+/// Helper to build an image settings slider row.
+fn view_slider_row<F>(
+    label: &str,
+    text_color: Color,
+    min: f32,
+    max: f32,
+    value: f32,
+    slider_id: SliderId,
+    is_dragging: bool,
+    on_change: F,
+) -> Row<'static, Message>
+where
+    F: Fn(f32) -> Message + 'static,
+{
+    row()
+        .push(Element::new(
+            text(label).size(text_const::SMALL).color(text_color),
+        ))
+        .push(Element::new(
+            slider(min, max, value)
+                .id(slider_id)
+                .dragging(is_dragging)
+                .width(slider_const::standard_length())
+                .on_drag_start(Message::slider_drag_start)
+                .on_change(on_change)
+                .on_drag_end(Message::slider_drag_end),
+        ))
+        .spacing(spacing::STANDARD)
 }
 
 /// Build the band selector UI.
@@ -402,73 +368,84 @@ fn view_band_selector(
 
     // Band sliders - always active
     // Note: on_drag_end triggers apply_bands() to regenerate the composite
-    let red_slider = row()
-        .push(Element::new(
-            text(format!("R <- Band {}", band_selection.red))
-                .size(12.0)
-                .color(Color::rgb(1.0, 0.3, 0.3)),
-        ))
-        .push(Element::new(
-            slider(0.0, max_band, band_selection.red as f32)
-                .id(SliderId::BandRed)
-                .step(1.0)
-                .dragging(widget_state.slider.is_dragging(SliderId::BandRed))
-                .width(Length::Units(150.0))
-                .on_drag_start(|_id, value| Message::start_red_band(value as usize))
-                .on_change(|v| Message::set_red_band(v as usize))
-                .on_drag_end(Message::apply_bands),
-        ))
-        .spacing(10.0);
+    let red_slider = view_band_slider_row(
+        &format!("R <- Band {}", band_selection.red),
+        colors::CHANNEL_RED,
+        max_band,
+        band_selection.red as f32,
+        SliderId::BandRed,
+        widget_state.slider.is_dragging(SliderId::BandRed),
+        |_id, value| Message::start_red_band(value as usize),
+        |v| Message::set_red_band(v as usize),
+    );
 
-    let green_slider = row()
-        .push(Element::new(
-            text(format!("G <- Band {}", band_selection.green))
-                .size(12.0)
-                .color(Color::rgb(0.3, 1.0, 0.3)),
-        ))
-        .push(Element::new(
-            slider(0.0, max_band, band_selection.green as f32)
-                .id(SliderId::BandGreen)
-                .step(1.0)
-                .dragging(widget_state.slider.is_dragging(SliderId::BandGreen))
-                .width(Length::Units(150.0))
-                .on_drag_start(|_id, value| Message::start_green_band(value as usize))
-                .on_change(|v| Message::set_green_band(v as usize))
-                .on_drag_end(Message::apply_bands),
-        ))
-        .spacing(10.0);
+    let green_slider = view_band_slider_row(
+        &format!("G <- Band {}", band_selection.green),
+        colors::CHANNEL_GREEN,
+        max_band,
+        band_selection.green as f32,
+        SliderId::BandGreen,
+        widget_state.slider.is_dragging(SliderId::BandGreen),
+        |_id, value| Message::start_green_band(value as usize),
+        |v| Message::set_green_band(v as usize),
+    );
 
-    let blue_slider = row()
-        .push(Element::new(
-            text(format!("B <- Band {}", band_selection.blue))
-                .size(12.0)
-                .color(Color::rgb(0.3, 0.3, 1.0)),
-        ))
-        .push(Element::new(
-            slider(0.0, max_band, band_selection.blue as f32)
-                .id(SliderId::BandBlue)
-                .step(1.0)
-                .dragging(widget_state.slider.is_dragging(SliderId::BandBlue))
-                .width(Length::Units(150.0))
-                .on_drag_start(|_id, value| Message::start_blue_band(value as usize))
-                .on_change(|v| Message::set_blue_band(v as usize))
-                .on_drag_end(Message::apply_bands),
-        ))
-        .spacing(10.0);
+    let blue_slider = view_band_slider_row(
+        &format!("B <- Band {}", band_selection.blue),
+        colors::CHANNEL_BLUE,
+        max_band,
+        band_selection.blue as f32,
+        SliderId::BandBlue,
+        widget_state.slider.is_dragging(SliderId::BandBlue),
+        |_id, value| Message::start_blue_band(value as usize),
+        |v| Message::set_blue_band(v as usize),
+    );
 
     let reset_btn = button("Reset (0,1,2)")
         .on_press(Message::reset_bands())
-        .width(110.0);
+        .width(btn_const::BAND_RESET_WIDTH);
 
     column()
         .push(Element::new(
             text(format!("{} channels available", num_bands))
-                .size(12.0)
+                .size(text_const::SMALL)
                 .color(text_color),
         ))
         .push(Element::new(red_slider))
         .push(Element::new(green_slider))
         .push(Element::new(blue_slider))
         .push(Element::new(reset_btn))
-        .spacing(5.0)
+        .spacing(spacing::TIGHT)
+}
+
+/// Helper to build a band slider row.
+fn view_band_slider_row<S, C>(
+    label: &str,
+    label_color: Color,
+    max_band: f32,
+    value: f32,
+    slider_id: SliderId,
+    is_dragging: bool,
+    on_drag_start: S,
+    on_change: C,
+) -> Row<'static, Message>
+where
+    S: Fn(SliderId, f32) -> Message + 'static,
+    C: Fn(f32) -> Message + 'static,
+{
+    row()
+        .push(Element::new(
+            text(label).size(text_const::SMALL).color(label_color),
+        ))
+        .push(Element::new(
+            slider(0.0, max_band, value)
+                .id(slider_id)
+                .step(1.0)
+                .dragging(is_dragging)
+                .width(slider_const::compact_length())
+                .on_drag_start(on_drag_start)
+                .on_change(on_change)
+                .on_drag_end(Message::apply_bands),
+        ))
+        .spacing(spacing::STANDARD)
 }

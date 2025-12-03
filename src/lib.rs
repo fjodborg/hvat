@@ -34,6 +34,9 @@ pub use hyperspectral::{
     generate_test_hyperspectral, BandSelection, HyperspectralImage,
 };
 
+// UI constants for consistent styling
+pub mod ui_constants;
+
 // ============================================================================
 // Application Modules (modularized from hvat_app.rs)
 // ============================================================================

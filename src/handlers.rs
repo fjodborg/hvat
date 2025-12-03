@@ -11,6 +11,7 @@ use crate::message::{
     ImageViewMessage, NavigationMessage, Tab, UIMessage,
 };
 use crate::theme::Theme;
+use crate::ui_constants::{threshold, zoom as zoom_const};
 use crate::widget_state::WidgetState;
 use hvat_ui::ImageHandle;
 use std::collections::HashMap;
@@ -47,6 +48,9 @@ pub fn handle_counter(msg: CounterMessage, counter: &mut i32) {
 }
 
 /// Handle image view messages (pan, zoom, drag).
+///
+/// Uses change detection for drag moves to avoid redundant pan updates
+/// when the mouse hasn't actually moved.
 pub fn handle_image_view(
     msg: ImageViewMessage,
     zoom: &mut f32,
@@ -56,11 +60,11 @@ pub fn handle_image_view(
 ) {
     match msg {
         ImageViewMessage::ZoomIn => {
-            *zoom = (*zoom * 1.2).min(5.0);
+            *zoom = (*zoom * zoom_const::FACTOR).min(zoom_const::MAX);
             log::debug!("🔍 Zoom in: {:.2}x", zoom);
         }
         ImageViewMessage::ZoomOut => {
-            *zoom = (*zoom / 1.2).max(0.2);
+            *zoom = (*zoom / zoom_const::FACTOR).max(zoom_const::MIN);
             log::debug!("🔍 Zoom out: {:.2}x", zoom);
         }
         ImageViewMessage::ResetView => {
@@ -70,42 +74,50 @@ pub fn handle_image_view(
             log::debug!("🔄 View reset");
         }
         ImageViewMessage::PanLeft => {
-            *pan_x -= 10.0;
+            *pan_x -= zoom_const::PAN_STEP;
             log::debug!("⬅️  Pan left: ({:.0}, {:.0})", pan_x, pan_y);
         }
         ImageViewMessage::PanRight => {
-            *pan_x += 10.0;
+            *pan_x += zoom_const::PAN_STEP;
             log::debug!("➡️  Pan right: ({:.0}, {:.0})", pan_x, pan_y);
         }
         ImageViewMessage::PanUp => {
-            *pan_y -= 10.0;
+            *pan_y -= zoom_const::PAN_STEP;
             log::debug!("⬆️  Pan up: ({:.0}, {:.0})", pan_x, pan_y);
         }
         ImageViewMessage::PanDown => {
-            *pan_y += 10.0;
+            *pan_y += zoom_const::PAN_STEP;
             log::debug!("⬇️  Pan down: ({:.0}, {:.0})", pan_x, pan_y);
         }
         ImageViewMessage::Pan(pan) => {
-            *pan_x = pan.0;
-            *pan_y = pan.1;
+            // Only update if pan actually changed
+            if (*pan_x - pan.0).abs() > threshold::PAN_CHANGE
+                || (*pan_y - pan.1).abs() > threshold::PAN_CHANGE
+            {
+                *pan_x = pan.0;
+                *pan_y = pan.1;
+            }
         }
         ImageViewMessage::ZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y) => {
-            let old_zoom = *zoom;
-            let cursor_rel_x = cursor_x - widget_center_x;
-            let cursor_rel_y = cursor_y - widget_center_y;
-            let img_x = (cursor_rel_x - *pan_x) / old_zoom;
-            let img_y = (cursor_rel_y - *pan_y) / old_zoom;
-            *zoom = new_zoom;
-            *pan_x = cursor_rel_x - img_x * new_zoom;
-            *pan_y = cursor_rel_y - img_y * new_zoom;
-            log::debug!(
-                "🔍 Zoom-to-cursor: {:.2}x at ({:.1}, {:.1}), pan: ({:.1}, {:.1})",
-                zoom,
-                cursor_x,
-                cursor_y,
-                pan_x,
-                pan_y
-            );
+            // Only process if zoom actually changed
+            if (*zoom - new_zoom).abs() > threshold::ZOOM_CHANGE {
+                let old_zoom = *zoom;
+                let cursor_rel_x = cursor_x - widget_center_x;
+                let cursor_rel_y = cursor_y - widget_center_y;
+                let img_x = (cursor_rel_x - *pan_x) / old_zoom;
+                let img_y = (cursor_rel_y - *pan_y) / old_zoom;
+                *zoom = new_zoom;
+                *pan_x = cursor_rel_x - img_x * new_zoom;
+                *pan_y = cursor_rel_y - img_y * new_zoom;
+                log::debug!(
+                    "🔍 Zoom-to-cursor: {:.2}x at ({:.1}, {:.1}), pan: ({:.1}, {:.1})",
+                    zoom,
+                    cursor_x,
+                    cursor_y,
+                    pan_x,
+                    pan_y
+                );
+            }
         }
         ImageViewMessage::DragStart(pos) => {
             widget_state.image.start_drag(pos);
@@ -113,9 +125,10 @@ pub fn handle_image_view(
         }
         ImageViewMessage::DragMove(pos) => {
             if let Some((dx, dy)) = widget_state.image.update_drag(pos) {
-                *pan_x += dx;
-                *pan_y += dy;
-                if dx.abs() > 1.0 || dy.abs() > 1.0 {
+                // Only update if there's meaningful movement
+                if dx.abs() > threshold::DRAG_MOVEMENT || dy.abs() > threshold::DRAG_MOVEMENT {
+                    *pan_x += dx;
+                    *pan_y += dy;
                     log::debug!(
                         "🖐️ Panning: delta({:.1}, {:.1}) -> pan({:.1}, {:.1})",
                         dx,
@@ -134,6 +147,9 @@ pub fn handle_image_view(
 }
 
 /// Handle image settings messages (brightness, contrast, etc.).
+///
+/// Uses change detection to avoid redundant updates and log spam when
+/// the slider value hasn't actually changed (common during continuous drag).
 pub fn handle_image_settings(
     msg: ImageSettingsMessage,
     brightness: &mut f32,
@@ -142,6 +158,11 @@ pub fn handle_image_settings(
     hue_shift: &mut f32,
     widget_state: &mut WidgetState,
 ) {
+    // Helper to check if f32 values are meaningfully different
+    fn changed(old: f32, new: f32) -> bool {
+        (old - new).abs() > threshold::FLOAT_EPSILON
+    }
+
     match msg {
         ImageSettingsMessage::SliderDragStart(id) => {
             // Safety: if there's already a drag in progress, end it first
@@ -158,20 +179,28 @@ pub fn handle_image_settings(
             log::debug!("Slider drag ended");
         }
         ImageSettingsMessage::SetBrightness(value) => {
-            *brightness = value;
-            log::debug!("☀️  Brightness: {:.2}", brightness);
+            if changed(*brightness, value) {
+                *brightness = value;
+                log::debug!("☀️  Brightness: {:.2}", brightness);
+            }
         }
         ImageSettingsMessage::SetContrast(value) => {
-            *contrast = value;
-            log::debug!("🎛️  Contrast: {:.2}", contrast);
+            if changed(*contrast, value) {
+                *contrast = value;
+                log::debug!("🎛️  Contrast: {:.2}", contrast);
+            }
         }
         ImageSettingsMessage::SetGamma(value) => {
-            *gamma = value;
-            log::debug!("📊 Gamma: {:.2}", gamma);
+            if changed(*gamma, value) {
+                *gamma = value;
+                log::debug!("📊 Gamma: {:.2}", gamma);
+            }
         }
         ImageSettingsMessage::SetHueShift(value) => {
-            *hue_shift = value;
-            log::debug!("🎨 Hue shift: {:.2}", hue_shift);
+            if changed(*hue_shift, value) {
+                *hue_shift = value;
+                log::debug!("🎨 Hue shift: {:.2}", hue_shift);
+            }
         }
         ImageSettingsMessage::Reset => {
             *brightness = 0.0;
@@ -310,6 +339,8 @@ fn load_current_image(state: &mut ImageLoadState) {
 }
 
 /// Handle UI messages (scroll, theme, debug).
+///
+/// Uses change detection for scroll offset to avoid redundant updates.
 pub fn handle_ui(
     msg: UIMessage,
     widget_state: &mut WidgetState,
@@ -318,8 +349,12 @@ pub fn handle_ui(
 ) {
     match msg {
         UIMessage::Scroll(offset) => {
-            widget_state.scroll.set_offset(offset);
-            log::debug!("📜 Scroll offset: {:.1}", offset);
+            // Only update if scroll position actually changed
+            let current = widget_state.scroll.offset;
+            if (current - offset).abs() > threshold::SCROLL_CHANGE {
+                widget_state.scroll.set_offset(offset);
+                log::debug!("📜 Scroll offset: {:.1}", offset);
+            }
         }
         UIMessage::ScrollbarDragStart => {
             widget_state.scroll.start_drag();
@@ -423,9 +458,8 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                         if state.drawing_state.points.len() >= 3 {
                             if let Some(first) = state.drawing_state.points.first() {
                                 let click_point = Point::new(x, y);
-                                // Close threshold in image coordinates (adjustable)
-                                const CLOSE_THRESHOLD: f32 = 15.0;
-                                if first.distance_to(&click_point) < CLOSE_THRESHOLD / state.zoom {
+                                // Close threshold in image coordinates (scaled by zoom)
+                                if first.distance_to(&click_point) < threshold::POLYGON_CLOSE / state.zoom {
                                     // Close the polygon
                                     let category = state.drawing_state.current_category;
                                     if let Some(shape) = state.drawing_state.finish() {
