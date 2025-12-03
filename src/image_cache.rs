@@ -274,20 +274,85 @@ mod tests {
 
     #[test]
     fn test_is_image_file() {
+        // Supported formats
         assert!(is_image_file("test.png"));
         assert!(is_image_file("test.PNG"));
         assert!(is_image_file("test.jpg"));
         assert!(is_image_file("test.JPEG"));
+        assert!(is_image_file("test.gif"));
+        assert!(is_image_file("test.bmp"));
+        assert!(is_image_file("test.webp"));
+        assert!(is_image_file("test.tiff"));
+        assert!(is_image_file("test.tif"));
+
+        // Unsupported formats
         assert!(!is_image_file("test.txt"));
         assert!(!is_image_file("test.rs"));
+        assert!(!is_image_file("test.pdf"));
+        assert!(!is_image_file("test.svg"));
+        assert!(!is_image_file("test"));
+
+        // Edge cases
+        assert!(!is_image_file(""));
+        // Note: "png" ends with "png" so it matches - this is fine for our use case
+        // as we're checking file extensions, not validating file names
+        assert!(is_image_file(".png")); // Hidden file
+        assert!(is_image_file("path/to/image.png"));
     }
 
     #[test]
-    fn test_navigation() {
-        let mut cache = ImageCache::new(1);
+    fn test_cache_creation() {
+        let cache = ImageCache::new(2);
+        assert_eq!(cache.preload_count(), 2);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
 
-        // Empty cache
+    #[test]
+    fn test_preload_count_modification() {
+        let mut cache = ImageCache::new(1);
+        assert_eq!(cache.preload_count(), 1);
+
+        cache.set_preload_count(3);
+        assert_eq!(cache.preload_count(), 3);
+    }
+
+    #[test]
+    fn test_navigation_empty_cache() {
+        let cache = ImageCache::new(1);
+
+        // Empty cache should return 0 for both directions
         assert_eq!(cache.next_index(0), 0);
         assert_eq!(cache.prev_index(0), 0);
+        assert_eq!(cache.next_index(5), 0);
+        assert_eq!(cache.prev_index(5), 0);
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut cache = ImageCache::new(1);
+        // Clear should work on empty cache without panic
+        cache.clear();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_get_name_out_of_bounds() {
+        let cache = ImageCache::new(1);
+        assert_eq!(cache.get_name(0), None);
+        assert_eq!(cache.get_name(100), None);
+    }
+
+    #[test]
+    fn test_image_extensions_constant() {
+        // Ensure all extensions are lowercase
+        for ext in IMAGE_EXTENSIONS {
+            assert_eq!(*ext, ext.to_lowercase());
+        }
+
+        // Ensure we have the common formats
+        assert!(IMAGE_EXTENSIONS.contains(&"png"));
+        assert!(IMAGE_EXTENSIONS.contains(&"jpg"));
+        assert!(IMAGE_EXTENSIONS.contains(&"jpeg"));
     }
 }

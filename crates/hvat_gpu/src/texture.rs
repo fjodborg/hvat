@@ -1,5 +1,6 @@
 use wgpu;
 
+use crate::config::TextureConfig;
 use crate::context::GpuContext;
 use crate::error::{GpuError, Result};
 
@@ -13,8 +14,19 @@ pub struct Texture {
 }
 
 impl Texture {
-    /// Create a texture from RGBA8 bytes
+    /// Create a texture from RGBA8 bytes with default configuration.
     pub fn from_rgba8(ctx: &GpuContext, data: &[u8], width: u32, height: u32) -> Result<Self> {
+        Self::from_rgba8_with_config(ctx, data, width, height, TextureConfig::default())
+    }
+
+    /// Create a texture from RGBA8 bytes with custom configuration.
+    pub fn from_rgba8_with_config(
+        ctx: &GpuContext,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        config: TextureConfig,
+    ) -> Result<Self> {
         // Validate data size
         let expected_size = (width * height * 4) as usize;
         if data.len() != expected_size {
@@ -60,15 +72,15 @@ impl Texture {
         // Create texture view
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create sampler
+        // Create sampler with config
         let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Image Sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: config.address_mode_u,
+            address_mode_v: config.address_mode_v,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mag_filter: config.mag_filter,
+            min_filter: config.min_filter,
+            mipmap_filter: config.mipmap_filter,
             ..Default::default()
         });
 

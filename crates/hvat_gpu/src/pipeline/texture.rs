@@ -2,7 +2,7 @@
 
 use wgpu::util::DeviceExt;
 
-use super::Pipeline;
+use super::{BindGroupLayoutBuilder, Pipeline, PipelineBuilder};
 use crate::context::GpuContext;
 use crate::texture::Texture;
 use crate::uniform::{ImageAdjustments, TransformUniform};
@@ -22,13 +22,10 @@ pub struct TexturePipeline {
 
 impl TexturePipeline {
     pub fn new(ctx: &GpuContext) -> Self {
-        // Create shader module
-        let shader = ctx
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Texture Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/texture.wgsl").into()),
-            });
+        let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Texture Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/texture.wgsl").into()),
+        });
 
         // Create uniform buffers
         let transform_uniform = TransformUniform::new();
@@ -45,58 +42,18 @@ impl TexturePipeline {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Create bind group layouts
-        let uniform_bind_group_layout =
-            ctx.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("Uniform Bind Group Layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::VERTEX,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                    ],
-                });
+        // Create bind group layouts using builder
+        let uniform_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
+            .with_label("Uniform Bind Group Layout")
+            .add_uniform_buffer(0, wgpu::ShaderStages::VERTEX)
+            .add_uniform_buffer(1, wgpu::ShaderStages::FRAGMENT)
+            .build();
 
-        let texture_bind_group_layout =
-            ctx.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("Texture Bind Group Layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                multisampled: false,
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                    ],
-                });
+        let texture_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
+            .with_label("Texture Bind Group Layout")
+            .add_texture_2d(0, wgpu::ShaderStages::FRAGMENT)
+            .add_sampler(1, wgpu::ShaderStages::FRAGMENT)
+            .build();
 
         // Create uniform bind group
         let uniform_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -114,74 +71,22 @@ impl TexturePipeline {
             ],
         });
 
-        // Create pipeline layout
-        let pipeline_layout = ctx
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Texture Pipeline Layout"),
-                bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        // Create render pipeline
-        let render_pipeline = ctx
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Texture Render Pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[Vertex::desc()],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: ctx.surface_config.format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
+        // Create render pipeline using builder
+        let render_pipeline = PipelineBuilder::new(&ctx.device, ctx.surface_config.format)
+            .with_label("Texture Render Pipeline")
+            .with_shader(&shader, "vs_main", "fs_main")
+            .with_vertex_buffer(Vertex::desc())
+            .with_bind_group_layouts(&[&uniform_bind_group_layout, &texture_bind_group_layout])
+            .with_blend_state(wgpu::BlendState::REPLACE)
+            .with_cull_mode(Some(wgpu::Face::Back))
+            .build();
 
         // Create fullscreen quad vertices
         let vertices = [
-            Vertex {
-                position: [-1.0, -1.0],
-                tex_coords: [0.0, 1.0],
-            }, // Bottom-left
-            Vertex {
-                position: [1.0, -1.0],
-                tex_coords: [1.0, 1.0],
-            }, // Bottom-right
-            Vertex {
-                position: [1.0, 1.0],
-                tex_coords: [1.0, 0.0],
-            }, // Top-right
-            Vertex {
-                position: [-1.0, 1.0],
-                tex_coords: [0.0, 0.0],
-            }, // Top-left
+            Vertex { position: [-1.0, -1.0], tex_coords: [0.0, 1.0] }, // Bottom-left
+            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },  // Bottom-right
+            Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] },   // Top-right
+            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },  // Top-left
         ];
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];

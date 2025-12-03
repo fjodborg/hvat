@@ -2,9 +2,11 @@
 //!
 //! This module provides common traits and implementations for GPU render pipelines.
 
+pub mod builder;
 pub mod color;
 pub mod texture;
 
+pub use builder::{BindGroupLayoutBuilder, PipelineBuilder};
 pub use color::ColorPipeline;
 pub use texture::TexturePipeline;
 

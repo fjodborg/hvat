@@ -23,6 +23,57 @@ pub enum Event {
     KeyReleased { key: Key, modifiers: Modifiers },
 }
 
+/// Result of handling an event, indicating whether it was consumed.
+///
+/// This allows widgets to signal whether an event was handled and should
+/// stop propagating to other widgets, or if it should continue.
+#[derive(Debug, Clone)]
+pub enum EventResult<Message> {
+    /// Event was not handled, no message produced.
+    Ignored,
+    /// Event was handled but no message produced (stops propagation).
+    Consumed,
+    /// Event produced a message (stops propagation).
+    Message(Message),
+}
+
+impl<Message> EventResult<Message> {
+    /// Returns true if this result indicates the event was handled.
+    pub fn is_handled(&self) -> bool {
+        !matches!(self, EventResult::Ignored)
+    }
+
+    /// Extract the message if one was produced.
+    pub fn into_message(self) -> Option<Message> {
+        match self {
+            EventResult::Message(msg) => Some(msg),
+            _ => None,
+        }
+    }
+
+    /// Map the message type.
+    pub fn map<F, B>(self, f: F) -> EventResult<B>
+    where
+        F: FnOnce(Message) -> B,
+    {
+        match self {
+            EventResult::Ignored => EventResult::Ignored,
+            EventResult::Consumed => EventResult::Consumed,
+            EventResult::Message(msg) => EventResult::Message(f(msg)),
+        }
+    }
+}
+
+impl<Message> From<Option<Message>> for EventResult<Message> {
+    /// Convert from legacy Option<Message> format for backwards compatibility.
+    fn from(opt: Option<Message>) -> Self {
+        match opt {
+            Some(msg) => EventResult::Message(msg),
+            None => EventResult::Ignored,
+        }
+    }
+}
+
 /// Mouse buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {

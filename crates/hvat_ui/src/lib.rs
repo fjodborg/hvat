@@ -14,6 +14,7 @@ mod image;
 mod layout;
 mod length;
 mod renderer;
+mod text_metrics;
 mod widget;
 
 // Widget implementations
@@ -22,10 +23,11 @@ pub mod widgets;
 // Public API
 pub use application::{run, Application, Settings};
 pub use element::Element;
-pub use event::{Event, Key, Modifiers, MouseButton};
+pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
 pub use image::ImageHandle;
 pub use layout::{Layout, Limits, Point, Rectangle, Size};
 pub use length::Length;
 pub use renderer::{Color, Renderer};
 pub use hvat_gpu::ImageAdjustments;
 pub use widget::Widget;
+pub use text_metrics::{TextMetrics, measure_text, line_height};

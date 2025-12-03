@@ -2,6 +2,7 @@ use std::sync::Arc;
 use wgpu;
 use winit::window::Window;
 
+use crate::config::GpuConfig;
 use crate::error::Result;
 
 /// Check if WebGPU is supported in the browser
@@ -29,14 +30,20 @@ pub struct GpuContext {
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
+    pub config: GpuConfig,
 }
 
 impl GpuContext {
-    /// Initialize GPU context for a window
+    /// Initialize GPU context for a window with default configuration.
     ///
     /// This is async to support both native and WASM backends.
     /// On native, you can use `pollster::block_on()` to call this.
     pub async fn new(window: Arc<Window>) -> Result<Self> {
+        Self::with_config(window, GpuConfig::default()).await
+    }
+
+    /// Initialize GPU context for a window with custom configuration.
+    pub async fn with_config(window: Arc<Window>, config: GpuConfig) -> Result<Self> {
         #[cfg(target_arch = "wasm32")]
         {
             // Check if WebGPU is supported via navigator.gpu
@@ -45,7 +52,7 @@ impl GpuContext {
                 web_sys::console::log_1(&"⚠️  Attempting WebGPU initialization (experimental in wgpu 27)...".into());
 
                 // Try WebGPU first
-                match Self::new_with_backend(window.clone(), wgpu::Backends::BROWSER_WEBGPU).await {
+                match Self::new_with_backend(window.clone(), wgpu::Backends::BROWSER_WEBGPU, config.clone()).await {
                     Ok(ctx) => {
                         web_sys::console::log_1(&"✅ WebGPU initialization successful!".into());
                         return Ok(ctx);
@@ -61,18 +68,18 @@ impl GpuContext {
             }
 
             // Fall back to WebGL
-            Self::new_with_backend(window, wgpu::Backends::GL).await
+            Self::new_with_backend(window, wgpu::Backends::GL, config).await
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            Self::new_with_backend(window, wgpu::Backends::PRIMARY).await
+            Self::new_with_backend(window, wgpu::Backends::PRIMARY, config).await
         }
     }
 
     /// Initialize GPU context with a specific backend
     #[cfg(target_arch = "wasm32")]
-    async fn new_with_backend(window: Arc<Window>, backends: wgpu::Backends) -> Result<Self> {
+    async fn new_with_backend(window: Arc<Window>, backends: wgpu::Backends, config: GpuConfig) -> Result<Self> {
         web_sys::console::log_1(&format!("Initializing GPU with backend: {:?}", backends).into());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -84,7 +91,7 @@ impl GpuContext {
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
+                power_preference: config.power_preference,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
@@ -93,12 +100,12 @@ impl GpuContext {
         let info = adapter.get_info();
         web_sys::console::log_1(&format!("✓ GPU initialized with backend: {:?}", info.backend).into());
 
-        Self::finish_init(adapter, surface, window).await
+        Self::finish_init(adapter, surface, window, config).await
     }
 
     /// Initialize GPU context with a specific backend (native)
     #[cfg(not(target_arch = "wasm32"))]
-    async fn new_with_backend(window: Arc<Window>, backends: wgpu::Backends) -> Result<Self> {
+    async fn new_with_backend(window: Arc<Window>, backends: wgpu::Backends, config: GpuConfig) -> Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends,
             ..Default::default()
@@ -108,13 +115,13 @@ impl GpuContext {
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
+                power_preference: config.power_preference,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
             .await?;
 
-        Self::finish_init(adapter, surface, window).await
+        Self::finish_init(adapter, surface, window, config).await
     }
 
     /// Complete GPU context initialization with adapter and surface
@@ -122,6 +129,7 @@ impl GpuContext {
         adapter: wgpu::Adapter,
         surface: wgpu::Surface<'static>,
         window: Arc<Window>,
+        config: GpuConfig,
     ) -> Result<Self> {
 
         // Use adapter limits to ensure compatibility with WebGL
@@ -151,15 +159,22 @@ impl GpuContext {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
+        // Use present mode from config, falling back to Fifo if not supported
+        let present_mode = if surface_caps.present_modes.contains(&config.present_mode) {
+            config.present_mode
+        } else {
+            wgpu::PresentMode::Fifo // Always supported
+        };
+
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::Fifo, // VSync
+            present_mode,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
-            desired_maximum_frame_latency: 2,
+            desired_maximum_frame_latency: config.max_frame_latency,
         };
 
         surface.configure(&device, &surface_config);
@@ -169,6 +184,7 @@ impl GpuContext {
             queue,
             surface,
             surface_config,
+            config,
         })
     }
 

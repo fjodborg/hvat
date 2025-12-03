@@ -2,7 +2,7 @@
 
 use wgpu::util::DeviceExt;
 
-use super::Pipeline;
+use super::{Pipeline, PipelineBuilder};
 use crate::vertex::ColorVertex;
 
 /// Pipeline for rendering solid color rectangles and shapes.
@@ -12,55 +12,17 @@ pub struct ColorPipeline {
 
 impl ColorPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        // Load shader from file
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Color Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/color.wgsl").into()),
         });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Color Pipeline Layout"),
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        });
-
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Color Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[ColorVertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None, // No culling for 2D
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let render_pipeline = PipelineBuilder::new(device, format)
+            .with_label("Color Render Pipeline")
+            .with_shader(&shader, "vs_main", "fs_main")
+            .with_vertex_buffer(ColorVertex::desc())
+            .with_blend_state(wgpu::BlendState::ALPHA_BLENDING)
+            .build();
 
         Self { render_pipeline }
     }

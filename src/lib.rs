@@ -9,6 +9,10 @@ pub use image_cache::{ImageCache, IMAGE_EXTENSIONS, is_image_file};
 mod widget_state;
 pub use widget_state::{WidgetState, ImageViewState, SliderState, ScrollState};
 
+// Zoom-to-cursor mathematics (extracted for testability)
+mod zoom_math;
+pub use zoom_math::Transform;
+
 // HVAT application (shared between native and WASM)
 mod hvat_app;
 pub use hvat_app::HvatApp;

@@ -1,4 +1,4 @@
-use crate::{Color, Event, Layout, Limits, Point, Rectangle, Renderer, Widget};
+use crate::{Color, Event, Layout, Limits, Point, Rectangle, Renderer, Widget, TextMetrics};
 
 /// A text widget that displays a string.
 pub struct Text {
@@ -32,12 +32,14 @@ impl Text {
 
 impl<Message> Widget<Message> for Text {
     fn layout(&self, limits: &Limits) -> Layout {
-        // TODO: Proper text measurement
-        // For now, estimate based on character count and size
-        let estimated_width = (self.content.len() as f32 * self.size * 0.6).min(limits.max_width);
-        let estimated_height = self.size * 1.2;
+        // Use TextMetrics for proper measurement
+        let metrics = TextMetrics::new(self.size);
+        let (text_width, text_height) = metrics.measure(&self.content);
 
-        let size = limits.resolve(estimated_width, estimated_height);
+        let width = text_width.min(limits.max_width);
+        let height = text_height.max(metrics.line_height()); // At least one line
+
+        let size = limits.resolve(width, height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
 
         Layout::new(bounds)
