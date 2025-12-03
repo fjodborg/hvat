@@ -221,22 +221,23 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
     // Create event loop
     let event_loop = EventLoop::new().map_err(|e| format!("Failed to create event loop: {:?}", e))?;
 
-    // Create window with canvas
+    // Create window with canvas that fills the browser window
     let window = {
-        let mut builder = WindowBuilder::new()
-            .with_inner_size(winit::dpi::LogicalSize::new(
-                settings.window_size.0,
-                settings.window_size.1,
-            ))
-            .with_resizable(settings.resizable);
-
-        if let Some(ref title) = settings.window_title {
-            builder = builder.with_title(title.clone());
-        }
-
         let web_window = web_sys::window().ok_or("No global window exists")?;
         let document = web_window.document().ok_or("No document in window")?;
         let body = document.body().ok_or("No body in document")?;
+
+        // Get the actual browser window dimensions
+        let browser_width = web_window.inner_width()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(settings.window_size.0 as f64) as u32;
+        let browser_height = web_window.inner_height()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(settings.window_size.1 as f64) as u32;
+
+        log::info!("Browser window size: {}x{}", browser_width, browser_height);
 
         let canvas = document
             .create_element("canvas")
@@ -244,13 +245,31 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .map_err(|_| "Failed to convert to canvas")?;
 
-        canvas.set_width(settings.window_size.0);
-        canvas.set_height(settings.window_size.1);
+        // Set canvas to fill the browser window
+        canvas.set_width(browser_width);
+        canvas.set_height(browser_height);
+
+        // Apply CSS to ensure the canvas fills the viewport
+        canvas.style().set_property("position", "fixed").ok();
+        canvas.style().set_property("top", "0").ok();
+        canvas.style().set_property("left", "0").ok();
+        canvas.style().set_property("width", "100%").ok();
+        canvas.style().set_property("height", "100%").ok();
+
+        // Set canvas ID so we can find it later for resize
+        canvas.set_id("hvat-canvas");
 
         body.append_child(&canvas)
             .map_err(|_| "Failed to append canvas to body")?;
 
-        builder = builder.with_canvas(Some(canvas));
+        let mut builder = WindowBuilder::new()
+            .with_inner_size(winit::dpi::LogicalSize::new(browser_width, browser_height))
+            .with_resizable(settings.resizable)
+            .with_canvas(Some(canvas));
+
+        if let Some(ref title) = settings.window_title {
+            builder = builder.with_title(title.clone());
+        }
 
         Arc::new(
             builder
@@ -269,16 +288,16 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
     let app_state: Rc<RefCell<Option<ApplicationState<A>>>> = Rc::new(RefCell::new(None));
     let app_state_clone = Rc::clone(&app_state);
     let window_clone = Arc::clone(&window);
-    let window_size = settings.window_size;
 
     // Spawn async initialization
     wasm_bindgen_futures::spawn_local(async move {
-        match ApplicationState::new_async(app, window_clone).await {
+        match ApplicationState::new_async(app, window_clone.clone()).await {
             Ok(mut state) => {
-                // Force resize to configured size
-                state.renderer.resize(window_size.0, window_size.1);
+                // Get actual window size for initial resize
+                let size = window_clone.inner_size();
+                state.renderer.resize(size.width, size.height);
                 *app_state_clone.borrow_mut() = Some(state);
-                log::info!("WASM renderer initialized successfully");
+                log::info!("WASM renderer initialized successfully ({}x{})", size.width, size.height);
             }
             Err(e) => {
                 log::error!("Failed to initialize renderer: {}", e);
@@ -310,10 +329,51 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         elwt.exit();
                     }
                     WindowEvent::Resized(size) => {
+                        // Update the canvas pixel dimensions (not just CSS size)
+                        if let Some(web_window) = web_sys::window() {
+                            if let Some(document) = web_window.document() {
+                                if let Some(canvas) = document.get_element_by_id("hvat-canvas") {
+                                    if let Ok(canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
+                                        canvas.set_width(size.width);
+                                        canvas.set_height(size.height);
+                                        log::debug!("Canvas resized to {}x{}", size.width, size.height);
+                                    }
+                                }
+                            }
+                        }
                         app_state.renderer.resize(size.width, size.height);
                         window.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {
+                        // Check for browser window resize on each frame
+                        if let Some(web_window) = web_sys::window() {
+                            let new_width = web_window.inner_width()
+                                .ok()
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0) as u32;
+                            let new_height = web_window.inner_height()
+                                .ok()
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0) as u32;
+
+                            let current_size = window.inner_size();
+                            if new_width > 0 && new_height > 0 &&
+                               (new_width != current_size.width || new_height != current_size.height) {
+                                // Browser window was resized, update canvas
+                                if let Some(document) = web_window.document() {
+                                    if let Some(canvas) = document.get_element_by_id("hvat-canvas") {
+                                        if let Ok(canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
+                                            canvas.set_width(new_width);
+                                            canvas.set_height(new_height);
+                                            log::debug!("Browser resize detected: {}x{}", new_width, new_height);
+                                        }
+                                    }
+                                }
+                                app_state.renderer.resize(new_width, new_height);
+                                let _ = window.request_inner_size(winit::dpi::LogicalSize::new(new_width, new_height));
+                            }
+                        }
+
                         // Call tick for frame timing
                         if let Some(tick_msg) = app_state.app.tick() {
                             app_state.app.update(tick_msg);
