@@ -11,9 +11,13 @@ use crate::ui_constants::{
 use crate::views::helpers::tool_button;
 use crate::widget_state::WidgetState;
 use hvat_ui::widgets::{
-    button, column, container, pan_zoom_image, row, slider, text, Column, Element, Row, SliderId,
+    button, column, container, hyperspectral_image, row, slider, text, Column, Element, Row,
+    SliderId,
 };
-use hvat_ui::{Color, ImageAdjustments, ImageHandle, Length, Overlay, OverlayItem, OverlayShape};
+use hvat_ui::{
+    BandSelectionUniform, Color, HyperspectralImageHandle, ImageAdjustments, Length, Overlay,
+    OverlayItem, OverlayShape,
+};
 
 /// Build an overlay from annotations and drawing state.
 pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState) -> Overlay {
@@ -109,11 +113,14 @@ pub fn view_annotation_toolbar(tool: AnnotationTool, _text_color: Color) -> Row<
 ///
 /// Takes individual parameters rather than a struct to avoid lifetime issues
 /// when the returned Element outlives a local struct.
+///
+/// Uses GPU-based band compositing - band selection changes only update a
+/// uniform buffer, no CPU-side image regeneration needed.
 #[allow(clippy::too_many_arguments)]
 pub fn view_image_viewer<'a>(
     theme: &Theme,
     text_color: Color,
-    current_image: &'a ImageHandle,
+    hyperspectral_handle: &'a HyperspectralImageHandle,
     zoom: f32,
     pan_x: f32,
     pan_y: f32,
@@ -125,7 +132,7 @@ pub fn view_image_viewer<'a>(
     drawing_state: &'a DrawingState,
     annotations: &'a AnnotationStore,
     status_message: Option<&'a str>,
-    // Band selection (always shown)
+    // Band selection (always shown) - passed to GPU for compositing
     band_selection: &BandSelection,
     num_bands: usize,
 ) -> Column<'a, Message> {
@@ -140,8 +147,17 @@ pub fn view_image_viewer<'a>(
     // Build the annotation overlay
     let overlay = build_overlay(annotations, drawing_state);
 
-    // Create the pan/zoom image widget
-    let image_widget = pan_zoom_image(current_image.clone())
+    // Convert BandSelection to GPU uniform format
+    let band_uniform = BandSelectionUniform::new(
+        band_selection.red,
+        band_selection.green,
+        band_selection.blue,
+        num_bands,
+    );
+
+    // Create the GPU-accelerated hyperspectral image widget
+    // Band compositing happens on the GPU - instant band selection changes!
+    let image_widget = hyperspectral_image(hyperspectral_handle.clone(), band_uniform)
         .pan((pan_x, pan_y))
         .zoom(zoom)
         .dragging(widget_state.image.is_dragging)

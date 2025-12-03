@@ -70,3 +70,39 @@ impl Default for ImageAdjustments {
         Self::new()
     }
 }
+
+/// Band selection parameters for hyperspectral compositing.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct BandSelectionUniform {
+    /// Band index for red channel output.
+    pub red_band: u32,
+    /// Band index for green channel output.
+    pub green_band: u32,
+    /// Band index for blue channel output.
+    pub blue_band: u32,
+    /// Total number of bands (for validation in shader).
+    pub num_bands: u32,
+}
+
+impl BandSelectionUniform {
+    pub fn new(red: usize, green: usize, blue: usize, num_bands: usize) -> Self {
+        Self {
+            red_band: red as u32,
+            green_band: green as u32,
+            blue_band: blue as u32,
+            num_bands: num_bands as u32,
+        }
+    }
+
+    /// Default RGB selection (bands 0, 1, 2).
+    pub fn default_rgb(num_bands: usize) -> Self {
+        Self::new(0, 1, 2.min(num_bands.saturating_sub(1)), num_bands)
+    }
+}
+
+impl Default for BandSelectionUniform {
+    fn default() -> Self {
+        Self::new(0, 1, 2, 3)
+    }
+}

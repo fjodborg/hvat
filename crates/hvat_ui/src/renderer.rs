@@ -8,7 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use winit::window::Window;
 
-use hvat_gpu::{ColorPipeline, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform};
+use hvat_gpu::{
+    ColorPipeline, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform,
+    HyperspectralPipeline, HyperspectralGpuData, BandSelectionUniform,
+};
 use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, FontSystem, Metrics,
     Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
@@ -86,6 +89,15 @@ enum DrawCommand {
         rect: Rectangle,
         pan: (f32, f32),
         zoom: f32,
+        adjustments: ImageAdjustments,
+    },
+    /// Draw a hyperspectral image with GPU-based band compositing
+    DrawHyperspectralImage {
+        handle: crate::HyperspectralImageHandle,
+        rect: Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+        band_selection: BandSelectionUniform,
         adjustments: ImageAdjustments,
     },
     /// Push a clip rectangle (screen space)
@@ -192,11 +204,17 @@ impl RenderState {
     }
 }
 
+/// Cached hyperspectral GPU data (bind group is stored inside gpu_data)
+struct CachedHyperspectralData {
+    gpu_data: HyperspectralGpuData,
+}
+
 /// The renderer abstracts away GPU rendering details from widgets.
 pub struct Renderer {
     gpu_ctx: GpuContext,
     texture_pipeline: TexturePipeline,
     color_pipeline: ColorPipeline,
+    hyperspectral_pipeline: Option<HyperspectralPipeline>,
     // Glyphon text rendering
     font_system: FontSystem,
     swash_cache: SwashCache,
@@ -212,6 +230,8 @@ pub struct Renderer {
     state: RenderState,
     /// Cache for GPU textures (keyed by ImageHandle unique ID)
     texture_cache: HashMap<u64, (Texture, wgpu::BindGroup)>,
+    /// Cache for hyperspectral GPU data (keyed by HyperspectralImageHandle unique ID)
+    hyperspectral_cache: HashMap<u64, CachedHyperspectralData>,
 }
 
 impl Renderer {
@@ -265,10 +285,14 @@ impl Renderer {
             None,
         );
 
+        // Create hyperspectral pipeline
+        let hyperspectral_pipeline = Some(HyperspectralPipeline::new(&gpu_ctx));
+
         Ok(Self {
             gpu_ctx,
             texture_pipeline,
             color_pipeline,
+            hyperspectral_pipeline,
             font_system,
             swash_cache,
             text_cache,
@@ -280,6 +304,7 @@ impl Renderer {
             commands: Vec::new(),
             state: RenderState::new(),
             texture_cache: HashMap::new(),
+            hyperspectral_cache: HashMap::new(),
         })
     }
 
@@ -424,6 +449,68 @@ impl Renderer {
         // TODO: Implement if needed
     }
 
+    /// Draw a hyperspectral image with GPU-based band compositing.
+    ///
+    /// This is the main entry point for rendering hyperspectral images.
+    /// Band selection happens on the GPU, so changing bands only updates
+    /// a uniform buffer - no CPU-side image regeneration needed.
+    pub fn draw_hyperspectral_image(
+        &mut self,
+        handle: &crate::HyperspectralImageHandle,
+        rect: Rectangle,
+        band_selection: BandSelectionUniform,
+    ) {
+        self.draw_hyperspectral_image_with_adjustments(
+            handle,
+            rect,
+            (0.0, 0.0),
+            1.0,
+            band_selection,
+            ImageAdjustments::new(),
+        );
+    }
+
+    /// Draw a hyperspectral image with pan/zoom and band selection.
+    pub fn draw_hyperspectral_image_transformed(
+        &mut self,
+        handle: &crate::HyperspectralImageHandle,
+        rect: Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+        band_selection: BandSelectionUniform,
+    ) {
+        self.draw_hyperspectral_image_with_adjustments(
+            handle,
+            rect,
+            pan,
+            zoom,
+            band_selection,
+            ImageAdjustments::new(),
+        );
+    }
+
+    /// Draw a hyperspectral image with full control.
+    pub fn draw_hyperspectral_image_with_adjustments(
+        &mut self,
+        handle: &crate::HyperspectralImageHandle,
+        rect: Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+        band_selection: BandSelectionUniform,
+        adjustments: ImageAdjustments,
+    ) {
+        let screen_rect = self.state.to_screen_rect(rect);
+
+        self.emit_with_clip(DrawCommand::DrawHyperspectralImage {
+            handle: handle.clone(),
+            rect: screen_rect,
+            pan,
+            zoom,
+            band_selection,
+            adjustments,
+        });
+    }
+
     // =========================================================================
     // Clip and scroll API
     // =========================================================================
@@ -485,7 +572,8 @@ impl Renderer {
             let should_draw = match &cmd {
                 DrawCommand::FillRect { rect, .. } |
                 DrawCommand::StrokeRect { rect, .. } |
-                DrawCommand::DrawImage { rect, .. } => {
+                DrawCommand::DrawImage { rect, .. } |
+                DrawCommand::DrawHyperspectralImage { rect, .. } => {
                     rects_overlap(rect, &clip)
                 }
                 DrawCommand::DrawLine { x1, y1, x2, y2, width, .. } => {
@@ -615,20 +703,42 @@ impl Renderer {
 
     fn prepare_textures(&mut self) {
         for cmd in &self.commands {
-            if let DrawCommand::DrawImage { handle, .. } = cmd {
-                // Use the unique image ID as cache key instead of memory pointer.
-                // This ensures that new image data always gets a fresh GPU texture,
-                // even if the allocator reuses the same memory address.
-                let key = handle.id();
-                if !self.texture_cache.contains_key(&key) {
-                    match Texture::from_rgba8(&self.gpu_ctx, handle.data(), handle.width(), handle.height()) {
-                        Ok(texture) => {
-                            let bind_group = self.texture_pipeline.create_texture_bind_group(&self.gpu_ctx, &texture);
-                            self.texture_cache.insert(key, (texture, bind_group));
+            match cmd {
+                DrawCommand::DrawImage { handle, .. } => {
+                    // Use the unique image ID as cache key instead of memory pointer.
+                    // This ensures that new image data always gets a fresh GPU texture,
+                    // even if the allocator reuses the same memory address.
+                    let key = handle.id();
+                    if !self.texture_cache.contains_key(&key) {
+                        match Texture::from_rgba8(&self.gpu_ctx, handle.data(), handle.width(), handle.height()) {
+                            Ok(texture) => {
+                                let bind_group = self.texture_pipeline.create_texture_bind_group(&self.gpu_ctx, &texture);
+                                self.texture_cache.insert(key, (texture, bind_group));
+                            }
+                            Err(e) => log::error!("Failed to create texture: {:?}", e),
                         }
-                        Err(e) => log::error!("Failed to create texture: {:?}", e),
                     }
                 }
+                DrawCommand::DrawHyperspectralImage { handle, .. } => {
+                    // Prepare hyperspectral GPU data if not cached
+                    let key = handle.id();
+                    if !self.hyperspectral_cache.contains_key(&key) {
+                        if let Some(ref pipeline) = self.hyperspectral_pipeline {
+                            // Upload band data to GPU (the bind group is created internally)
+                            let gpu_data = HyperspectralGpuData::from_bands(
+                                &self.gpu_ctx,
+                                handle.bands(),
+                                handle.width(),
+                                handle.height(),
+                                pipeline.band_texture_layout(),
+                            );
+                            self.hyperspectral_cache.insert(key, CachedHyperspectralData {
+                                gpu_data,
+                            });
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -687,6 +797,52 @@ impl Renderer {
                         pass.draw_indexed(0..self.texture_pipeline.num_indices, 0, 0..1);
                     }
                 }
+                DrawCommand::DrawHyperspectralImage { handle, rect, pan, zoom, band_selection, adjustments } => {
+                    let cache_key = handle.id();
+                    if let (Some(cached), Some(ref pipeline)) = (
+                        self.hyperspectral_cache.get(&cache_key),
+                        &self.hyperspectral_pipeline,
+                    ) {
+                        // Calculate transform
+                        let transform = self.calculate_hyperspectral_transform(handle, rect, *pan, *zoom);
+                        pipeline.update_transform(&self.gpu_ctx, transform);
+                        pipeline.update_adjustments(&self.gpu_ctx, *adjustments);
+                        pipeline.update_band_selection(&self.gpu_ctx, *band_selection);
+
+                        // Render
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("Hyperspectral Image Pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                        });
+
+                        // Set scissor
+                        if let Some(clip) = clip_stack.last() {
+                            if let Some((x, y, w, h)) = self.clip_to_scissor(clip) {
+                                pass.set_scissor_rect(x, y, w, h);
+                            }
+                        } else {
+                            pass.set_scissor_rect(0, 0, self.width, self.height);
+                        }
+
+                        pass.set_pipeline(&pipeline.render_pipeline);
+                        pass.set_bind_group(0, &pipeline.uniform_bind_group, &[]);
+                        pass.set_bind_group(1, &cached.gpu_data.bind_group, &[]);
+                        pass.set_vertex_buffer(0, pipeline.vertex_buffer.slice(..));
+                        pass.set_index_buffer(pipeline.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        pass.draw_indexed(0..pipeline.num_indices, 0, 0..1);
+                    }
+                }
                 _ => {}
             }
         }
@@ -716,6 +872,48 @@ impl Renderer {
             // Image is taller than rect - fit to height
             let sy = ndc_h / 2.0;
             // Adjust X scale to preserve aspect ratio, accounting for window stretch
+            let sx = sy * img_aspect / window_aspect;
+            (sx, sy)
+        };
+
+        let scale_x = scale_x * zoom;
+        let scale_y = scale_y * zoom;
+
+        let pan_ndc_x = (pan.0 / self.width as f32) * 2.0;
+        let pan_ndc_y = -(pan.1 / self.height as f32) * 2.0;
+
+        let center_x = ndc_x + ndc_w / 2.0 + pan_ndc_x;
+        let center_y = ndc_y - ndc_h / 2.0 + pan_ndc_y;
+
+        TransformUniform {
+            matrix: [
+                [scale_x, 0.0, 0.0, 0.0],
+                [0.0, scale_y, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [center_x, center_y, 0.0, 1.0],
+            ],
+        }
+    }
+
+    fn calculate_hyperspectral_transform(&self, handle: &crate::HyperspectralImageHandle, rect: &Rectangle, pan: (f32, f32), zoom: f32) -> TransformUniform {
+        // Convert rect position to NDC (Normalized Device Coordinates)
+        let ndc_x = (rect.x / self.width as f32) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (rect.y / self.height as f32) * 2.0;
+        let ndc_w = (rect.width / self.width as f32) * 2.0;
+        let ndc_h = (rect.height / self.height as f32) * 2.0;
+
+        // Calculate aspect ratios
+        let img_aspect = handle.width() as f32 / handle.height() as f32;
+        let rect_aspect = rect.width / rect.height;
+        let window_aspect = self.width as f32 / self.height as f32;
+
+        // Calculate scale to fit image in rect while preserving aspect ratio
+        let (scale_x, scale_y) = if img_aspect > rect_aspect {
+            let sx = ndc_w / 2.0;
+            let sy = sx / img_aspect * window_aspect;
+            (sx, sy)
+        } else {
+            let sy = ndc_h / 2.0;
             let sx = sy * img_aspect / window_aspect;
             (sx, sy)
         };

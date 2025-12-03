@@ -7,7 +7,7 @@
 //! - RGB composite generation from arbitrary band combinations
 //! - Band selection state management
 
-use hvat_ui::ImageHandle;
+use hvat_ui::{ImageHandle, HyperspectralImageHandle};
 
 /// A hyperspectral image with multiple spectral bands.
 #[derive(Clone)]
@@ -87,6 +87,18 @@ impl HyperspectralImage {
     /// Get the label for a specific band.
     pub fn band_label(&self, index: usize) -> Option<&str> {
         self.band_labels.get(index).map(|s| s.as_str())
+    }
+
+    /// Get a reference to all band data for GPU upload.
+    pub fn bands(&self) -> &[Vec<f32>] {
+        &self.bands
+    }
+
+    /// Create a HyperspectralImageHandle for GPU-based rendering.
+    /// This uploads band data to the GPU once, then band selection changes
+    /// only require updating a uniform buffer (instant).
+    pub fn to_gpu_handle(&self) -> HyperspectralImageHandle {
+        HyperspectralImageHandle::from_bands(self.bands.clone(), self.width, self.height)
     }
 
     /// Generate an RGB composite image from three bands.

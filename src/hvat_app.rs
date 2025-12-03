@@ -25,7 +25,7 @@ use crate::message::ImageLoadMessage;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_file::take_wasm_pending_files;
 use hvat_ui::widgets::{button, column, container, row, scrollable, text, Element, ScrollDirection};
-use hvat_ui::{Application, Color, ImageHandle};
+use hvat_ui::{Application, BandSelectionUniform, Color, HyperspectralImageHandle, ImageHandle};
 use std::collections::HashMap;
 use web_time::Instant;
 
@@ -55,13 +55,12 @@ pub struct HvatApp {
     // === Image data ===
     /// The raw hyperspectral/multi-band image data (source of truth)
     hyperspectral_image: HyperspectralImage,
-    /// The rendered composite image (generated from band selection)
+    /// GPU handle for the hyperspectral image (band data uploaded to GPU once)
+    hyperspectral_handle: HyperspectralImageHandle,
+    /// The rendered composite image (fallback for non-hyperspectral images)
     current_image: ImageHandle,
-    /// Current band selection for RGB composite (UI state, may be ahead of applied)
+    /// Current band selection for RGB composite
     band_selection: BandSelection,
-    /// The band selection that was actually applied to generate current_image
-    /// Used to detect when composite needs regeneration after missed drag end
-    applied_band_selection: BandSelection,
     /// Image cache for loading/preloading (unified native/WASM)
     image_cache: ImageCache,
     /// Current index in the loaded images list
@@ -82,14 +81,6 @@ pub struct HvatApp {
     frame_count: u32,
     last_fps_time: Instant,
     fps: f32,
-
-    // === Composite generation queue (size 1 per channel) ===
-    /// Pending red band index waiting to be processed (newest value overwrites old)
-    pending_red_band: Option<usize>,
-    /// Pending green band index waiting to be processed (newest value overwrites old)
-    pending_green_band: Option<usize>,
-    /// Pending blue band index waiting to be processed (newest value overwrites old)
-    pending_blue_band: Option<usize>,
 }
 
 impl Application for HvatApp {
@@ -98,15 +89,19 @@ impl Application for HvatApp {
     fn new() -> Self {
         // Create a test hyperspectral image (8 bands)
         log::info!("Creating 4096x4096 test hyperspectral image (8 bands)...");
-        let width= 4096;
+        let width = 4096;
         let height = 4096;
         let hyper_image = generate_test_hyperspectral(width, height, 8);
         let band_selection = BandSelection::default_rgb();
-        // Generate initial composite from default band selection
+
+        // Create GPU handle for hyperspectral rendering (band data uploaded once)
+        let hyperspectral_handle = hyper_image.to_gpu_handle();
+
+        // Create fallback composite for non-GPU path
         let current_image = hyper_image
             .to_rgb_composite(band_selection.red, band_selection.green, band_selection.blue)
             .expect("Failed to create initial composite");
-        log::info!("Test image created");
+        log::info!("Test image created (GPU-accelerated band compositing enabled)");
 
         Self {
             current_tab: Tab::Home,
@@ -121,10 +116,10 @@ impl Application for HvatApp {
             show_debug_info: false,
             theme: Theme::dark(),
             hyperspectral_image: hyper_image,
+            hyperspectral_handle,
             current_image,
             band_selection,
-            applied_band_selection: band_selection, // Initially in sync
-            image_cache: ImageCache::new(1), // Preload 1 image before and after
+            image_cache: ImageCache::new(1),
             current_image_index: 0,
             status_message: None,
             widget_state: WidgetState::new(),
@@ -133,9 +128,6 @@ impl Application for HvatApp {
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
-            pending_red_band: None,
-            pending_green_band: None,
-            pending_blue_band: None,
         }
     }
 
@@ -176,6 +168,7 @@ impl Application for HvatApp {
                     current_image_index: &mut self.current_image_index,
                     current_image: &mut self.current_image,
                     hyperspectral_image: &mut self.hyperspectral_image,
+                    hyperspectral_handle: &mut self.hyperspectral_handle,
                     band_selection: &mut self.band_selection,
                     status_message: &mut self.status_message,
                     zoom: &mut self.zoom,
@@ -205,37 +198,16 @@ impl Application for HvatApp {
             }
             Message::Band(msg) => {
                 let num_bands = self.hyperspectral_image.num_bands();
-                // Determine which channel changed (if any) before calling handler
-                let channel = match &msg {
-                    crate::message::BandMessage::SetRedBand(_)
-                    | crate::message::BandMessage::StartRedBand(_) => Some(0),
-                    crate::message::BandMessage::SetGreenBand(_)
-                    | crate::message::BandMessage::StartGreenBand(_) => Some(1),
-                    crate::message::BandMessage::SetBlueBand(_)
-                    | crate::message::BandMessage::StartBlueBand(_) => Some(2),
-                    _ => None,
-                };
-                let should_update = handle_band(
+                // With GPU-based compositing, band selection changes are instant
+                // (just updates a uniform buffer), so no need to queue or throttle
+                let _should_update = handle_band(
                     msg,
                     &mut self.band_selection,
                     num_bands,
                     &mut self.widget_state,
                 );
-                // Queue the specific channel for processing (overwrites any pending value for that channel)
-                // The actual composite generation happens in Tick when ready
-                if should_update {
-                    match channel {
-                        Some(0) => self.pending_red_band = Some(self.band_selection.red),
-                        Some(1) => self.pending_green_band = Some(self.band_selection.green),
-                        Some(2) => self.pending_blue_band = Some(self.band_selection.blue),
-                        _ => {
-                            // ResetBands: queue all channels
-                            self.pending_red_band = Some(self.band_selection.red);
-                            self.pending_green_band = Some(self.band_selection.green);
-                            self.pending_blue_band = Some(self.band_selection.blue);
-                        }
-                    }
-                }
+                // Band selection is passed to the GPU widget each frame,
+                // so changes are reflected immediately with no CPU work needed
             }
             Message::Tick => {
                 self.frame_count += 1;
@@ -245,30 +217,7 @@ impl Application for HvatApp {
                     self.frame_count = 0;
                     self.last_fps_time = Instant::now();
                 }
-
-                // Process pending band selections (per-channel single-slot queues)
-                // Merge all pending values at once, then regenerate composite if anything changed
-                let pending_r = self.pending_red_band.take();
-                let pending_g = self.pending_green_band.take();
-                let pending_b = self.pending_blue_band.take();
-
-                if pending_r.is_some() || pending_g.is_some() || pending_b.is_some() {
-                    // Apply any pending values to the band selection
-                    if let Some(r) = pending_r {
-                        self.band_selection.red = r;
-                    }
-                    if let Some(g) = pending_g {
-                        self.band_selection.green = g;
-                    }
-                    if let Some(b) = pending_b {
-                        self.band_selection.blue = b;
-                    }
-
-                    // Only regenerate if the merged selection differs from what's already applied
-                    if self.band_selection != self.applied_band_selection {
-                        self.update_hyperspectral_composite();
-                    }
-                }
+                // No composite generation needed - GPU handles band selection
             }
         }
     }
@@ -333,7 +282,7 @@ impl Application for HvatApp {
             Tab::ImageViewer => Element::new(view_image_viewer(
                 &self.theme,
                 text_color,
-                &self.current_image,
+                &self.hyperspectral_handle,
                 self.zoom,
                 self.pan_x,
                 self.pan_y,
@@ -397,29 +346,6 @@ impl HvatApp {
         self.annotations_map
             .get(&key)
             .unwrap_or_else(|| EMPTY.get_or_init(AnnotationStore::new))
-    }
-
-    /// Update the displayed image from current band selection.
-    fn update_hyperspectral_composite(&mut self) {
-        log::info!(
-            "🔄 Regenerating composite: R={}, G={}, B={} (num_bands={})",
-            self.band_selection.red,
-            self.band_selection.green,
-            self.band_selection.blue,
-            self.hyperspectral_image.num_bands()
-        );
-        if let Some(composite) = self.hyperspectral_image.to_rgb_composite(
-            self.band_selection.red,
-            self.band_selection.green,
-            self.band_selection.blue,
-        ) {
-            self.current_image = composite;
-            // Track what we actually applied so we can detect mismatches
-            self.applied_band_selection = self.band_selection;
-            log::info!("✅ Composite updated");
-        } else {
-            log::error!("❌ Failed to generate composite - invalid band indices");
-        }
     }
 
     /// Get the number of bands in the hyperspectral image.

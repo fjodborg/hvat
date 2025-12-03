@@ -13,7 +13,7 @@ use crate::message::{
 use crate::theme::Theme;
 use crate::ui_constants::{threshold, zoom as zoom_const};
 use crate::widget_state::WidgetState;
-use hvat_ui::ImageHandle;
+use hvat_ui::{HyperspectralImageHandle, ImageHandle};
 use std::collections::HashMap;
 
 #[cfg(target_arch = "wasm32")]
@@ -218,6 +218,7 @@ pub struct ImageLoadState<'a> {
     pub current_image_index: &'a mut usize,
     pub current_image: &'a mut ImageHandle,
     pub hyperspectral_image: &'a mut HyperspectralImage,
+    pub hyperspectral_handle: &'a mut HyperspectralImageHandle,
     pub band_selection: &'a mut BandSelection,
     pub status_message: &'a mut Option<String>,
     pub zoom: &'a mut f32,
@@ -310,7 +311,7 @@ fn load_current_image(state: &mut ImageLoadState) {
         // Reset band selection to default (0, 1, 2 for RGB)
         *state.band_selection = BandSelection::default_rgb();
 
-        // Generate the composite image
+        // Generate the composite image (fallback for non-GPU path)
         if let Some(composite) = hyper.to_rgb_composite(
             state.band_selection.red,
             state.band_selection.green,
@@ -318,6 +319,9 @@ fn load_current_image(state: &mut ImageLoadState) {
         ) {
             *state.current_image = composite;
         }
+
+        // Create GPU handle for hyperspectral rendering
+        *state.hyperspectral_handle = hyper.to_gpu_handle();
 
         // Store the hyperspectral data
         *state.hyperspectral_image = hyper;

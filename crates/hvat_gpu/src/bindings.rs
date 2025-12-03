@@ -43,6 +43,27 @@ pub mod color {
     pub const UNIFORM_TRANSFORM_BINDING: u32 = 0;
 }
 
+/// Binding constants for the hyperspectral pipeline.
+pub mod hyperspectral {
+    /// Group 0: Uniforms
+    pub const UNIFORM_GROUP: u32 = 0;
+    /// Binding 0 in group 0: Transform matrix uniform
+    pub const UNIFORM_TRANSFORM_BINDING: u32 = 0;
+    /// Binding 1 in group 0: Image adjustments uniform
+    pub const UNIFORM_ADJUSTMENTS_BINDING: u32 = 1;
+    /// Binding 2 in group 0: Band selection uniform
+    pub const UNIFORM_BAND_SELECTION_BINDING: u32 = 2;
+
+    /// Group 1: Band textures
+    pub const BAND_TEXTURE_GROUP: u32 = 1;
+    /// Binding 0 in group 1: Band texture 0 (bands 0-3)
+    pub const BAND_TEXTURE_0_BINDING: u32 = 0;
+    /// Binding 1 in group 1: Band texture 1 (bands 4-7)
+    pub const BAND_TEXTURE_1_BINDING: u32 = 1;
+    /// Binding 2 in group 1: Band sampler
+    pub const BAND_SAMPLER_BINDING: u32 = 2;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
