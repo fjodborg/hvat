@@ -24,7 +24,7 @@ use crate::widget_state::WidgetState;
 use crate::message::ImageLoadMessage;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_file::take_wasm_pending_files;
-use hvat_ui::widgets::{button, column, container, row, scrollable, text, Element};
+use hvat_ui::widgets::{button, column, container, row, scrollable, text, Element, ScrollDirection};
 use hvat_ui::{Application, Color, ImageHandle};
 use std::collections::HashMap;
 use web_time::Instant;
@@ -82,6 +82,14 @@ pub struct HvatApp {
     frame_count: u32,
     last_fps_time: Instant,
     fps: f32,
+
+    // === Composite generation queue (size 1 per channel) ===
+    /// Pending red band index waiting to be processed (newest value overwrites old)
+    pending_red_band: Option<usize>,
+    /// Pending green band index waiting to be processed (newest value overwrites old)
+    pending_green_band: Option<usize>,
+    /// Pending blue band index waiting to be processed (newest value overwrites old)
+    pending_blue_band: Option<usize>,
 }
 
 impl Application for HvatApp {
@@ -89,8 +97,10 @@ impl Application for HvatApp {
 
     fn new() -> Self {
         // Create a test hyperspectral image (8 bands)
-        log::info!("Creating 512x512 test hyperspectral image (8 bands)...");
-        let hyper_image = generate_test_hyperspectral(512, 512, 8);
+        log::info!("Creating 4096x4096 test hyperspectral image (8 bands)...");
+        let width= 4096;
+        let height = 4096;
+        let hyper_image = generate_test_hyperspectral(width, height, 8);
         let band_selection = BandSelection::default_rgb();
         // Generate initial composite from default band selection
         let current_image = hyper_image
@@ -123,6 +133,9 @@ impl Application for HvatApp {
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
+            pending_red_band: None,
+            pending_green_band: None,
+            pending_blue_band: None,
         }
     }
 
@@ -192,15 +205,36 @@ impl Application for HvatApp {
             }
             Message::Band(msg) => {
                 let num_bands = self.hyperspectral_image.num_bands();
+                // Determine which channel changed (if any) before calling handler
+                let channel = match &msg {
+                    crate::message::BandMessage::SetRedBand(_)
+                    | crate::message::BandMessage::StartRedBand(_) => Some(0),
+                    crate::message::BandMessage::SetGreenBand(_)
+                    | crate::message::BandMessage::StartGreenBand(_) => Some(1),
+                    crate::message::BandMessage::SetBlueBand(_)
+                    | crate::message::BandMessage::StartBlueBand(_) => Some(2),
+                    _ => None,
+                };
                 let should_update = handle_band(
                     msg,
                     &mut self.band_selection,
                     num_bands,
                     &mut self.widget_state,
                 );
-                // Only regenerate composite on drag end or reset (not during drag)
+                // Queue the specific channel for processing (overwrites any pending value for that channel)
+                // The actual composite generation happens in Tick when ready
                 if should_update {
-                    self.update_hyperspectral_composite();
+                    match channel {
+                        Some(0) => self.pending_red_band = Some(self.band_selection.red),
+                        Some(1) => self.pending_green_band = Some(self.band_selection.green),
+                        Some(2) => self.pending_blue_band = Some(self.band_selection.blue),
+                        _ => {
+                            // ResetBands: queue all channels
+                            self.pending_red_band = Some(self.band_selection.red);
+                            self.pending_green_band = Some(self.band_selection.green);
+                            self.pending_blue_band = Some(self.band_selection.blue);
+                        }
+                    }
                 }
             }
             Message::Tick => {
@@ -212,17 +246,28 @@ impl Application for HvatApp {
                     self.last_fps_time = Instant::now();
                 }
 
-                // Safety check: if band selection differs from applied AND we're not dragging,
-                // regenerate the composite. This catches cases where drag end was missed.
-                if self.band_selection != self.applied_band_selection
-                    && self.widget_state.slider.active_slider.is_none()
-                {
-                    log::warn!(
-                        "Band mismatch detected (UI: {:?}, Applied: {:?}) - regenerating",
-                        self.band_selection,
-                        self.applied_band_selection
-                    );
-                    self.update_hyperspectral_composite();
+                // Process pending band selections (per-channel single-slot queues)
+                // Merge all pending values at once, then regenerate composite if anything changed
+                let pending_r = self.pending_red_band.take();
+                let pending_g = self.pending_green_band.take();
+                let pending_b = self.pending_blue_band.take();
+
+                if pending_r.is_some() || pending_g.is_some() || pending_b.is_some() {
+                    // Apply any pending values to the band selection
+                    if let Some(r) = pending_r {
+                        self.band_selection.red = r;
+                    }
+                    if let Some(g) = pending_g {
+                        self.band_selection.green = g;
+                    }
+                    if let Some(b) = pending_b {
+                        self.band_selection.blue = b;
+                    }
+
+                    // Only regenerate if the merged selection differs from what's already applied
+                    if self.band_selection != self.applied_band_selection {
+                        self.update_hyperspectral_composite();
+                    }
                 }
             }
         }
@@ -310,13 +355,19 @@ impl Application for HvatApp {
             )),
         };
 
-        // Wrap content in scrollable - use Fill to expand with window
+        // Wrap content in scrollable - supports both vertical and horizontal scrolling
         let scrollable_content = scrollable(content)
-            .scroll_offset(self.widget_state.scroll.offset)
-            .dragging(self.widget_state.scroll.is_dragging)
-            .on_scroll(Message::scroll)
-            .on_drag_start(Message::scrollbar_drag_start)
-            .on_drag_end(Message::scrollbar_drag_end);
+            .direction(ScrollDirection::Both)
+            .scroll_offset_y(self.widget_state.scroll.offset_y)
+            .scroll_offset_x(self.widget_state.scroll.offset_x)
+            .dragging_y(self.widget_state.scroll.is_dragging_y)
+            .dragging_x(self.widget_state.scroll.is_dragging_x)
+            .on_scroll_y(Message::scroll_y)
+            .on_scroll_x(Message::scroll_x)
+            .on_drag_start_y(Message::scrollbar_drag_start_y)
+            .on_drag_end_y(Message::scrollbar_drag_end_y)
+            .on_drag_start_x(Message::scrollbar_drag_start_x)
+            .on_drag_end_x(Message::scrollbar_drag_end_x);
 
         Element::new(
             container(Element::new(

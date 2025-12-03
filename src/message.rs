@@ -87,10 +87,14 @@ pub enum ImageLoadMessage {
 /// Messages for UI state (scrolling, debug, theme).
 #[derive(Debug, Clone)]
 pub enum UIMessage {
-    // Scrolling
-    Scroll(f32),
-    ScrollbarDragStart,
-    ScrollbarDragEnd,
+    // Vertical scrolling
+    ScrollY(f32),
+    ScrollbarDragStartY,
+    ScrollbarDragEndY,
+    // Horizontal scrolling
+    ScrollX(f32),
+    ScrollbarDragStartX,
+    ScrollbarDragEndX,
     // Settings
     ToggleDebugInfo,
     SetTheme(Theme),
@@ -241,15 +245,25 @@ impl Message {
         Message::ImageLoad(ImageLoadMessage::PreviousImage)
     }
 
-    // UI shortcuts
-    pub fn scroll(offset: f32) -> Self {
-        Message::UI(UIMessage::Scroll(offset))
+    // UI shortcuts - vertical scrolling
+    pub fn scroll_y(offset: f32) -> Self {
+        Message::UI(UIMessage::ScrollY(offset))
     }
-    pub fn scrollbar_drag_start() -> Self {
-        Message::UI(UIMessage::ScrollbarDragStart)
+    pub fn scrollbar_drag_start_y() -> Self {
+        Message::UI(UIMessage::ScrollbarDragStartY)
     }
-    pub fn scrollbar_drag_end() -> Self {
-        Message::UI(UIMessage::ScrollbarDragEnd)
+    pub fn scrollbar_drag_end_y() -> Self {
+        Message::UI(UIMessage::ScrollbarDragEndY)
+    }
+    // UI shortcuts - horizontal scrolling
+    pub fn scroll_x(offset: f32) -> Self {
+        Message::UI(UIMessage::ScrollX(offset))
+    }
+    pub fn scrollbar_drag_start_x() -> Self {
+        Message::UI(UIMessage::ScrollbarDragStartX)
+    }
+    pub fn scrollbar_drag_end_x() -> Self {
+        Message::UI(UIMessage::ScrollbarDragEndX)
     }
     pub fn toggle_debug_info() -> Self {
         Message::UI(UIMessage::ToggleDebugInfo)

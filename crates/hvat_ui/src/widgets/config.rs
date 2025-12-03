@@ -4,6 +4,30 @@
 
 use crate::Color;
 
+/// Scroll direction for scrollable containers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollDirection {
+    /// Only vertical scrolling (default)
+    #[default]
+    Vertical,
+    /// Only horizontal scrolling
+    Horizontal,
+    /// Both vertical and horizontal scrolling
+    Both,
+}
+
+impl ScrollDirection {
+    /// Check if vertical scrolling is enabled.
+    pub fn has_vertical(&self) -> bool {
+        matches!(self, ScrollDirection::Vertical | ScrollDirection::Both)
+    }
+
+    /// Check if horizontal scrolling is enabled.
+    pub fn has_horizontal(&self) -> bool {
+        matches!(self, ScrollDirection::Horizontal | ScrollDirection::Both)
+    }
+}
+
 /// Configuration for slider widget appearance.
 #[derive(Debug, Clone)]
 pub struct SliderConfig {

@@ -1,38 +1,51 @@
-//! Scrollable container widget that allows vertical scrolling via scrollbar.
+//! Scrollable container widget that allows vertical and/or horizontal scrolling via scrollbars.
 //!
 //! This widget consists of:
 //! - A content viewport with clipping
-//! - A scrollbar with track and thumb
+//! - Vertical and/or horizontal scrollbars with track and thumb
 //! - Coordinate transformation for events
 
 use crate::{Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
-use super::config::ScrollbarConfig;
+use super::config::{ScrollbarConfig, ScrollDirection};
 
 /// Default scrollbar configuration (used if not overridden).
 fn default_scrollbar_config() -> ScrollbarConfig {
     ScrollbarConfig::default()
 }
 
-/// A scrollable container that wraps a single child and allows vertical scrolling via scrollbar.
+/// A scrollable container that wraps a single child and allows scrolling via scrollbars.
+/// Supports vertical, horizontal, or both scroll directions.
 /// Mouse wheel events pass through to children (for zoom support).
 pub struct Scrollable<'a, Message> {
     child: Element<'a, Message>,
-    /// Current scroll offset (positive = scrolled down)
-    scroll_offset: f32,
+    /// Scroll direction (vertical, horizontal, or both)
+    direction: ScrollDirection,
+    /// Current vertical scroll offset (positive = scrolled down)
+    scroll_offset_y: f32,
+    /// Current horizontal scroll offset (positive = scrolled right)
+    scroll_offset_x: f32,
     /// Height of the viewport (set via builder)
     height: Option<f32>,
     /// Width of the viewport (set via builder)
     width: Option<f32>,
-    /// Whether the scrollbar is currently being dragged
-    is_dragging: bool,
+    /// Whether the vertical scrollbar is currently being dragged
+    is_dragging_y: bool,
+    /// Whether the horizontal scrollbar is currently being dragged
+    is_dragging_x: bool,
     /// Scrollbar appearance configuration
     scrollbar_config: ScrollbarConfig,
-    /// Callback when scroll offset changes
-    on_scroll: Option<Box<dyn Fn(f32) -> Message>>,
-    /// Callback when scrollbar drag starts
-    on_drag_start: Option<Box<dyn Fn() -> Message>>,
-    /// Callback when scrollbar drag ends
-    on_drag_end: Option<Box<dyn Fn() -> Message>>,
+    /// Callback when vertical scroll offset changes
+    on_scroll_y: Option<Box<dyn Fn(f32) -> Message>>,
+    /// Callback when horizontal scroll offset changes
+    on_scroll_x: Option<Box<dyn Fn(f32) -> Message>>,
+    /// Callback when vertical scrollbar drag starts
+    on_drag_start_y: Option<Box<dyn Fn() -> Message>>,
+    /// Callback when vertical scrollbar drag ends
+    on_drag_end_y: Option<Box<dyn Fn() -> Message>>,
+    /// Callback when horizontal scrollbar drag starts
+    on_drag_start_x: Option<Box<dyn Fn() -> Message>>,
+    /// Callback when horizontal scrollbar drag ends
+    on_drag_end_x: Option<Box<dyn Fn() -> Message>>,
 }
 
 impl<'a, Message> Scrollable<'a, Message> {
@@ -40,20 +53,38 @@ impl<'a, Message> Scrollable<'a, Message> {
     pub fn new(child: Element<'a, Message>) -> Self {
         Self {
             child,
-            scroll_offset: 0.0,
+            direction: ScrollDirection::Vertical,
+            scroll_offset_y: 0.0,
+            scroll_offset_x: 0.0,
             height: None,
             width: None,
-            is_dragging: false,
+            is_dragging_y: false,
+            is_dragging_x: false,
             scrollbar_config: default_scrollbar_config(),
-            on_scroll: None,
-            on_drag_start: None,
-            on_drag_end: None,
+            on_scroll_y: None,
+            on_scroll_x: None,
+            on_drag_start_y: None,
+            on_drag_end_y: None,
+            on_drag_start_x: None,
+            on_drag_end_x: None,
         }
     }
 
-    /// Set the scroll offset (from external state).
-    pub fn scroll_offset(mut self, offset: f32) -> Self {
-        self.scroll_offset = offset;
+    /// Set the scroll direction.
+    pub fn direction(mut self, direction: ScrollDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
+    /// Set the vertical scroll offset (from external state).
+    pub fn scroll_offset_y(mut self, offset: f32) -> Self {
+        self.scroll_offset_y = offset;
+        self
+    }
+
+    /// Set the horizontal scroll offset (from external state).
+    pub fn scroll_offset_x(mut self, offset: f32) -> Self {
+        self.scroll_offset_x = offset;
         self
     }
 
@@ -69,9 +100,15 @@ impl<'a, Message> Scrollable<'a, Message> {
         self
     }
 
-    /// Set whether scrollbar is being dragged (from external state).
-    pub fn dragging(mut self, is_dragging: bool) -> Self {
-        self.is_dragging = is_dragging;
+    /// Set whether vertical scrollbar is being dragged (from external state).
+    pub fn dragging_y(mut self, is_dragging: bool) -> Self {
+        self.is_dragging_y = is_dragging;
+        self
+    }
+
+    /// Set whether horizontal scrollbar is being dragged (from external state).
+    pub fn dragging_x(mut self, is_dragging: bool) -> Self {
+        self.is_dragging_x = is_dragging;
         self
     }
 
@@ -81,104 +118,222 @@ impl<'a, Message> Scrollable<'a, Message> {
         self
     }
 
-    /// Set the callback when scroll offset changes.
-    pub fn on_scroll<F>(mut self, f: F) -> Self
+    /// Set the callback when vertical scroll offset changes.
+    pub fn on_scroll_y<F>(mut self, f: F) -> Self
     where
         F: Fn(f32) -> Message + 'static,
     {
-        self.on_scroll = Some(Box::new(f));
+        self.on_scroll_y = Some(Box::new(f));
         self
     }
 
-    /// Set the callback when scrollbar drag starts.
-    pub fn on_drag_start<F>(mut self, f: F) -> Self
+    /// Set the callback when horizontal scroll offset changes.
+    pub fn on_scroll_x<F>(mut self, f: F) -> Self
     where
-        F: Fn() -> Message + 'static,
+        F: Fn(f32) -> Message + 'static,
     {
-        self.on_drag_start = Some(Box::new(f));
+        self.on_scroll_x = Some(Box::new(f));
         self
     }
 
-    /// Set the callback when scrollbar drag ends.
-    pub fn on_drag_end<F>(mut self, f: F) -> Self
+    /// Set the callback when vertical scrollbar drag starts.
+    pub fn on_drag_start_y<F>(mut self, f: F) -> Self
     where
         F: Fn() -> Message + 'static,
     {
-        self.on_drag_end = Some(Box::new(f));
+        self.on_drag_start_y = Some(Box::new(f));
+        self
+    }
+
+    /// Set the callback when vertical scrollbar drag ends.
+    pub fn on_drag_end_y<F>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Message + 'static,
+    {
+        self.on_drag_end_y = Some(Box::new(f));
+        self
+    }
+
+    /// Set the callback when horizontal scrollbar drag starts.
+    pub fn on_drag_start_x<F>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Message + 'static,
+    {
+        self.on_drag_start_x = Some(Box::new(f));
+        self
+    }
+
+    /// Set the callback when horizontal scrollbar drag ends.
+    pub fn on_drag_end_x<F>(mut self, f: F) -> Self
+    where
+        F: Fn() -> Message + 'static,
+    {
+        self.on_drag_end_x = Some(Box::new(f));
         self
     }
 
     // === Helper methods for scrollbar calculations ===
 
-    /// Get the total area reserved for the scrollbar.
+    /// Get the total area reserved for scrollbars.
     fn scrollbar_area(&self) -> f32 {
         self.scrollbar_config.total_area()
     }
 
-    /// Calculate thumb height based on viewport and content sizes.
+    /// Calculate vertical thumb height based on viewport and content sizes.
     fn thumb_height(&self, viewport_height: f32, content_height: f32) -> f32 {
         (viewport_height / content_height * viewport_height).max(self.scrollbar_config.min_thumb_height)
     }
 
-    /// Calculate thumb Y position based on scroll offset.
+    /// Calculate horizontal thumb width based on viewport and content sizes.
+    fn thumb_width(&self, viewport_width: f32, content_width: f32) -> f32 {
+        (viewport_width / content_width * viewport_width).max(self.scrollbar_config.min_thumb_height)
+    }
+
+    /// Calculate vertical thumb Y position based on scroll offset.
     fn thumb_y(&self, viewport_y: f32, viewport_height: f32, thumb_height: f32, max_scroll: f32) -> f32 {
         let scroll_ratio = if max_scroll > 0.0 {
-            self.scroll_offset / max_scroll
+            self.scroll_offset_y / max_scroll
         } else {
             0.0
         };
         viewport_y + scroll_ratio * (viewport_height - thumb_height)
     }
 
-    /// Calculate scroll offset from mouse Y position during drag.
+    /// Calculate horizontal thumb X position based on scroll offset.
+    fn thumb_x(&self, viewport_x: f32, viewport_width: f32, thumb_width: f32, max_scroll: f32) -> f32 {
+        let scroll_ratio = if max_scroll > 0.0 {
+            self.scroll_offset_x / max_scroll
+        } else {
+            0.0
+        };
+        viewport_x + scroll_ratio * (viewport_width - thumb_width)
+    }
+
+    /// Calculate vertical scroll offset from mouse Y position during drag.
     fn scroll_from_mouse_y(&self, mouse_y: f32, viewport_y: f32, viewport_height: f32, thumb_height: f32, max_scroll: f32) -> f32 {
         let track_range = viewport_height - thumb_height;
         let mouse_ratio = ((mouse_y - viewport_y - thumb_height / 2.0) / track_range).clamp(0.0, 1.0);
         (mouse_ratio * max_scroll).clamp(0.0, max_scroll)
     }
 
-    /// Get scrollbar X position.
+    /// Calculate horizontal scroll offset from mouse X position during drag.
+    fn scroll_from_mouse_x(&self, mouse_x: f32, viewport_x: f32, viewport_width: f32, thumb_width: f32, max_scroll: f32) -> f32 {
+        let track_range = viewport_width - thumb_width;
+        let mouse_ratio = ((mouse_x - viewport_x - thumb_width / 2.0) / track_range).clamp(0.0, 1.0);
+        (mouse_ratio * max_scroll).clamp(0.0, max_scroll)
+    }
+
+    /// Get vertical scrollbar X position (right side of viewport).
     fn scrollbar_x(&self, viewport_x: f32, viewport_width: f32) -> f32 {
         viewport_x + viewport_width - self.scrollbar_config.width - self.scrollbar_config.padding
     }
 
-    /// Create scrollbar hit bounds (slightly larger for easier clicking).
-    fn scrollbar_hit_bounds(&self, viewport: &Rectangle) -> Rectangle {
+    /// Get horizontal scrollbar Y position (bottom of viewport).
+    fn scrollbar_y(&self, viewport_y: f32, viewport_height: f32) -> f32 {
+        viewport_y + viewport_height - self.scrollbar_config.width - self.scrollbar_config.padding
+    }
+
+    /// Create vertical scrollbar hit bounds (slightly larger for easier clicking).
+    fn scrollbar_hit_bounds_y(&self, viewport: &Rectangle, has_h_scrollbar: bool) -> Rectangle {
         let x = self.scrollbar_x(viewport.x, viewport.width);
+        let height = if has_h_scrollbar {
+            viewport.height - self.scrollbar_area()
+        } else {
+            viewport.height
+        };
         Rectangle::new(
             x - 4.0,
             viewport.y,
             self.scrollbar_config.width + 8.0,
-            viewport.height,
+            height,
         )
     }
 
-    /// Draw the scrollbar (track and thumb).
-    fn draw_scrollbar(&self, renderer: &mut Renderer, viewport: &Rectangle, content_height: f32) {
+    /// Create horizontal scrollbar hit bounds (slightly larger for easier clicking).
+    fn scrollbar_hit_bounds_x(&self, viewport: &Rectangle, has_v_scrollbar: bool) -> Rectangle {
+        let y = self.scrollbar_y(viewport.y, viewport.height);
+        let width = if has_v_scrollbar {
+            viewport.width - self.scrollbar_area()
+        } else {
+            viewport.width
+        };
+        Rectangle::new(
+            viewport.x,
+            y - 4.0,
+            width,
+            self.scrollbar_config.width + 8.0,
+        )
+    }
+
+    /// Draw the vertical scrollbar (track and thumb).
+    fn draw_scrollbar_y(&self, renderer: &mut Renderer, viewport: &Rectangle, content_height: f32, has_h_scrollbar: bool) {
         let scrollbar_x = self.scrollbar_x(viewport.x, viewport.width);
         let config = &self.scrollbar_config;
+
+        // Track height excludes horizontal scrollbar area if present
+        let track_height = if has_h_scrollbar {
+            viewport.height - self.scrollbar_area()
+        } else {
+            viewport.height
+        };
 
         // Track background
         let track_bounds = Rectangle::new(
             scrollbar_x,
             viewport.y,
             config.width,
-            viewport.height,
+            track_height,
         );
         renderer.fill_rect(track_bounds, config.track_color);
 
         // Thumb
-        let thumb_height = self.thumb_height(viewport.height, content_height);
-        let max_scroll = content_height - viewport.height;
-        let thumb_y = self.thumb_y(viewport.y, viewport.height, thumb_height, max_scroll);
+        let thumb_height = self.thumb_height(track_height, content_height);
+        let max_scroll = content_height - track_height;
+        let thumb_y = self.thumb_y(viewport.y, track_height, thumb_height, max_scroll);
 
-        let thumb_color = if self.is_dragging {
+        let thumb_color = if self.is_dragging_y {
             config.thumb_active_color
         } else {
             config.thumb_color
         };
 
         let thumb_bounds = Rectangle::new(scrollbar_x, thumb_y, config.width, thumb_height);
+        renderer.fill_rect(thumb_bounds, thumb_color);
+    }
+
+    /// Draw the horizontal scrollbar (track and thumb).
+    fn draw_scrollbar_x(&self, renderer: &mut Renderer, viewport: &Rectangle, content_width: f32, has_v_scrollbar: bool) {
+        let scrollbar_y = self.scrollbar_y(viewport.y, viewport.height);
+        let config = &self.scrollbar_config;
+
+        // Track width excludes vertical scrollbar area if present
+        let track_width = if has_v_scrollbar {
+            viewport.width - self.scrollbar_area()
+        } else {
+            viewport.width
+        };
+
+        // Track background
+        let track_bounds = Rectangle::new(
+            viewport.x,
+            scrollbar_y,
+            track_width,
+            config.width,
+        );
+        renderer.fill_rect(track_bounds, config.track_color);
+
+        // Thumb
+        let thumb_width = self.thumb_width(track_width, content_width);
+        let max_scroll = content_width - track_width;
+        let thumb_x = self.thumb_x(viewport.x, track_width, thumb_width, max_scroll);
+
+        let thumb_color = if self.is_dragging_x {
+            config.thumb_active_color
+        } else {
+            config.thumb_color
+        };
+
+        let thumb_bounds = Rectangle::new(thumb_x, scrollbar_y, thumb_width, config.width);
         renderer.fill_rect(thumb_bounds, thumb_color);
     }
 }
@@ -191,7 +346,7 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         let viewport_height = self.height.unwrap_or(0.0);
         let viewport_width = self.width.unwrap_or(limits.max_width);
 
-        // Include scrollbar area in our width
+        // Include scrollbar area in our dimensions
         let bounds = Rectangle::new(0.0, 0.0, viewport_width, viewport_height);
         Layout::new(bounds)
     }
@@ -201,47 +356,77 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         let scrollbar_area = self.scrollbar_area();
 
         log::debug!(
-            "📜 Scrollable draw: bounds={{x:{:.1}, y:{:.1}, w:{:.1}, h:{:.1}}}, scroll_offset={:.1}",
-            bounds.x, bounds.y, bounds.width, bounds.height, self.scroll_offset
+            "📜 Scrollable draw: bounds={{x:{:.1}, y:{:.1}, w:{:.1}, h:{:.1}}}, scroll=({:.1}, {:.1}), dir={:?}",
+            bounds.x, bounds.y, bounds.width, bounds.height, self.scroll_offset_x, self.scroll_offset_y, self.direction
         );
 
-        // Determine if scrollbar is needed
-        let needs_scrollbar = {
-            let content_width = bounds.width - scrollbar_area;
-            let content_limits = Limits::with_range(0.0, content_width, 0.0, 100000.0);
+        // Determine which scrollbars are needed
+        let (needs_v_scrollbar, needs_h_scrollbar) = {
+            // First pass: check with no scrollbars
+            let content_limits = Limits::with_range(0.0, bounds.width, 0.0, 100000.0);
             let content_layout = self.child.widget().layout(&content_limits);
-            content_layout.size().height > bounds.height
+            let content_size = content_layout.size();
+
+            let needs_v = self.direction.has_vertical() && content_size.height > bounds.height;
+            let needs_h = self.direction.has_horizontal() && content_size.width > bounds.width;
+
+            // Second pass: if we need one scrollbar, check if we now need the other
+            if needs_v && !needs_h && self.direction.has_horizontal() {
+                let adjusted_width = bounds.width - scrollbar_area;
+                let content_limits = Limits::with_range(0.0, adjusted_width, 0.0, 100000.0);
+                let content_layout = self.child.widget().layout(&content_limits);
+                let needs_h_now = content_layout.size().width > adjusted_width;
+                (needs_v, needs_h_now)
+            } else if needs_h && !needs_v && self.direction.has_vertical() {
+                let adjusted_height = bounds.height - scrollbar_area;
+                let content_limits = Limits::with_range(0.0, bounds.width, 0.0, 100000.0);
+                let content_layout = self.child.widget().layout(&content_limits);
+                let needs_v_now = content_layout.size().height > adjusted_height;
+                (needs_v_now, needs_h)
+            } else {
+                (needs_v, needs_h)
+            }
         };
 
-        // Calculate content area width (exclude scrollbar area only if needed)
-        let content_width = if needs_scrollbar {
+        // Calculate content area (exclude scrollbar areas)
+        let content_width = if needs_v_scrollbar {
             bounds.width - scrollbar_area
         } else {
             bounds.width
         };
+        let content_height = if needs_h_scrollbar {
+            bounds.height - scrollbar_area
+        } else {
+            bounds.height
+        };
 
         // Get the content size
-        let content_limits = Limits::with_range(0.0, content_width, 0.0, 100000.0);
+        let content_limits = Limits::with_range(0.0, 100000.0, 0.0, 100000.0);
         let content_layout = self.child.widget().layout(&content_limits);
-        let content_height = content_layout.size().height;
+        let content_size = content_layout.size();
 
-        // Push clip and scroll offset
-        let clip_bounds = Rectangle::new(bounds.x, bounds.y, content_width, bounds.height);
+        // Push clip and scroll offsets
+        let clip_bounds = Rectangle::new(bounds.x, bounds.y, content_width, content_height);
         renderer.push_clip(clip_bounds);
-        renderer.push_scroll_offset(self.scroll_offset);
+        renderer.push_scroll_offset_y(self.scroll_offset_y);
+        renderer.push_scroll_offset_x(self.scroll_offset_x);
 
         // Draw child
-        let child_bounds = Rectangle::new(bounds.x, bounds.y, content_width, content_height);
+        let child_bounds = Rectangle::new(bounds.x, bounds.y, content_size.width, content_size.height);
         let child_layout = Layout::new(child_bounds);
         self.child.widget().draw(renderer, &child_layout);
 
-        // Pop scroll offset and clip
-        renderer.pop_scroll_offset();
+        // Pop scroll offsets and clip
+        renderer.pop_scroll_offset_x();
+        renderer.pop_scroll_offset_y();
         renderer.pop_clip();
 
-        // Draw scrollbar if needed
-        if needs_scrollbar {
-            self.draw_scrollbar(renderer, &bounds, content_height);
+        // Draw scrollbars if needed
+        if needs_v_scrollbar {
+            self.draw_scrollbar_y(renderer, &bounds, content_size.height, needs_h_scrollbar);
+        }
+        if needs_h_scrollbar {
+            self.draw_scrollbar_x(renderer, &bounds, content_size.width, needs_v_scrollbar);
         }
     }
 
@@ -249,84 +434,151 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         let bounds = layout.bounds();
         let scrollbar_area = self.scrollbar_area();
 
-        // Calculate content dimensions
-        let content_width = bounds.width - scrollbar_area;
-        let content_limits = Limits::with_range(0.0, content_width, 0.0, 100000.0);
+        // Calculate content dimensions and scrollbar needs
+        let content_limits = Limits::with_range(0.0, 100000.0, 0.0, 100000.0);
         let content_layout = self.child.widget().layout(&content_limits);
-        let content_height = content_layout.size().height;
+        let content_size = content_layout.size();
 
-        let scrollbar_hit_bounds = self.scrollbar_hit_bounds(&bounds);
-        let scrollbar_x = self.scrollbar_x(bounds.x, bounds.width);
-        let max_scroll = (content_height - bounds.height).max(0.0);
+        let needs_v_scrollbar = self.direction.has_vertical() && content_size.height > bounds.height;
+        let needs_h_scrollbar = self.direction.has_horizontal() && content_size.width > bounds.width;
+
+        let content_width = if needs_v_scrollbar { bounds.width - scrollbar_area } else { bounds.width };
+        let content_height = if needs_h_scrollbar { bounds.height - scrollbar_area } else { bounds.height };
+
+        let max_scroll_y = (content_size.height - content_height).max(0.0);
+        let max_scroll_x = (content_size.width - content_width).max(0.0);
+
+        let scrollbar_hit_y = self.scrollbar_hit_bounds_y(&bounds, needs_h_scrollbar);
+        let scrollbar_hit_x = self.scrollbar_hit_bounds_x(&bounds, needs_v_scrollbar);
 
         // Helper to create child layout for event handling
         let make_child_layout = || {
-            Layout::new(Rectangle::new(bounds.x, bounds.y, content_width, content_height))
+            Layout::new(Rectangle::new(bounds.x, bounds.y, content_size.width, content_size.height))
         };
 
         match event {
             Event::MousePressed { button: MouseButton::Left, position } => {
-                // Check if click is on scrollbar track
-                if scrollbar_hit_bounds.contains(*position) && content_height > bounds.height {
-                    let thumb_height = self.thumb_height(bounds.height, content_height);
-                    let thumb_y = self.thumb_y(bounds.y, bounds.height, thumb_height, max_scroll);
+                // Check vertical scrollbar
+                if needs_v_scrollbar && scrollbar_hit_y.contains(*position) {
+                    let track_height = if needs_h_scrollbar { bounds.height - scrollbar_area } else { bounds.height };
+                    let thumb_height = self.thumb_height(track_height, content_size.height);
+                    let thumb_y = self.thumb_y(bounds.y, track_height, thumb_height, max_scroll_y);
                     let thumb_end_y = thumb_y + thumb_height;
                     let on_thumb = position.y >= thumb_y && position.y <= thumb_end_y;
 
                     if on_thumb {
-                        log::debug!("📜 Scrollbar thumb grab at ({:.1}, {:.1})", position.x, position.y);
-                        if let Some(ref on_drag_start) = self.on_drag_start {
-                            return Some(on_drag_start());
+                        log::debug!("📜 Vertical scrollbar thumb grab");
+                        if let Some(ref on_drag_start_y) = self.on_drag_start_y {
+                            return Some(on_drag_start_y());
                         }
                     } else {
-                        let new_offset = self.scroll_from_mouse_y(position.y, bounds.y, bounds.height, thumb_height, max_scroll);
-                        log::debug!("📜 Scrollbar track click at ({:.1}, {:.1}), new_offset={:.1}", position.x, position.y, new_offset);
-                        if let Some(ref on_scroll) = self.on_scroll {
-                            return Some(on_scroll(new_offset));
+                        let new_offset = self.scroll_from_mouse_y(position.y, bounds.y, track_height, thumb_height, max_scroll_y);
+                        log::debug!("📜 Vertical scrollbar track click, offset={:.1}", new_offset);
+                        if let Some(ref on_scroll_y) = self.on_scroll_y {
+                            return Some(on_scroll_y(new_offset));
+                        }
+                    }
+                    return None;
+                }
+
+                // Check horizontal scrollbar
+                if needs_h_scrollbar && scrollbar_hit_x.contains(*position) {
+                    let track_width = if needs_v_scrollbar { bounds.width - scrollbar_area } else { bounds.width };
+                    let thumb_width = self.thumb_width(track_width, content_size.width);
+                    let thumb_x = self.thumb_x(bounds.x, track_width, thumb_width, max_scroll_x);
+                    let thumb_end_x = thumb_x + thumb_width;
+                    let on_thumb = position.x >= thumb_x && position.x <= thumb_end_x;
+
+                    if on_thumb {
+                        log::debug!("📜 Horizontal scrollbar thumb grab");
+                        if let Some(ref on_drag_start_x) = self.on_drag_start_x {
+                            return Some(on_drag_start_x());
+                        }
+                    } else {
+                        let new_offset = self.scroll_from_mouse_x(position.x, bounds.x, track_width, thumb_width, max_scroll_x);
+                        log::debug!("📜 Horizontal scrollbar track click, offset={:.1}", new_offset);
+                        if let Some(ref on_scroll_x) = self.on_scroll_x {
+                            return Some(on_scroll_x(new_offset));
                         }
                     }
                     return None;
                 }
 
                 // Pass to child (click is in content area)
-                if bounds.contains(*position) && position.x < scrollbar_x - 4.0 {
-                    let content_y = position.y + self.scroll_offset;
+                let scrollbar_x = self.scrollbar_x(bounds.x, bounds.width);
+                let scrollbar_y = self.scrollbar_y(bounds.y, bounds.height);
+                let in_content = bounds.contains(*position)
+                    && (!needs_v_scrollbar || position.x < scrollbar_x - 4.0)
+                    && (!needs_h_scrollbar || position.y < scrollbar_y - 4.0);
+
+                if in_content {
+                    let content_pos = Point::new(
+                        position.x + self.scroll_offset_x,
+                        position.y + self.scroll_offset_y,
+                    );
                     let transformed = Event::MousePressed {
                         button: MouseButton::Left,
-                        position: Point::new(position.x, content_y),
+                        position: content_pos,
                     };
                     return self.child.widget_mut().on_event(&transformed, &make_child_layout());
                 }
                 None
             }
             Event::MouseReleased { button: MouseButton::Left, position } => {
-                if self.is_dragging {
-                    log::debug!("📜 Scrollbar drag ended");
-                    if let Some(ref on_drag_end) = self.on_drag_end {
-                        return Some(on_drag_end());
+                // Handle drag end for vertical scrollbar
+                if self.is_dragging_y {
+                    log::debug!("📜 Vertical scrollbar drag ended");
+                    if let Some(ref on_drag_end_y) = self.on_drag_end_y {
+                        return Some(on_drag_end_y());
+                    }
+                }
+                // Handle drag end for horizontal scrollbar
+                if self.is_dragging_x {
+                    log::debug!("📜 Horizontal scrollbar drag ended");
+                    if let Some(ref on_drag_end_x) = self.on_drag_end_x {
+                        return Some(on_drag_end_x());
                     }
                 }
 
-                let content_y = position.y + self.scroll_offset;
+                let content_pos = Point::new(
+                    position.x + self.scroll_offset_x,
+                    position.y + self.scroll_offset_y,
+                );
                 let transformed = Event::MouseReleased {
                     button: MouseButton::Left,
-                    position: Point::new(position.x, content_y),
+                    position: content_pos,
                 };
                 self.child.widget_mut().on_event(&transformed, &make_child_layout())
             }
             Event::MouseMoved { position } => {
-                if self.is_dragging && content_height > bounds.height {
-                    let thumb_height = self.thumb_height(bounds.height, content_height);
-                    let new_offset = self.scroll_from_mouse_y(position.y, bounds.y, bounds.height, thumb_height, max_scroll);
-                    log::trace!("📜 Scrollbar drag: mouse_y={:.1}, offset={:.1}/{:.1}", position.y, new_offset, max_scroll);
-                    if let Some(ref on_scroll) = self.on_scroll {
-                        return Some(on_scroll(new_offset));
+                // Handle vertical scrollbar drag
+                if self.is_dragging_y && needs_v_scrollbar {
+                    let track_height = if needs_h_scrollbar { bounds.height - scrollbar_area } else { bounds.height };
+                    let thumb_height = self.thumb_height(track_height, content_size.height);
+                    let new_offset = self.scroll_from_mouse_y(position.y, bounds.y, track_height, thumb_height, max_scroll_y);
+                    log::trace!("📜 Vertical drag: offset={:.1}/{:.1}", new_offset, max_scroll_y);
+                    if let Some(ref on_scroll_y) = self.on_scroll_y {
+                        return Some(on_scroll_y(new_offset));
                     }
                 }
 
-                let content_y = position.y + self.scroll_offset;
+                // Handle horizontal scrollbar drag
+                if self.is_dragging_x && needs_h_scrollbar {
+                    let track_width = if needs_v_scrollbar { bounds.width - scrollbar_area } else { bounds.width };
+                    let thumb_width = self.thumb_width(track_width, content_size.width);
+                    let new_offset = self.scroll_from_mouse_x(position.x, bounds.x, track_width, thumb_width, max_scroll_x);
+                    log::trace!("📜 Horizontal drag: offset={:.1}/{:.1}", new_offset, max_scroll_x);
+                    if let Some(ref on_scroll_x) = self.on_scroll_x {
+                        return Some(on_scroll_x(new_offset));
+                    }
+                }
+
+                let content_pos = Point::new(
+                    position.x + self.scroll_offset_x,
+                    position.y + self.scroll_offset_y,
+                );
                 let transformed = Event::MouseMoved {
-                    position: Point::new(position.x, content_y),
+                    position: content_pos,
                 };
                 self.child.widget_mut().on_event(&transformed, &make_child_layout())
             }

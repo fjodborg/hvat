@@ -46,28 +46,19 @@ impl GpuContext {
     pub async fn with_config(window: Arc<Window>, config: GpuConfig) -> Result<Self> {
         #[cfg(target_arch = "wasm32")]
         {
-            // Check if WebGPU is supported via navigator.gpu
+            // NOTE: WebGPU is experimental and causes canvas context issues when fallback to WebGL
+            // is needed. The failed WebGPU surface creation can "taint" the canvas, making WebGL
+            // initialization fail with "canvas already in use". For stability, we use WebGL only.
+            //
+            // When WebGPU becomes stable in browsers, we can re-enable this:
+            // if is_webgpu_supported() { ... try WebGPU first ... }
+
             if is_webgpu_supported() {
-                web_sys::console::log_1(&"🔍 WebGPU detected via navigator.gpu".into());
-                web_sys::console::log_1(&"⚠️  Attempting WebGPU initialization (experimental in wgpu 27)...".into());
-
-                // Try WebGPU first
-                match Self::new_with_backend(window.clone(), wgpu::Backends::BROWSER_WEBGPU, config.clone()).await {
-                    Ok(ctx) => {
-                        web_sys::console::log_1(&"✅ WebGPU initialization successful!".into());
-                        return Ok(ctx);
-                    }
-                    Err(e) => {
-                        web_sys::console::log_1(&format!("❌ WebGPU initialization failed: {:?}", e).into());
-                        web_sys::console::log_1(&"🔄 Falling back to WebGL...".into());
-                    }
-                }
-            } else {
-                web_sys::console::log_1(&"ℹ️  WebGPU not available (navigator.gpu not found)".into());
-                web_sys::console::log_1(&"🔄 Using WebGL backend...".into());
+                web_sys::console::log_1(&"🔍 WebGPU detected but skipping (experimental, causes fallback issues)".into());
             }
+            web_sys::console::log_1(&"🔄 Using WebGL backend...".into());
 
-            // Fall back to WebGL
+            // Use WebGL directly for stability
             Self::new_with_backend(window, wgpu::Backends::GL, config).await
         }
 

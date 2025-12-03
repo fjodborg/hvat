@@ -2,9 +2,6 @@
 //!
 //! A GPU-accelerated desktop and web application for hyperspectral image annotation.
 
-// Shared application logic (legacy, being phased out)
-mod app;
-
 // ============================================================================
 // Core Modules
 // ============================================================================
@@ -89,12 +86,6 @@ mod wasm;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::*;
 
-// Native entry point
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use native::run;
 
 // ============================================================================
 // Public API

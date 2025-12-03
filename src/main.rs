@@ -8,6 +8,7 @@ fn main() {
     let settings = Settings {
         window_title: Some("HVAT - Hyperspectral Annotation Tool".to_string()),
         window_size: (1200, 800),
+        min_window_size: Some((600, 400)), // Minimum size to fit toolbar
         resizable: true,
         log_level: log::LevelFilter::Debug,
     };

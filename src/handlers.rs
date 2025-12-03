@@ -348,21 +348,37 @@ pub fn handle_ui(
     theme: &mut Theme,
 ) {
     match msg {
-        UIMessage::Scroll(offset) => {
+        UIMessage::ScrollY(offset) => {
             // Only update if scroll position actually changed
-            let current = widget_state.scroll.offset;
+            let current = widget_state.scroll.offset_y;
             if (current - offset).abs() > threshold::SCROLL_CHANGE {
-                widget_state.scroll.set_offset(offset);
-                log::debug!("📜 Scroll offset: {:.1}", offset);
+                widget_state.scroll.set_offset_y(offset);
+                log::debug!("📜 Scroll Y offset: {:.1}", offset);
             }
         }
-        UIMessage::ScrollbarDragStart => {
-            widget_state.scroll.start_drag();
-            log::debug!("📜 Scrollbar drag started");
+        UIMessage::ScrollbarDragStartY => {
+            widget_state.scroll.start_drag_y();
+            log::debug!("📜 Scrollbar Y drag started");
         }
-        UIMessage::ScrollbarDragEnd => {
-            widget_state.scroll.end_drag();
-            log::debug!("📜 Scrollbar drag ended");
+        UIMessage::ScrollbarDragEndY => {
+            widget_state.scroll.end_drag_y();
+            log::debug!("📜 Scrollbar Y drag ended");
+        }
+        UIMessage::ScrollX(offset) => {
+            // Only update if scroll position actually changed
+            let current = widget_state.scroll.offset_x;
+            if (current - offset).abs() > threshold::SCROLL_CHANGE {
+                widget_state.scroll.set_offset_x(offset);
+                log::debug!("📜 Scroll X offset: {:.1}", offset);
+            }
+        }
+        UIMessage::ScrollbarDragStartX => {
+            widget_state.scroll.start_drag_x();
+            log::debug!("📜 Scrollbar X drag started");
+        }
+        UIMessage::ScrollbarDragEndX => {
+            widget_state.scroll.end_drag_x();
+            log::debug!("📜 Scrollbar X drag ended");
         }
         UIMessage::ToggleDebugInfo => {
             *show_debug_info = !*show_debug_info;

@@ -78,10 +78,14 @@ impl SliderState {
 /// Transient state for scrollable containers.
 #[derive(Debug, Clone, Default)]
 pub struct ScrollState {
-    /// Current scroll offset
-    pub offset: f32,
-    /// Whether the scrollbar is being dragged
-    pub is_dragging: bool,
+    /// Current vertical scroll offset (positive = scrolled down)
+    pub offset_y: f32,
+    /// Current horizontal scroll offset (positive = scrolled right)
+    pub offset_x: f32,
+    /// Whether the vertical scrollbar is being dragged
+    pub is_dragging_y: bool,
+    /// Whether the horizontal scrollbar is being dragged
+    pub is_dragging_x: bool,
 }
 
 impl ScrollState {
@@ -89,19 +93,34 @@ impl ScrollState {
         Self::default()
     }
 
-    /// Set the scroll offset.
-    pub fn set_offset(&mut self, offset: f32) {
-        self.offset = offset;
+    /// Set the vertical scroll offset.
+    pub fn set_offset_y(&mut self, offset: f32) {
+        self.offset_y = offset;
     }
 
-    /// Start scrollbar drag.
-    pub fn start_drag(&mut self) {
-        self.is_dragging = true;
+    /// Set the horizontal scroll offset.
+    pub fn set_offset_x(&mut self, offset: f32) {
+        self.offset_x = offset;
     }
 
-    /// End scrollbar drag.
-    pub fn end_drag(&mut self) {
-        self.is_dragging = false;
+    /// Start vertical scrollbar drag.
+    pub fn start_drag_y(&mut self) {
+        self.is_dragging_y = true;
+    }
+
+    /// Start horizontal scrollbar drag.
+    pub fn start_drag_x(&mut self) {
+        self.is_dragging_x = true;
+    }
+
+    /// End vertical scrollbar drag.
+    pub fn end_drag_y(&mut self) {
+        self.is_dragging_y = false;
+    }
+
+    /// End horizontal scrollbar drag.
+    pub fn end_drag_x(&mut self) {
+        self.is_dragging_x = false;
     }
 }
 
@@ -176,16 +195,27 @@ mod tests {
     #[test]
     fn test_scroll_state() {
         let mut state = ScrollState::new();
-        assert_eq!(state.offset, 0.0);
-        assert!(!state.is_dragging);
+        assert_eq!(state.offset_y, 0.0);
+        assert_eq!(state.offset_x, 0.0);
+        assert!(!state.is_dragging_y);
+        assert!(!state.is_dragging_x);
 
-        state.set_offset(50.0);
-        assert_eq!(state.offset, 50.0);
+        state.set_offset_y(50.0);
+        assert_eq!(state.offset_y, 50.0);
 
-        state.start_drag();
-        assert!(state.is_dragging);
+        state.set_offset_x(30.0);
+        assert_eq!(state.offset_x, 30.0);
 
-        state.end_drag();
-        assert!(!state.is_dragging);
+        state.start_drag_y();
+        assert!(state.is_dragging_y);
+
+        state.start_drag_x();
+        assert!(state.is_dragging_x);
+
+        state.end_drag_y();
+        assert!(!state.is_dragging_y);
+
+        state.end_drag_x();
+        assert!(!state.is_dragging_x);
     }
 }

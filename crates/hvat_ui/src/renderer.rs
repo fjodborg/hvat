@@ -100,16 +100,19 @@ enum DrawCommand {
 struct RenderState {
     /// Current scroll Y offset (accumulated from nested scrollables)
     scroll_y: f32,
+    /// Current scroll X offset (accumulated from nested scrollables)
+    scroll_x: f32,
     /// Current clip rectangle in screen space (None = full viewport)
     clip: Option<Rectangle>,
     /// Stack of saved states for push/pop
-    stack: Vec<(f32, Option<Rectangle>)>,
+    stack: Vec<(f32, f32, Option<Rectangle>)>,
 }
 
 impl RenderState {
     fn new() -> Self {
         Self {
             scroll_y: 0.0,
+            scroll_x: 0.0,
             clip: None,
             stack: Vec::new(),
         }
@@ -117,36 +120,43 @@ impl RenderState {
 
     fn clear(&mut self) {
         self.scroll_y = 0.0;
+        self.scroll_x = 0.0;
         self.clip = None;
         self.stack.clear();
     }
 
-    /// Push current state and apply scroll offset
-    fn push_scroll(&mut self, offset: f32) {
-        self.stack.push((self.scroll_y, self.clip));
+    /// Push current state and apply vertical scroll offset
+    fn push_scroll_y(&mut self, offset: f32) {
+        self.stack.push((self.scroll_y, self.scroll_x, self.clip));
         self.scroll_y += offset;
+    }
+
+    /// Push current state and apply horizontal scroll offset
+    fn push_scroll_x(&mut self, offset: f32) {
+        self.stack.push((self.scroll_y, self.scroll_x, self.clip));
+        self.scroll_x += offset;
     }
 
     /// Push current state and apply clip (intersecting with current clip)
     fn push_clip(&mut self, clip_in_layout_space: Rectangle) {
-        self.stack.push((self.scroll_y, self.clip));
+        self.stack.push((self.scroll_y, self.scroll_x, self.clip));
 
-        // Transform clip from layout space to screen space using current scroll_y.
+        // Transform clip from layout space to screen space using current scroll offsets.
         // This is correct because:
         // - Scrollable calls push_clip BEFORE push_scroll, so its viewport clip uses
-        //   parent's scroll_y (or 0), keeping the viewport fixed on screen.
+        //   parent's scroll (or 0), keeping the viewport fixed on screen.
         // - Child widgets call push_clip AFTER scrollable's push_scroll, so their
         //   clips get transformed to match where the content actually renders.
         let screen_clip = Rectangle::new(
-            clip_in_layout_space.x,
-            clip_in_layout_space.y - self.scroll_y,  // Transform by current scroll
+            clip_in_layout_space.x - self.scroll_x,  // Transform by current horizontal scroll
+            clip_in_layout_space.y - self.scroll_y,  // Transform by current vertical scroll
             clip_in_layout_space.width,
             clip_in_layout_space.height,
         );
 
         log::debug!(
-            "push_clip: layout={:?} -> screen={:?}, scroll_y={}",
-            clip_in_layout_space, screen_clip, self.scroll_y
+            "push_clip: layout={:?} -> screen={:?}, scroll=({}, {})",
+            clip_in_layout_space, screen_clip, self.scroll_x, self.scroll_y
         );
 
         // Intersect with current clip
@@ -158,22 +168,23 @@ impl RenderState {
 
     /// Pop to previous state
     fn pop(&mut self) {
-        if let Some((scroll_y, clip)) = self.stack.pop() {
+        if let Some((scroll_y, scroll_x, clip)) = self.stack.pop() {
             self.scroll_y = scroll_y;
+            self.scroll_x = scroll_x;
             self.clip = clip;
         }
     }
 
     /// Transform a point from layout space to screen space
     fn to_screen_point(&self, x: f32, y: f32) -> (f32, f32) {
-        (x, y - self.scroll_y)
+        (x - self.scroll_x, y - self.scroll_y)
     }
 
     /// Transform a rectangle from layout space to screen space
     /// Clamps negative dimensions to 0
     fn to_screen_rect(&self, rect: Rectangle) -> Rectangle {
         Rectangle::new(
-            rect.x,
+            rect.x - self.scroll_x,
             rect.y - self.scroll_y,
             rect.width.max(0.0),
             rect.height.max(0.0),
@@ -433,19 +444,34 @@ impl Renderer {
         self.state.clip
     }
 
-    /// Push a scroll offset. All subsequent drawing will be offset by this amount.
-    pub fn push_scroll_offset(&mut self, offset: f32) {
-        self.state.push_scroll(offset);
+    /// Push a vertical scroll offset. All subsequent drawing will be offset by this amount.
+    pub fn push_scroll_offset_y(&mut self, offset: f32) {
+        self.state.push_scroll_y(offset);
     }
 
-    /// Pop the most recent scroll offset.
-    pub fn pop_scroll_offset(&mut self) {
+    /// Push a horizontal scroll offset. All subsequent drawing will be offset by this amount.
+    pub fn push_scroll_offset_x(&mut self, offset: f32) {
+        self.state.push_scroll_x(offset);
+    }
+
+    /// Pop the most recent vertical scroll offset.
+    pub fn pop_scroll_offset_y(&mut self) {
         self.state.pop();
     }
 
-    /// Get the total accumulated scroll offset.
-    pub fn total_scroll_offset(&self) -> f32 {
+    /// Pop the most recent horizontal scroll offset.
+    pub fn pop_scroll_offset_x(&mut self) {
+        self.state.pop();
+    }
+
+    /// Get the total accumulated vertical scroll offset.
+    pub fn total_scroll_offset_y(&self) -> f32 {
         self.state.scroll_y
+    }
+
+    /// Get the total accumulated horizontal scroll offset.
+    pub fn total_scroll_offset_x(&self) -> f32 {
+        self.state.scroll_x
     }
 
     // =========================================================================

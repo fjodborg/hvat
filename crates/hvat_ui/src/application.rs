@@ -43,6 +43,9 @@ pub struct Settings {
     /// Initial window size
     pub window_size: (u32, u32),
 
+    /// Minimum window size (prevents resizing below this)
+    pub min_window_size: Option<(u32, u32)>,
+
     /// Whether the window should be resizable
     pub resizable: bool,
 
@@ -55,6 +58,7 @@ impl Default for Settings {
         Self {
             window_title: None,
             window_size: (800, 600),
+            min_window_size: Some((400, 300)),
             resizable: true,
             log_level: log::LevelFilter::Debug,
         }
@@ -93,6 +97,11 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                 settings.window_size.1,
             ))
             .with_resizable(settings.resizable);
+
+        if let Some((min_w, min_h)) = settings.min_window_size {
+            builder = builder.with_min_inner_size(winit::dpi::LogicalSize::new(min_w, min_h));
+            log::debug!("Minimum window size: {}x{}", min_w, min_h);
+        }
 
         if let Some(title) = settings.window_title {
             builder = builder.with_title(title);
@@ -268,6 +277,9 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
     log::info!("Starting hvat_ui application (WASM)");
     log::debug!("Window size: {}x{}", settings.window_size.0, settings.window_size.1);
 
+    // Store minimum size for clamping during resize
+    let min_size = settings.min_window_size;
+
     // Create event loop
     let event_loop = EventLoop::new().map_err(|e| format!("Failed to create event loop: {:?}", e))?;
 
@@ -287,7 +299,16 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
             .and_then(|v| v.as_f64())
             .unwrap_or(settings.window_size.1 as f64) as u32;
 
-        log::info!("Browser window size: {}x{}", browser_width, browser_height);
+        // Clamp to minimum size for initial render dimensions
+        let (render_width, render_height) = clamp_to_min_size(browser_width, browser_height, min_size);
+
+        log::info!("Browser window size: {}x{}, render size: {}x{}", browser_width, browser_height, render_width, render_height);
+
+        // Remove any existing canvas with our ID to avoid "context already in use" errors
+        if let Some(existing) = document.get_element_by_id("hvat-canvas") {
+            existing.remove();
+            log::info!("Removed existing canvas element");
+        }
 
         let canvas = document
             .create_element("canvas")
@@ -295,9 +316,9 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .map_err(|_| "Failed to convert to canvas")?;
 
-        // Set canvas to fill the browser window
-        canvas.set_width(browser_width);
-        canvas.set_height(browser_height);
+        // Set canvas pixel dimensions to the clamped render size
+        canvas.set_width(render_width);
+        canvas.set_height(render_height);
 
         // Apply CSS to ensure the canvas fills the viewport
         canvas.style().set_property("position", "fixed").ok();
@@ -313,9 +334,13 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
             .map_err(|_| "Failed to append canvas to body")?;
 
         let mut builder = WindowBuilder::new()
-            .with_inner_size(winit::dpi::LogicalSize::new(browser_width, browser_height))
+            .with_inner_size(winit::dpi::LogicalSize::new(render_width, render_height))
             .with_resizable(settings.resizable)
             .with_canvas(Some(canvas));
+
+        if let Some((min_w, min_h)) = settings.min_window_size {
+            builder = builder.with_min_inner_size(winit::dpi::LogicalSize::new(min_w, min_h));
+        }
 
         if let Some(ref title) = settings.window_title {
             builder = builder.with_title(title.clone());
@@ -379,48 +404,54 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         elwt.exit();
                     }
                     WindowEvent::Resized(size) => {
+                        // Clamp to minimum size for render dimensions
+                        let (render_width, render_height) = clamp_to_min_size(size.width, size.height, min_size);
+
                         // Update the canvas pixel dimensions (not just CSS size)
                         if let Some(web_window) = web_sys::window() {
                             if let Some(document) = web_window.document() {
                                 if let Some(canvas) = document.get_element_by_id("hvat-canvas") {
                                     if let Ok(canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
-                                        canvas.set_width(size.width);
-                                        canvas.set_height(size.height);
-                                        log::debug!("Canvas resized to {}x{}", size.width, size.height);
+                                        canvas.set_width(render_width);
+                                        canvas.set_height(render_height);
+                                        log::debug!("Canvas resized to {}x{} (browser: {}x{})", render_width, render_height, size.width, size.height);
                                     }
                                 }
                             }
                         }
-                        app_state.renderer.resize(size.width, size.height);
+                        app_state.renderer.resize(render_width, render_height);
                         window.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {
                         // Check for browser window resize on each frame
                         if let Some(web_window) = web_sys::window() {
-                            let new_width = web_window.inner_width()
+                            let browser_width = web_window.inner_width()
                                 .ok()
                                 .and_then(|v| v.as_f64())
                                 .unwrap_or(0.0) as u32;
-                            let new_height = web_window.inner_height()
+                            let browser_height = web_window.inner_height()
                                 .ok()
                                 .and_then(|v| v.as_f64())
                                 .unwrap_or(0.0) as u32;
 
+                            // Clamp to minimum size for render dimensions
+                            let (render_width, render_height) = clamp_to_min_size(browser_width, browser_height, min_size);
+
                             let current_size = window.inner_size();
-                            if new_width > 0 && new_height > 0 &&
-                               (new_width != current_size.width || new_height != current_size.height) {
-                                // Browser window was resized, update canvas
+                            if render_width > 0 && render_height > 0 &&
+                               (render_width != current_size.width || render_height != current_size.height) {
+                                // Browser window was resized, update canvas with clamped dimensions
                                 if let Some(document) = web_window.document() {
                                     if let Some(canvas) = document.get_element_by_id("hvat-canvas") {
                                         if let Ok(canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
-                                            canvas.set_width(new_width);
-                                            canvas.set_height(new_height);
-                                            log::debug!("Browser resize detected: {}x{}", new_width, new_height);
+                                            canvas.set_width(render_width);
+                                            canvas.set_height(render_height);
+                                            log::debug!("Browser resize detected: {}x{}, render: {}x{}", browser_width, browser_height, render_width, render_height);
                                         }
                                     }
                                 }
-                                app_state.renderer.resize(new_width, new_height);
-                                let _ = window.request_inner_size(winit::dpi::LogicalSize::new(new_width, new_height));
+                                app_state.renderer.resize(render_width, render_height);
+                                let _ = window.request_inner_size(winit::dpi::LogicalSize::new(render_width, render_height));
                             }
                         }
 
@@ -577,5 +608,15 @@ impl<A: Application> ApplicationState<A> {
     /// Get layout cache statistics for debugging.
     pub fn layout_cache_stats(&self) -> crate::CacheStats {
         self.layout_cache.stats()
+    }
+}
+
+/// Helper function to clamp dimensions to minimum size (WASM only).
+/// Returns (width, height) clamped to at least min_size if provided.
+#[cfg(target_arch = "wasm32")]
+fn clamp_to_min_size(width: u32, height: u32, min_size: Option<(u32, u32)>) -> (u32, u32) {
+    match min_size {
+        Some((min_w, min_h)) => (width.max(min_w), height.max(min_h)),
+        None => (width, height),
     }
 }
