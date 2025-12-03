@@ -3,6 +3,7 @@
 use wgpu::util::DeviceExt;
 
 use super::{BindGroupLayoutBuilder, Pipeline, PipelineBuilder};
+use crate::bindings::texture as bindings;
 use crate::context::GpuContext;
 use crate::texture::Texture;
 use crate::uniform::{ImageAdjustments, TransformUniform};
@@ -43,16 +44,17 @@ impl TexturePipeline {
         });
 
         // Create bind group layouts using builder
+        // Binding numbers must match those in shaders/texture.wgsl
         let uniform_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
             .with_label("Uniform Bind Group Layout")
-            .add_uniform_buffer(0, wgpu::ShaderStages::VERTEX)
-            .add_uniform_buffer(1, wgpu::ShaderStages::FRAGMENT)
+            .add_uniform_buffer(bindings::UNIFORM_TRANSFORM_BINDING, wgpu::ShaderStages::VERTEX)
+            .add_uniform_buffer(bindings::UNIFORM_ADJUSTMENTS_BINDING, wgpu::ShaderStages::FRAGMENT)
             .build();
 
         let texture_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
             .with_label("Texture Bind Group Layout")
-            .add_texture_2d(0, wgpu::ShaderStages::FRAGMENT)
-            .add_sampler(1, wgpu::ShaderStages::FRAGMENT)
+            .add_texture_2d(bindings::TEXTURE_BINDING, wgpu::ShaderStages::FRAGMENT)
+            .add_sampler(bindings::SAMPLER_BINDING, wgpu::ShaderStages::FRAGMENT)
             .build();
 
         // Create uniform bind group
@@ -61,11 +63,11 @@ impl TexturePipeline {
             layout: &uniform_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding: bindings::UNIFORM_TRANSFORM_BINDING,
                     resource: uniform_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding: bindings::UNIFORM_ADJUSTMENTS_BINDING,
                     resource: adjustments_buffer.as_entire_binding(),
                 },
             ],
@@ -122,11 +124,11 @@ impl TexturePipeline {
             layout: &self.texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
+                    binding: bindings::TEXTURE_BINDING,
                     resource: wgpu::BindingResource::TextureView(&texture.view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding: bindings::SAMPLER_BINDING,
                     resource: wgpu::BindingResource::Sampler(&texture.sampler),
                 },
             ],
@@ -174,8 +176,8 @@ impl TexturePipeline {
         });
 
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-        render_pass.set_bind_group(1, texture_bind_group, &[]);
+        render_pass.set_bind_group(bindings::UNIFORM_GROUP, &self.uniform_bind_group, &[]);
+        render_pass.set_bind_group(bindings::TEXTURE_GROUP, texture_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.draw_indexed(0..self.num_indices, 0, 0..1);

@@ -1,3 +1,4 @@
+pub mod bindings;
 pub mod config;
 pub mod context;
 pub mod error;

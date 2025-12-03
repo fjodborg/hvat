@@ -57,12 +57,15 @@ impl TextMetrics {
     pub fn measure(&self, text: &str) -> (f32, f32) {
         let lines: Vec<&str> = text.lines().collect();
 
+        // Handle empty string: still counts as one line
+        let line_count = if lines.is_empty() { 1 } else { lines.len() };
+
         let width = lines
             .iter()
             .map(|line| self.line_width(line))
             .fold(0.0f32, |max, w| max.max(w));
 
-        let height = lines.len() as f32 * self.line_height();
+        let height = line_count as f32 * self.line_height();
 
         (width, height)
     }

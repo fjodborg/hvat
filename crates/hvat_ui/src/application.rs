@@ -442,6 +442,7 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
 pub(crate) struct ApplicationState<A: Application> {
     pub app: A,
     pub renderer: Renderer,
+    pub layout_cache: crate::LayoutCache,
 }
 
 impl<A: Application> ApplicationState<A> {
@@ -451,13 +452,13 @@ impl<A: Application> ApplicationState<A> {
             Renderer::new(window).await
         })?;
 
-        Ok(Self { app, renderer })
+        Ok(Self { app, renderer, layout_cache: crate::LayoutCache::new() })
     }
 
     #[cfg(target_arch = "wasm32")]
     pub async fn new_async(app: A, window: Arc<Window>) -> Result<Self, String> {
         let renderer = Renderer::new(window).await?;
-        Ok(Self { app, renderer })
+        Ok(Self { app, renderer, layout_cache: crate::LayoutCache::new() })
     }
 
     pub fn update(&mut self, message: A::Message) {
@@ -469,8 +470,14 @@ impl<A: Application> ApplicationState<A> {
     }
 
     pub fn render(&mut self) {
+        // Begin frame for layout cache
+        self.layout_cache.begin_frame();
+
         let element = self.app.view();
         self.renderer.render(element);
+
+        // End frame and cleanup stale cache entries
+        self.layout_cache.end_frame();
     }
 
     pub fn handle_event(&mut self, event: crate::Event) {
@@ -493,5 +500,15 @@ impl<A: Application> ApplicationState<A> {
         if let Some(message) = message {
             self.app.update(message);
         }
+    }
+
+    /// Invalidate the layout cache. Call when the widget tree structure changes.
+    pub fn invalidate_layout(&mut self) {
+        self.layout_cache.invalidate();
+    }
+
+    /// Get layout cache statistics for debugging.
+    pub fn layout_cache_stats(&self) -> crate::CacheStats {
+        self.layout_cache.stats()
     }
 }

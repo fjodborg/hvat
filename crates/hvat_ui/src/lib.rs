@@ -12,6 +12,7 @@ mod element;
 mod event;
 mod image;
 mod layout;
+mod layout_cache;
 mod length;
 mod renderer;
 mod text_metrics;
@@ -22,7 +23,7 @@ pub mod widgets;
 
 // Public API
 pub use application::{run, Application, Settings};
-pub use element::Element;
+pub use element::{Element, WidgetId};
 pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
 pub use image::ImageHandle;
 pub use layout::{Layout, Limits, Point, Rectangle, Size};
@@ -31,3 +32,4 @@ pub use renderer::{Color, Renderer};
 pub use hvat_gpu::ImageAdjustments;
 pub use widget::Widget;
 pub use text_metrics::{TextMetrics, measure_text, line_height};
+pub use layout_cache::{LayoutCache, LayoutKey, LayoutPath, LayoutContext, CacheStats};
