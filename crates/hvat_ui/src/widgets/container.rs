@@ -7,6 +7,8 @@ pub struct Container<'a, Message> {
     background: Option<Color>,
     border_color: Option<Color>,
     border_width: f32,
+    /// Whether to fill available space (true) or size to content (false)
+    fill: bool,
 }
 
 impl<'a, Message> Container<'a, Message> {
@@ -18,6 +20,7 @@ impl<'a, Message> Container<'a, Message> {
             background: None,
             border_color: None,
             border_width: 1.0,
+            fill: false,
         }
     }
 
@@ -44,34 +47,65 @@ impl<'a, Message> Container<'a, Message> {
         self.border_width = width;
         self
     }
+
+    /// Make the container fill all available space.
+    /// By default, containers size to their content.
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
+        self
+    }
 }
 
 impl<'a, Message> Widget<Message> for Container<'a, Message> {
     fn layout(&self, limits: &Limits) -> Layout {
-        // Reduce limits by padding
-        let child_limits = Limits::with_range(
-            limits.min_width - self.padding * 2.0,
-            limits.max_width - self.padding * 2.0,
-            limits.min_height - self.padding * 2.0,
-            limits.max_height - self.padding * 2.0,
-        );
+        // Calculate child limits (accounting for padding)
+        let child_max_width = if limits.max_width.is_finite() {
+            (limits.max_width - self.padding * 2.0).max(0.0)
+        } else {
+            f32::INFINITY
+        };
+        let child_max_height = if limits.max_height.is_finite() {
+            (limits.max_height - self.padding * 2.0).max(0.0)
+        } else {
+            f32::INFINITY
+        };
 
+        let child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
         let child_layout = self.child.widget().layout(&child_limits);
         let child_size = child_layout.size();
 
-        // Container size is child size + padding
-        let bounds = Rectangle::new(
-            0.0,
-            0.0,
-            child_size.width + self.padding * 2.0,
-            child_size.height + self.padding * 2.0,
-        );
+        // Container size depends on fill mode
+        let (width, height) = if self.fill {
+            // Fill mode: use all available space (up to limits)
+            let w = if limits.max_width.is_finite() {
+                limits.max_width
+            } else {
+                child_size.width + self.padding * 2.0
+            };
+            let h = if limits.max_height.is_finite() {
+                limits.max_height
+            } else {
+                child_size.height + self.padding * 2.0
+            };
+            (w, h)
+        } else {
+            // Content mode: size to child + padding, capped by limits
+            let w = (child_size.width + self.padding * 2.0).min(limits.max_width);
+            let h = (child_size.height + self.padding * 2.0).min(limits.max_height);
+            (w, h)
+        };
 
+        let bounds = Rectangle::new(0.0, 0.0, width, height);
         Layout::new(bounds)
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
+
+        log::debug!(
+            "📦 Container draw: bounds={{x:{:.1}, y:{:.1}, w:{:.1}, h:{:.1}}}, padding={}",
+            bounds.x, bounds.y, bounds.width, bounds.height, self.padding
+        );
 
         // Draw background if specified
         if let Some(color) = self.background {

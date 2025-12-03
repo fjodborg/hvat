@@ -119,9 +119,20 @@ impl<Message> PanZoomImage<Message> {
 
 impl<Message: Clone> Widget<Message> for PanZoomImage<Message> {
     fn layout(&self, limits: &Limits) -> Layout {
-        // Use available space
-        let width = self.width.resolve(limits.max_width, limits.max_width);
-        let height = self.height.resolve(limits.max_height, limits.max_height);
+        // Use available space, but fall back to reasonable defaults if unbounded
+        let available_width = if limits.max_width.is_finite() {
+            limits.max_width
+        } else {
+            600.0 // Default width when unbounded
+        };
+        let available_height = if limits.max_height.is_finite() {
+            limits.max_height
+        } else {
+            400.0 // Default height when unbounded
+        };
+
+        let width = self.width.resolve(available_width, available_width);
+        let height = self.height.resolve(available_height, available_height);
 
         let size = limits.resolve(width, height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
@@ -132,8 +143,13 @@ impl<Message: Clone> Widget<Message> for PanZoomImage<Message> {
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
 
+        // Clip image to widget bounds - prevents image from extending beyond container
+        renderer.push_clip(bounds);
+
         // Draw the image with current pan/zoom transform and adjustments
         renderer.draw_image_with_adjustments(&self.handle, bounds, self.pan, self.zoom, self.adjustments);
+
+        renderer.pop_clip();
     }
 
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {

@@ -1,63 +1,21 @@
-use bytemuck::{Pod, Zeroable};
-use wgpu;
+//! Color rendering pipeline for solid color shapes.
 
-/// Vertex for colored shapes (no texture)
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct ColorVertex {
-    pub position: [f32; 2],
-    pub color: [f32; 4],
-}
+use wgpu::util::DeviceExt;
 
-impl ColorVertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
+use super::Pipeline;
+use crate::vertex::ColorVertex;
 
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<ColorVertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
-
-/// Pipeline for rendering solid color rectangles
+/// Pipeline for rendering solid color rectangles and shapes.
 pub struct ColorPipeline {
     pub render_pipeline: wgpu::RenderPipeline,
 }
 
 impl ColorPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        // Shader for solid colors
-        let shader_source = r#"
-struct VertexInput {
-    @location(0) position: vec2<f32>,
-    @location(1) color: vec4<f32>,
-}
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-}
-
-@vertex
-fn vs_main(input: VertexInput) -> VertexOutput {
-    var output: VertexOutput;
-    output.position = vec4<f32>(input.position, 0.0, 1.0);
-    output.color = input.color;
-    return output;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return input.color;
-}
-"#;
-
+        // Load shader from file
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Color Shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/color.wgsl").into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -104,12 +62,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             cache: None,
         });
 
-        Self {
-            render_pipeline,
-        }
+        Self { render_pipeline }
     }
 
-    /// Create vertex buffer for a rectangle
+    /// Create vertex and index buffers for a filled rectangle.
     pub fn create_rect_vertices(
         device: &wgpu::Device,
         x: f32,
@@ -147,8 +103,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
-        use wgpu::util::DeviceExt;
-
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Rect Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
@@ -164,7 +118,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         (vertex_buffer, index_buffer, indices.len() as u32)
     }
 
-    /// Create vertex buffer for a rectangle outline (stroke)
+    /// Create vertex and index buffers for a stroked rectangle (outline).
     pub fn create_stroke_rect_vertices(
         device: &wgpu::Device,
         x: f32,
@@ -221,8 +175,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             12, 13, 14, 12, 14, 15,
         ];
 
-        use wgpu::util::DeviceExt;
-
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Stroke Rect Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
@@ -236,5 +188,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         });
 
         (vertex_buffer, index_buffer, indices.len() as u32)
+    }
+}
+
+impl Pipeline for ColorPipeline {
+    fn render_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.render_pipeline
     }
 }

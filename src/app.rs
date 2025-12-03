@@ -6,7 +6,7 @@ use winit::{
     window::Window,
 };
 
-use hvat_gpu::{context::GpuContext, pipeline::*, texture::Texture};
+use hvat_gpu::{context::GpuContext, pipeline::TexturePipeline, texture::Texture, TransformUniform, ImageAdjustments};
 
 pub struct ViewTransform {
     offset_x: f32,

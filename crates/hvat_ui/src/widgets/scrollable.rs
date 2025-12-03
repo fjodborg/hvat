@@ -99,7 +99,9 @@ impl<'a, Message> Scrollable<'a, Message> {
 impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
     fn layout(&self, limits: &Limits) -> Layout {
         // Use specified dimensions or limits
-        let viewport_height = self.height.unwrap_or(limits.max_height);
+        // For height: if not specified, report 0 to indicate "fill remaining space"
+        // The parent container will give us actual height during draw()
+        let viewport_height = self.height.unwrap_or(0.0);
         let viewport_width = self.width.unwrap_or(limits.max_width);
 
         // Include scrollbar area in our width
@@ -109,6 +111,11 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
+
+        log::debug!(
+            "📜 Scrollable draw: bounds={{x:{:.1}, y:{:.1}, w:{:.1}, h:{:.1}}}, scroll_offset={:.1}",
+            bounds.x, bounds.y, bounds.width, bounds.height, self.scroll_offset
+        );
 
         // Determine if scrollbar is needed
         let needs_scrollbar = {
@@ -131,24 +138,29 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         let content_layout = self.child.widget().layout(&content_limits);
         let content_height = content_layout.size().height;
 
-        // Calculate visible area with scroll offset
-        let visible_bounds = Rectangle::new(
-            bounds.x,
-            bounds.y - self.scroll_offset,
-            content_width,
-            content_height,
-        );
-        let visible_layout = Layout::new(visible_bounds);
-
-        // Push clip rect to limit child drawing to our viewport bounds
-        // This ensures scrolled content is clipped at the scrollable's boundaries
+        // Push clip rect FIRST - this defines the viewport bounds in screen space
+        // The clip should NOT be transformed by scroll offset (viewport doesn't move when scrolling)
         let clip_bounds = Rectangle::new(bounds.x, bounds.y, content_width, bounds.height);
         renderer.push_clip(clip_bounds);
 
-        // Draw the child (will be clipped to our bounds)
-        self.child.widget().draw(renderer, &visible_layout);
+        // Push scroll offset AFTER clip - this affects child draw calls but not the clip itself
+        renderer.push_scroll_offset(self.scroll_offset);
 
-        // Pop the clip rect
+        // Child layout at viewport position (in layout/widget space)
+        // The scroll offset is applied by the renderer, not by offsetting the layout
+        let child_bounds = Rectangle::new(
+            bounds.x,
+            bounds.y,  // NO scroll offset here - renderer handles it
+            content_width,
+            content_height,
+        );
+        let child_layout = Layout::new(child_bounds);
+
+        // Draw the child (will be clipped and scroll-transformed by renderer)
+        self.child.widget().draw(renderer, &child_layout);
+
+        // Pop scroll offset and clip (in reverse order of push)
+        renderer.pop_scroll_offset();
         renderer.pop_clip();
 
         // Only draw scrollbar if content is larger than viewport

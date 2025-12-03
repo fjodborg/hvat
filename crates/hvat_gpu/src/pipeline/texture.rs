@@ -1,81 +1,12 @@
-use bytemuck::{Pod, Zeroable};
-use wgpu;
+//! Texture rendering pipeline.
 
+use wgpu::util::DeviceExt;
+
+use super::Pipeline;
 use crate::context::GpuContext;
 use crate::texture::Texture;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct Vertex {
-    pub position: [f32; 2],
-    pub tex_coords: [f32; 2],
-}
-
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2];
-
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
-
-/// 4x4 transform matrix for pan/zoom
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct TransformUniform {
-    pub matrix: [[f32; 4]; 4],
-}
-
-impl TransformUniform {
-    pub fn new() -> Self {
-        Self {
-            matrix: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-        }
-    }
-
-    /// Create transform from offset and zoom
-    pub fn from_transform(offset_x: f32, offset_y: f32, zoom: f32) -> Self {
-        Self {
-            matrix: [
-                [zoom, 0.0, 0.0, 0.0],
-                [0.0, zoom, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [offset_x, offset_y, 0.0, 1.0],
-            ],
-        }
-    }
-}
-
-/// Image adjustment parameters
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct ImageAdjustments {
-    pub brightness: f32,
-    pub contrast: f32,
-    pub gamma: f32,
-    pub hue_shift: f32,
-}
-
-impl ImageAdjustments {
-    pub fn new() -> Self {
-        Self {
-            brightness: 0.0,
-            contrast: 1.0,
-            gamma: 1.0,
-            hue_shift: 0.0,
-        }
-    }
-}
+use crate::uniform::{ImageAdjustments, TransformUniform};
+use crate::vertex::Vertex;
 
 /// Texture rendering pipeline
 pub struct TexturePipeline {
@@ -96,7 +27,7 @@ impl TexturePipeline {
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Texture Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/texture.wgsl").into()),
             });
 
         // Create uniform buffers
@@ -255,8 +186,6 @@ impl TexturePipeline {
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
-        use wgpu::util::DeviceExt;
-
         let vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
@@ -345,5 +274,11 @@ impl TexturePipeline {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+    }
+}
+
+impl Pipeline for TexturePipeline {
+    fn render_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.render_pipeline
     }
 }

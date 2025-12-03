@@ -436,12 +436,10 @@ impl Application for HvatApp {
             Tab::Settings => self.view_settings(text_color),
         };
 
-        // Wrap content in scrollable with a fixed viewport size
+        // Wrap content in scrollable - use Fill to expand with window
         let scrollable_content = scrollable(Element::new(content))
             .scroll_offset(self.scroll_offset)
             .dragging(self.scrollbar_dragging)
-            .width(800.0)  // Fixed width viewport (includes scrollbar)
-            .height(600.0) // Fixed height viewport
             .on_scroll(Message::Scroll)
             .on_drag_start(|| Message::ScrollbarDragStart)
             .on_drag_end(|| Message::ScrollbarDragEnd);
@@ -453,7 +451,8 @@ impl Application for HvatApp {
                     .push(Element::new(scrollable_content))
                     .spacing(20.0),
             ))
-            .padding(30.0),
+            .padding(30.0)
+            .fill(),
         )
     }
 }

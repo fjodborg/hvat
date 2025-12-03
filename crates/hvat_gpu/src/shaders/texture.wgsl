@@ -1,4 +1,4 @@
-// Vertex shader
+// Texture shader - for rendering images with pan/zoom and adjustments
 
 struct VertexInput {
     @location(0) position: vec2<f32>,

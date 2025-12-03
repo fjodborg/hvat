@@ -8,7 +8,6 @@ pub use hvat_gpu;
 
 // Core modules
 mod application;
-mod color_pipeline;
 mod element;
 mod event;
 mod image;

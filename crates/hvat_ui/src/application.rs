@@ -84,6 +84,10 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
     {
         env_logger::Builder::from_default_env()
             .filter_level(settings.log_level)
+            // Mute noisy dependency logs
+            .filter_module("cosmic_text", log::LevelFilter::Warn)
+            .filter_module("wgpu", log::LevelFilter::Warn)
+            .filter_module("naga", log::LevelFilter::Warn)
             .init();
     }
 
