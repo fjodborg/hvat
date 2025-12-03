@@ -10,7 +10,7 @@ use winit::window::Window;
 
 use hvat_gpu::{ColorPipeline, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform};
 use glyphon::{
-    Attrs, Buffer, Cache, Color as GlyphonColor, Family, FontSystem, Metrics,
+    Attrs, Buffer, Cache, Color as GlyphonColor, FontSystem, Metrics,
     Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
 
@@ -149,12 +149,13 @@ impl RenderState {
     }
 
     /// Transform a rectangle from layout space to screen space
+    /// Clamps negative dimensions to 0
     fn to_screen_rect(&self, rect: Rectangle) -> Rectangle {
         Rectangle::new(
             rect.x,
             rect.y - self.scroll_y,
-            rect.width,
-            rect.height,
+            rect.width.max(0.0),
+            rect.height.max(0.0),
         )
     }
 }
@@ -196,7 +197,31 @@ impl Renderer {
         let height = gpu_ctx.height();
 
         // Initialize glyphon text rendering
-        let font_system = FontSystem::new();
+        // For WASM, we need to create a font system with embedded fonts
+        // since system fonts aren't available
+        #[cfg(target_arch = "wasm32")]
+        let font_system = {
+            // For WASM, we must use new_with_locale_and_db to set the correct font family names.
+            // new_with_fonts() hardcodes "Noto Sans Mono" etc which don't match our embedded font.
+            // See: https://github.com/pop-os/cosmic-text/issues/126
+            let mut db = cosmic_text::fontdb::Database::new();
+            let font_data: &[u8] = include_bytes!("../assets/DejaVuSansMono.ttf");
+            db.load_font_data(font_data.to_vec());
+            // Set our font as the default for all generic family lookups
+            db.set_monospace_family("DejaVu Sans Mono");
+            db.set_sans_serif_family("DejaVu Sans Mono");
+            db.set_serif_family("DejaVu Sans Mono");
+            FontSystem::new_with_locale_and_db("en-US".to_string(), db)
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let font_system = {
+            let mut fs = FontSystem::new();
+            // Also load our embedded font as fallback on native
+            let font_data = include_bytes!("../assets/DejaVuSansMono.ttf");
+            fs.db_mut().load_font_data(font_data.to_vec());
+            fs
+        };
         let swash_cache = SwashCache::new();
         let text_cache = Cache::new(&gpu_ctx.device);
         let viewport = Viewport::new(&gpu_ctx.device, &text_cache);
@@ -726,7 +751,7 @@ impl Renderer {
                 buffer.set_text(
                     &mut self.font_system,
                     &item.text,
-                    &Attrs::new().family(Family::SansSerif),
+                    &Attrs::new(),
                     Shaping::Advanced,
                 );
                 buffer.shape_until_scroll(&mut self.font_system, false);

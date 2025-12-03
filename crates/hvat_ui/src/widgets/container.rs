@@ -117,12 +117,14 @@ impl<'a, Message> Widget<Message> for Container<'a, Message> {
             renderer.stroke_rect(bounds, color, self.border_width);
         }
 
-        // Draw child with offset for padding
+        // Draw child with offset for padding (ensure non-negative dimensions)
+        let child_width = (bounds.width - self.padding * 2.0).max(0.0);
+        let child_height = (bounds.height - self.padding * 2.0).max(0.0);
         let child_bounds = Rectangle::new(
             bounds.x + self.padding,
             bounds.y + self.padding,
-            bounds.width - self.padding * 2.0,
-            bounds.height - self.padding * 2.0,
+            child_width,
+            child_height,
         );
         let child_layout = Layout::new(child_bounds);
         self.child.widget().draw(renderer, &child_layout);
@@ -130,11 +132,13 @@ impl<'a, Message> Widget<Message> for Container<'a, Message> {
 
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
         let bounds = layout.bounds();
+        let child_width = (bounds.width - self.padding * 2.0).max(0.0);
+        let child_height = (bounds.height - self.padding * 2.0).max(0.0);
         let child_bounds = Rectangle::new(
             bounds.x + self.padding,
             bounds.y + self.padding,
-            bounds.width - self.padding * 2.0,
-            bounds.height - self.padding * 2.0,
+            child_width,
+            child_height,
         );
         let child_layout = Layout::new(child_bounds);
         self.child.widget_mut().on_event(event, &child_layout)

@@ -3,7 +3,17 @@
 use hvat_ui::{
     widgets::*, Application, Color, Element, ImageAdjustments, ImageHandle, Length,
 };
+use std::path::PathBuf;
 use web_time::Instant;
+
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
@@ -71,8 +81,8 @@ pub struct HvatApp {
     pan_y: f32,
     show_debug_info: bool,
     theme: Theme,
-    /// The test image for the image viewer
-    test_image: ImageHandle,
+    /// The current image for the image viewer (either test image or loaded image)
+    current_image: ImageHandle,
     /// Image manipulation settings
     brightness: f32,
     contrast: f32,
@@ -94,6 +104,15 @@ pub struct HvatApp {
     scroll_offset: f32,
     /// Whether the scrollbar is being dragged
     scrollbar_dragging: bool,
+    /// List of image paths loaded from a folder (native only)
+    loaded_image_paths: Vec<PathBuf>,
+    /// Current index in the loaded images list
+    current_image_index: usize,
+    /// Status message to display
+    status_message: Option<String>,
+    /// WASM: Loaded image data (name, rgba, width, height)
+    #[cfg(target_arch = "wasm32")]
+    wasm_loaded_images: Vec<(String, ImageHandle)>,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +164,19 @@ pub enum Message {
     Scroll(f32),
     ScrollbarDragStart,
     ScrollbarDragEnd,
+
+    // Image loading
+    LoadFolder,
+    FolderLoaded(Vec<PathBuf>),
+    NextImage,
+    PreviousImage,
+    ImageLoaded(ImageHandle),
+    /// WASM: Image data loaded from file input (filename, rgba data, width, height)
+    #[cfg(target_arch = "wasm32")]
+    WasmImageLoaded(String, Vec<u8>, u32, u32),
+    /// WASM: Multiple images loaded
+    #[cfg(target_arch = "wasm32")]
+    WasmImagesLoaded(Vec<(String, Vec<u8>, u32, u32)>),
 }
 
 
@@ -152,9 +184,9 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn new() -> Self {
-        // Create a larger test image for performance testing (4096x4096 = 64MB RGBA)
-        log::info!("Creating 4096x4096 test image...");
-        let test_image = create_test_image(4096, 4096);
+        // Create a test image for initial display
+        log::info!("Creating 512x512 test image...");
+        let test_image = create_test_image(512, 512);
         log::info!("Test image created");
 
         Self {
@@ -165,7 +197,7 @@ impl Application for HvatApp {
             pan_y: 0.0,
             show_debug_info: false,
             theme: Theme::dark(),
-            test_image,
+            current_image: test_image,
             brightness: 0.0,
             contrast: 1.0,
             gamma: 1.0,
@@ -178,6 +210,11 @@ impl Application for HvatApp {
             fps: 0.0,
             scroll_offset: 0.0,
             scrollbar_dragging: false,
+            loaded_image_paths: Vec::new(),
+            current_image_index: 0,
+            status_message: None,
+            #[cfg(target_arch = "wasm32")]
+            wasm_loaded_images: Vec::new(),
         }
     }
 
@@ -377,10 +414,182 @@ impl Application for HvatApp {
                 self.scrollbar_dragging = false;
                 log::debug!("📜 Scrollbar drag ended");
             }
+
+            // Image loading
+            Message::LoadFolder => {
+                log::info!("📂 Opening folder dialog...");
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        log::info!("📂 Selected folder: {:?}", folder);
+                        // Find all image files in the folder
+                        let image_extensions = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+                        let mut paths: Vec<PathBuf> = std::fs::read_dir(&folder)
+                            .ok()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|entry| entry.ok())
+                            .map(|entry| entry.path())
+                            .filter(|path| {
+                                path.extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .map(|ext| image_extensions.contains(&ext.to_lowercase().as_str()))
+                                    .unwrap_or(false)
+                            })
+                            .collect();
+                        paths.sort();
+
+                        if paths.is_empty() {
+                            self.status_message = Some("No images found in folder".to_string());
+                            log::warn!("📂 No images found in folder");
+                        } else {
+                            let count = paths.len();
+                            self.loaded_image_paths = paths;
+                            self.current_image_index = 0;
+                            self.status_message = Some(format!("Loaded {} images", count));
+                            log::info!("📂 Found {} images", count);
+
+                            // Load the first image
+                            self.load_current_image();
+                        }
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.status_message = Some("Opening file picker...".to_string());
+                    log::info!("📂 Opening WASM file picker...");
+                    // Trigger the file input - this is fire-and-forget, results come via WasmImagesLoaded
+                    open_wasm_file_picker();
+                }
+            }
+            Message::FolderLoaded(paths) => {
+                self.loaded_image_paths = paths;
+                self.current_image_index = 0;
+                if !self.loaded_image_paths.is_empty() {
+                    self.load_current_image();
+                }
+            }
+            Message::NextImage => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if !self.loaded_image_paths.is_empty() {
+                        self.current_image_index = (self.current_image_index + 1) % self.loaded_image_paths.len();
+                        self.load_current_image();
+                        // Reset view when changing images
+                        self.zoom = 1.0;
+                        self.pan_x = 0.0;
+                        self.pan_y = 0.0;
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if !self.wasm_loaded_images.is_empty() {
+                        self.current_image_index = (self.current_image_index + 1) % self.wasm_loaded_images.len();
+                        let (name, handle) = &self.wasm_loaded_images[self.current_image_index];
+                        self.current_image = handle.clone();
+                        self.status_message = Some(format!(
+                            "Image {}/{}: {}",
+                            self.current_image_index + 1,
+                            self.wasm_loaded_images.len(),
+                            name
+                        ));
+                        // Reset view when changing images
+                        self.zoom = 1.0;
+                        self.pan_x = 0.0;
+                        self.pan_y = 0.0;
+                    }
+                }
+            }
+            Message::PreviousImage => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if !self.loaded_image_paths.is_empty() {
+                        self.current_image_index = if self.current_image_index == 0 {
+                            self.loaded_image_paths.len() - 1
+                        } else {
+                            self.current_image_index - 1
+                        };
+                        self.load_current_image();
+                        // Reset view when changing images
+                        self.zoom = 1.0;
+                        self.pan_x = 0.0;
+                        self.pan_y = 0.0;
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if !self.wasm_loaded_images.is_empty() {
+                        self.current_image_index = if self.current_image_index == 0 {
+                            self.wasm_loaded_images.len() - 1
+                        } else {
+                            self.current_image_index - 1
+                        };
+                        let (name, handle) = &self.wasm_loaded_images[self.current_image_index];
+                        self.current_image = handle.clone();
+                        self.status_message = Some(format!(
+                            "Image {}/{}: {}",
+                            self.current_image_index + 1,
+                            self.wasm_loaded_images.len(),
+                            name
+                        ));
+                        // Reset view when changing images
+                        self.zoom = 1.0;
+                        self.pan_x = 0.0;
+                        self.pan_y = 0.0;
+                    }
+                }
+            }
+            Message::ImageLoaded(handle) => {
+                self.current_image = handle;
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            Message::WasmImageLoaded(name, data, width, height) => {
+                log::info!("📂 WASM: Single image loaded: {} ({}x{})", name, width, height);
+                let handle = ImageHandle::from_rgba8(data, width, height);
+                self.wasm_loaded_images = vec![(name.clone(), handle.clone())];
+                self.current_image = handle;
+                self.current_image_index = 0;
+                self.status_message = Some(format!("Loaded: {}", name));
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            Message::WasmImagesLoaded(images) => {
+                log::info!("📂 WASM: {} images loaded", images.len());
+                if images.is_empty() {
+                    self.status_message = Some("No images selected".to_string());
+                    return;
+                }
+
+                self.wasm_loaded_images = images
+                    .into_iter()
+                    .map(|(name, data, width, height)| {
+                        let handle = ImageHandle::from_rgba8(data, width, height);
+                        (name, handle)
+                    })
+                    .collect();
+
+                self.current_image_index = 0;
+                if let Some((name, handle)) = self.wasm_loaded_images.first() {
+                    self.current_image = handle.clone();
+                    self.status_message = Some(format!(
+                        "Image 1/{}: {}",
+                        self.wasm_loaded_images.len(),
+                        name
+                    ));
+                }
+            }
         }
     }
 
     fn tick(&self) -> Option<Self::Message> {
+        // In WASM, check for pending images from file picker
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(images) = take_wasm_pending_images() {
+                return Some(Message::WasmImagesLoaded(images));
+            }
+        }
         Some(Message::Tick)
     }
 
@@ -550,7 +759,7 @@ impl HvatApp {
         };
 
         // Create the pan/zoom image widget
-        let image_widget = pan_zoom_image(self.test_image.clone())
+        let image_widget = pan_zoom_image(self.current_image.clone())
             .pan((self.pan_x, self.pan_y))
             .zoom(self.zoom)
             .dragging(self.image_dragging)
@@ -564,11 +773,39 @@ impl HvatApp {
                 Message::ImageZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_cx, widget_cy)
             });
 
+        // Status text
+        let status_text = self.status_message.as_deref().unwrap_or("No images loaded");
+
         column()
             .push(Element::new(
                 text("Image Viewer")
                     .size(24.0)
                     .color(text_color),
+            ))
+            // File loading controls
+            .push(Element::new(
+                row()
+                    .push(Element::new(
+                        button("Load Folder")
+                            .on_press(Message::LoadFolder)
+                            .width(120.0),
+                    ))
+                    .push(Element::new(
+                        button("< Prev")
+                            .on_press(Message::PreviousImage)
+                            .width(80.0),
+                    ))
+                    .push(Element::new(
+                        button("Next >")
+                            .on_press(Message::NextImage)
+                            .width(80.0),
+                    ))
+                    .push(Element::new(
+                        text(status_text)
+                            .size(12.0)
+                            .color(text_color),
+                    ))
+                    .spacing(10.0),
             ))
             .push(Element::new(
                 text(format!("Zoom: {:.2}x | Pan: ({:.0}, {:.0})", self.zoom, self.pan_x, self.pan_y))
@@ -601,7 +838,7 @@ impl HvatApp {
                             .width(90.0),
                     ))
                     .push(Element::new(
-                        button("Reset")
+                        button("Reset View")
                             .on_press(Message::ResetView)
                             .width(90.0),
                     ))
@@ -754,6 +991,36 @@ impl HvatApp {
             ))
             .spacing(20.0)
     }
+
+    /// Load the current image from the loaded_image_paths
+    fn load_current_image(&mut self) {
+        if self.current_image_index >= self.loaded_image_paths.len() {
+            return;
+        }
+
+        let path = &self.loaded_image_paths[self.current_image_index];
+        log::info!("🖼️ Loading image: {:?}", path);
+
+        match image::open(path) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                let data = rgba.into_raw();
+                self.current_image = ImageHandle::from_rgba8(data, width, height);
+                self.status_message = Some(format!(
+                    "Image {}/{}: {}",
+                    self.current_image_index + 1,
+                    self.loaded_image_paths.len(),
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ));
+                log::info!("🖼️ Loaded {}x{} image", width, height);
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to load image: {}", e));
+                log::error!("🖼️ Failed to load image: {}", e);
+            }
+        }
+    }
 }
 
 /// Create a test image with a gradient pattern for demonstration.
@@ -804,4 +1071,152 @@ fn create_test_image(width: u32, height: u32) -> ImageHandle {
     }
 
     ImageHandle::from_rgba8(data, width, height)
+}
+
+// ============================================================================
+// WASM File Loading
+// ============================================================================
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// Global storage for loaded images - the app polls this via tick()
+    static WASM_PENDING_IMAGES: RefCell<Option<Vec<(String, Vec<u8>, u32, u32)>>> = const { RefCell::new(None) };
+}
+
+/// Check if there are pending images loaded from WASM file picker
+#[cfg(target_arch = "wasm32")]
+pub fn take_wasm_pending_images() -> Option<Vec<(String, Vec<u8>, u32, u32)>> {
+    WASM_PENDING_IMAGES.with(|pending| pending.borrow_mut().take())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_wasm_pending_images(images: Vec<(String, Vec<u8>, u32, u32)>) {
+    WASM_PENDING_IMAGES.with(|pending| {
+        *pending.borrow_mut() = Some(images);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn open_wasm_file_picker() {
+    use web_sys::{Document, Event, FileReader, HtmlInputElement};
+
+    let window = web_sys::window().expect("no window");
+    let document: Document = window.document().expect("no document");
+
+    // Create a hidden file input element
+    let input: HtmlInputElement = document
+        .create_element("input")
+        .expect("failed to create input")
+        .dyn_into()
+        .expect("not an input element");
+
+    input.set_type("file");
+    input.set_accept("image/*");
+    input.set_multiple(true);
+
+    // Enable folder selection using webkitdirectory attribute
+    // This is widely supported (Chrome, Edge, Firefox, Safari)
+    input.set_attribute("webkitdirectory", "").expect("failed to set webkitdirectory");
+    input.set_attribute("directory", "").expect("failed to set directory"); // Firefox fallback
+
+    // Store results as they load
+    let results: Rc<RefCell<Vec<(String, Vec<u8>, u32, u32)>>> = Rc::new(RefCell::new(Vec::new()));
+    let total_files: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
+    let loaded_files: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
+
+    // Clone for closure
+    let results_clone = results.clone();
+    let total_clone = total_files.clone();
+    let loaded_clone = loaded_files.clone();
+
+    // Handle file selection
+    let onchange = Closure::wrap(Box::new(move |event: Event| {
+        let input: HtmlInputElement = event
+            .target()
+            .expect("no target")
+            .dyn_into()
+            .expect("not input");
+
+        if let Some(files) = input.files() {
+            let count = files.length();
+            if count == 0 {
+                log::warn!("📂 No files selected");
+                return;
+            }
+
+            *total_clone.borrow_mut() = count as usize;
+            log::info!("📂 Selected {} files", count);
+
+            for i in 0..count {
+                if let Some(file) = files.get(i) {
+                    let name = file.name();
+                    log::info!("📂 Loading file: {}", name);
+
+                    let reader = FileReader::new().expect("failed to create FileReader");
+
+                    let results_inner = results_clone.clone();
+                    let loaded_inner = loaded_clone.clone();
+                    let total_inner = total_clone.clone();
+                    let name_clone = name.clone();
+
+                    // Handle load complete
+                    let onload = Closure::wrap(Box::new(move |event: Event| {
+                        let reader: FileReader = event
+                            .target()
+                            .expect("no target")
+                            .dyn_into()
+                            .expect("not FileReader");
+
+                        if let Ok(result) = reader.result() {
+                            let array = js_sys::Uint8Array::new(&result);
+                            let bytes = array.to_vec();
+
+                            log::info!("📂 File {} loaded: {} bytes", name_clone, bytes.len());
+
+                            // Decode image using the image crate
+                            match image::load_from_memory(&bytes) {
+                                Ok(img) => {
+                                    let rgba = img.to_rgba8();
+                                    let (width, height) = rgba.dimensions();
+                                    let data = rgba.into_raw();
+
+                                    log::info!("📂 Decoded {}: {}x{}", name_clone, width, height);
+
+                                    results_inner
+                                        .borrow_mut()
+                                        .push((name_clone.clone(), data, width, height));
+                                }
+                                Err(e) => {
+                                    log::error!("📂 Failed to decode {}: {}", name_clone, e);
+                                }
+                            }
+                        }
+
+                        // Check if all files loaded
+                        *loaded_inner.borrow_mut() += 1;
+                        let loaded = *loaded_inner.borrow();
+                        let total = *total_inner.borrow();
+
+                        if loaded >= total {
+                            log::info!("📂 All {} files loaded", total);
+                            let images = results_inner.borrow().clone();
+                            set_wasm_pending_images(images);
+                        }
+                    }) as Box<dyn FnMut(Event)>);
+
+                    reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                    onload.forget(); // Leak the closure to keep it alive
+
+                    // Read as array buffer
+                    reader.read_as_array_buffer(&file).expect("failed to read");
+                }
+            }
+        }
+    }) as Box<dyn FnMut(Event)>);
+
+    input.set_onchange(Some(onchange.as_ref().unchecked_ref()));
+    onchange.forget(); // Leak the closure to keep it alive
+
+    // Trigger the file picker
+    input.click();
 }
