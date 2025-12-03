@@ -1,6 +1,14 @@
 // Shared application logic
 mod app;
 
+// Image caching abstraction (unified native/WASM)
+mod image_cache;
+pub use image_cache::{ImageCache, IMAGE_EXTENSIONS, is_image_file};
+
+// Widget state management layer
+mod widget_state;
+pub use widget_state::{WidgetState, ImageViewState, SliderState, ScrollState};
+
 // HVAT application (shared between native and WASM)
 mod hvat_app;
 pub use hvat_app::HvatApp;

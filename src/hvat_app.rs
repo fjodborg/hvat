@@ -1,5 +1,7 @@
 // The main HVAT application - shared between native and WASM builds
 
+use crate::image_cache::ImageCache;
+use crate::widget_state::WidgetState;
 use hvat_ui::{
     widgets::*, Application, Color, Element, ImageAdjustments, ImageHandle, Length,
 };
@@ -74,67 +76,68 @@ impl Theme {
 }
 
 pub struct HvatApp {
+    // === Navigation ===
     current_tab: Tab,
+
+    // === Counter demo ===
     counter: i32,
+
+    // === Image viewer - transform state ===
     zoom: f32,
     pan_x: f32,
     pan_y: f32,
-    show_debug_info: bool,
-    theme: Theme,
-    /// The current image for the image viewer (either test image or loaded image)
-    current_image: ImageHandle,
-    /// Image manipulation settings
+
+    // === Image manipulation settings ===
     brightness: f32,
     contrast: f32,
     gamma: f32,
     hue_shift: f32,
-    /// Whether the image is currently being dragged
-    image_dragging: bool,
-    /// Last drag position for calculating delta
-    image_last_drag_pos: Option<(f32, f32)>,
-    /// Which slider is currently being dragged (if any)
-    active_slider: Option<SliderId>,
-    /// Frame count for FPS calculation
-    frame_count: u32,
-    /// Last FPS update time
-    last_fps_time: Instant,
-    /// Current FPS value
-    fps: f32,
-    /// Scroll offset for the main content
-    scroll_offset: f32,
-    /// Whether the scrollbar is being dragged
-    scrollbar_dragging: bool,
-    /// List of image paths loaded from a folder (native only)
-    loaded_image_paths: Vec<PathBuf>,
+
+    // === Settings ===
+    show_debug_info: bool,
+    theme: Theme,
+
+    // === Image data ===
+    /// The current image for the image viewer (either test image or loaded image)
+    current_image: ImageHandle,
+    /// Image cache for loading/preloading (unified native/WASM)
+    image_cache: ImageCache,
     /// Current index in the loaded images list
     current_image_index: usize,
     /// Status message to display
     status_message: Option<String>,
-    /// Number of adjacent images to preload (before and after current)
-    preload_count: usize,
-    /// Native: Cache of decoded images (index -> ImageHandle)
-    #[cfg(not(target_arch = "wasm32"))]
-    native_decoded_cache: std::collections::HashMap<usize, ImageHandle>,
-    /// WASM: Raw image bytes (not decoded) for lazy loading
-    /// Stores (filename, raw_bytes) - decoding happens on demand
-    #[cfg(target_arch = "wasm32")]
-    wasm_image_bytes: Vec<(String, Vec<u8>)>,
-    /// WASM: Cache of decoded images (index -> ImageHandle)
-    #[cfg(target_arch = "wasm32")]
-    wasm_decoded_cache: std::collections::HashMap<usize, ImageHandle>,
+
+    // === Transient UI state (drag states, hover, etc.) ===
+    widget_state: WidgetState,
+
+    // === FPS tracking ===
+    frame_count: u32,
+    last_fps_time: Instant,
+    fps: f32,
 }
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    // Navigation
-    SwitchTab(Tab),
+// ============================================================================
+// Hierarchical Message System
+// ============================================================================
 
-    // Counter
+/// Messages related to navigation between tabs/views.
+#[derive(Debug, Clone)]
+pub enum NavigationMessage {
+    SwitchTab(Tab),
+}
+
+/// Messages for the counter demo.
+#[derive(Debug, Clone)]
+pub enum CounterMessage {
     Increment,
     Decrement,
     Reset,
+}
 
-    // Image viewer - button controls
+/// Messages for image viewer controls (pan, zoom, drag).
+#[derive(Debug, Clone)]
+pub enum ImageViewMessage {
+    // Button controls
     ZoomIn,
     ZoomOut,
     ResetView,
@@ -142,48 +145,164 @@ pub enum Message {
     PanRight,
     PanUp,
     PanDown,
-
-    // Image viewer - from widget callbacks
-    ImagePan((f32, f32)),
+    // Widget callbacks
+    Pan((f32, f32)),
     /// (new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y)
-    ImageZoomAtPoint(f32, f32, f32, f32, f32),
-    ImageDragStart((f32, f32)),
-    ImageDragMove((f32, f32)),
-    ImageDragEnd,
+    ZoomAtPoint(f32, f32, f32, f32, f32),
+    DragStart((f32, f32)),
+    DragMove((f32, f32)),
+    DragEnd,
+}
 
-    // Image manipulation - slider drag
+/// Messages for image manipulation settings (brightness, contrast, etc.).
+#[derive(Debug, Clone)]
+pub enum ImageSettingsMessage {
+    // Slider drag state
     SliderDragStart(SliderId),
     SliderDragEnd,
-
-    // Image manipulation - value changes
+    // Value changes
     SetBrightness(f32),
     SetContrast(f32),
     SetGamma(f32),
     SetHueShift(f32),
-    ResetImageSettings,
+    Reset,
+}
 
-    // Settings
-    ToggleDebugInfo,
-    SetTheme(Theme),
-
-    // FPS counter
-    Tick,
-
-    // Scrolling
-    Scroll(f32),
-    ScrollbarDragStart,
-    ScrollbarDragEnd,
-
-    // Image loading
+/// Messages for image loading and navigation between images.
+#[derive(Debug, Clone)]
+pub enum ImageLoadMessage {
     LoadFolder,
     FolderLoaded(Vec<PathBuf>),
     NextImage,
     PreviousImage,
     ImageLoaded(ImageHandle),
-    /// WASM: Raw file bytes loaded from file input (filename, raw_bytes)
-    /// These are NOT decoded yet - decoding happens lazily
     #[cfg(target_arch = "wasm32")]
     WasmFilesLoaded(Vec<(String, Vec<u8>)>),
+}
+
+/// Messages for UI state (scrolling, debug, theme).
+#[derive(Debug, Clone)]
+pub enum UIMessage {
+    // Scrolling
+    Scroll(f32),
+    ScrollbarDragStart,
+    ScrollbarDragEnd,
+    // Settings
+    ToggleDebugInfo,
+    SetTheme(Theme),
+}
+
+/// Top-level message enum that delegates to sub-message types.
+/// This keeps the match arms organized and easier to maintain.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// Navigation between tabs
+    Navigation(NavigationMessage),
+    /// Counter demo messages
+    Counter(CounterMessage),
+    /// Image viewer (pan/zoom/drag)
+    ImageView(ImageViewMessage),
+    /// Image manipulation settings
+    ImageSettings(ImageSettingsMessage),
+    /// Image loading and file management
+    ImageLoad(ImageLoadMessage),
+    /// UI state (scroll, theme, debug)
+    UI(UIMessage),
+    /// FPS tick (called every frame)
+    Tick,
+}
+
+// ============================================================================
+// Convenience constructors for common messages
+// ============================================================================
+
+impl Message {
+    // Navigation shortcuts
+    pub fn switch_tab(tab: Tab) -> Self {
+        Message::Navigation(NavigationMessage::SwitchTab(tab))
+    }
+
+    // Counter shortcuts
+    pub fn increment() -> Self {
+        Message::Counter(CounterMessage::Increment)
+    }
+    pub fn decrement() -> Self {
+        Message::Counter(CounterMessage::Decrement)
+    }
+
+    // Image view shortcuts
+    pub fn zoom_in() -> Self {
+        Message::ImageView(ImageViewMessage::ZoomIn)
+    }
+    pub fn zoom_out() -> Self {
+        Message::ImageView(ImageViewMessage::ZoomOut)
+    }
+    pub fn reset_view() -> Self {
+        Message::ImageView(ImageViewMessage::ResetView)
+    }
+    pub fn image_drag_start(pos: (f32, f32)) -> Self {
+        Message::ImageView(ImageViewMessage::DragStart(pos))
+    }
+    pub fn image_drag_move(pos: (f32, f32)) -> Self {
+        Message::ImageView(ImageViewMessage::DragMove(pos))
+    }
+    pub fn image_drag_end() -> Self {
+        Message::ImageView(ImageViewMessage::DragEnd)
+    }
+    pub fn image_zoom_at_point(new_zoom: f32, cursor_x: f32, cursor_y: f32, cx: f32, cy: f32) -> Self {
+        Message::ImageView(ImageViewMessage::ZoomAtPoint(new_zoom, cursor_x, cursor_y, cx, cy))
+    }
+
+    // Image settings shortcuts
+    pub fn slider_drag_start(id: SliderId) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SliderDragStart(id))
+    }
+    pub fn slider_drag_end() -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SliderDragEnd)
+    }
+    pub fn set_brightness(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetBrightness(v))
+    }
+    pub fn set_contrast(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetContrast(v))
+    }
+    pub fn set_gamma(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetGamma(v))
+    }
+    pub fn set_hue_shift(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetHueShift(v))
+    }
+    pub fn reset_image_settings() -> Self {
+        Message::ImageSettings(ImageSettingsMessage::Reset)
+    }
+
+    // Image load shortcuts
+    pub fn load_folder() -> Self {
+        Message::ImageLoad(ImageLoadMessage::LoadFolder)
+    }
+    pub fn next_image() -> Self {
+        Message::ImageLoad(ImageLoadMessage::NextImage)
+    }
+    pub fn previous_image() -> Self {
+        Message::ImageLoad(ImageLoadMessage::PreviousImage)
+    }
+
+    // UI shortcuts
+    pub fn scroll(offset: f32) -> Self {
+        Message::UI(UIMessage::Scroll(offset))
+    }
+    pub fn scrollbar_drag_start() -> Self {
+        Message::UI(UIMessage::ScrollbarDragStart)
+    }
+    pub fn scrollbar_drag_end() -> Self {
+        Message::UI(UIMessage::ScrollbarDragEnd)
+    }
+    pub fn toggle_debug_info() -> Self {
+        Message::UI(UIMessage::ToggleDebugInfo)
+    }
+    pub fn set_theme(theme: Theme) -> Self {
+        Message::UI(UIMessage::SetTheme(theme))
+    }
 }
 
 
@@ -202,31 +321,20 @@ impl Application for HvatApp {
             zoom: 1.0,
             pan_x: 0.0,
             pan_y: 0.0,
-            show_debug_info: false,
-            theme: Theme::dark(),
-            current_image: test_image,
             brightness: 0.0,
             contrast: 1.0,
             gamma: 1.0,
             hue_shift: 0.0,
-            image_dragging: false,
-            image_last_drag_pos: None,
-            active_slider: None,
+            show_debug_info: false,
+            theme: Theme::dark(),
+            current_image: test_image,
+            image_cache: ImageCache::new(1), // Preload 1 image before and after
+            current_image_index: 0,
+            status_message: None,
+            widget_state: WidgetState::new(),
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
-            scroll_offset: 0.0,
-            scrollbar_dragging: false,
-            loaded_image_paths: Vec::new(),
-            current_image_index: 0,
-            status_message: None,
-            preload_count: 1, // Preload 1 image before and after current
-            #[cfg(not(target_arch = "wasm32"))]
-            native_decoded_cache: std::collections::HashMap::new(),
-            #[cfg(target_arch = "wasm32")]
-            wasm_image_bytes: Vec::new(),
-            #[cfg(target_arch = "wasm32")]
-            wasm_decoded_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -236,329 +344,20 @@ impl Application for HvatApp {
 
     fn update(&mut self, message: Self::Message) {
         match message {
-            // Navigation
-            Message::SwitchTab(tab) => {
-                log::debug!("🔄 Switching to tab: {:?}", tab);
-                self.current_tab = tab;
-            }
-
-            // Counter
-            Message::Increment => {
-                self.counter += 1;
-                log::debug!("➕ Counter incremented: {}", self.counter);
-            }
-            Message::Decrement => {
-                self.counter -= 1;
-                log::debug!("➖ Counter decremented: {}", self.counter);
-            }
-            Message::Reset => {
-                self.counter = 0;
-                log::debug!("🔄 Counter reset");
-            }
-
-            // Image viewer
-            Message::ZoomIn => {
-                self.zoom = (self.zoom * 1.2).min(5.0);
-                log::debug!("🔍 Zoom in: {:.2}x", self.zoom);
-            }
-            Message::ZoomOut => {
-                self.zoom = (self.zoom / 1.2).max(0.2);
-                log::debug!("🔍 Zoom out: {:.2}x", self.zoom);
-            }
-            Message::ResetView => {
-                self.zoom = 1.0;
-                self.pan_x = 0.0;
-                self.pan_y = 0.0;
-                log::debug!("🔄 View reset");
-            }
-            Message::PanLeft => {
-                self.pan_x -= 10.0;
-                log::debug!("⬅️  Pan left: ({:.0}, {:.0})", self.pan_x, self.pan_y);
-            }
-            Message::PanRight => {
-                self.pan_x += 10.0;
-                log::debug!("➡️  Pan right: ({:.0}, {:.0})", self.pan_x, self.pan_y);
-            }
-            Message::PanUp => {
-                self.pan_y -= 10.0;
-                log::debug!("⬆️  Pan up: ({:.0}, {:.0})", self.pan_x, self.pan_y);
-            }
-            Message::PanDown => {
-                self.pan_y += 10.0;
-                log::debug!("⬇️  Pan down: ({:.0}, {:.0})", self.pan_x, self.pan_y);
-            }
-
-            // Image viewer - from widget callbacks
-            Message::ImagePan(pan) => {
-                self.pan_x = pan.0;
-                self.pan_y = pan.1;
-                // Don't log every pan event to avoid spam
-            }
-            Message::ImageZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y) => {
-                // Zoom-to-cursor algorithm:
-                // The point under the cursor should stay in the same position after zooming.
-                //
-                // Current image point under cursor (in image-space relative to widget center):
-                //   img_x = (cursor_x - widget_center_x - pan_x) / old_zoom
-                //   img_y = (cursor_y - widget_center_y - pan_y) / old_zoom
-                //
-                // After zoom, we want the same image point to be under the cursor:
-                //   cursor_x - widget_center_x = img_x * new_zoom + new_pan_x
-                //   cursor_y - widget_center_y = img_y * new_zoom + new_pan_y
-                //
-                // Solving for new_pan:
-                //   new_pan_x = (cursor_x - widget_center_x) - img_x * new_zoom
-                //   new_pan_y = (cursor_y - widget_center_y) - img_y * new_zoom
-
-                let old_zoom = self.zoom;
-
-                // Cursor position relative to widget center
-                let cursor_rel_x = cursor_x - widget_center_x;
-                let cursor_rel_y = cursor_y - widget_center_y;
-
-                // Image-space point under cursor
-                let img_x = (cursor_rel_x - self.pan_x) / old_zoom;
-                let img_y = (cursor_rel_y - self.pan_y) / old_zoom;
-
-                // Update zoom
-                self.zoom = new_zoom;
-
-                // Calculate new pan to keep the image point under cursor
-                self.pan_x = cursor_rel_x - img_x * new_zoom;
-                self.pan_y = cursor_rel_y - img_y * new_zoom;
-
-                log::debug!("🔍 Zoom-to-cursor: {:.2}x at ({:.1}, {:.1}), pan: ({:.1}, {:.1})",
-                    self.zoom, cursor_x, cursor_y, self.pan_x, self.pan_y);
-            }
-            Message::ImageDragStart(pos) => {
-                self.image_dragging = true;
-                self.image_last_drag_pos = Some(pos);
-                log::debug!("Pan drag started at ({:.1}, {:.1})", pos.0, pos.1);
-            }
-            Message::ImageDragMove(pos) => {
-                if self.image_dragging {
-                    if let Some(last_pos) = self.image_last_drag_pos {
-                        let dx = pos.0 - last_pos.0;
-                        let dy = pos.1 - last_pos.1;
-                        self.pan_x += dx;
-                        self.pan_y += dy;
-                        self.image_last_drag_pos = Some(pos);
-                        // Log pan movement (delta)
-                        if dx.abs() > 1.0 || dy.abs() > 1.0 {
-                            log::debug!("🖐️ Panning: delta({:.1}, {:.1}) -> pan({:.1}, {:.1})", dx, dy, self.pan_x, self.pan_y);
-                        }
-                    }
-                }
-            }
-            Message::ImageDragEnd => {
-                self.image_dragging = false;
-                self.image_last_drag_pos = None;
-                log::debug!("Pan drag ended");
-            }
-
-            // Slider drag state
-            Message::SliderDragStart(id) => {
-                self.active_slider = Some(id);
-                log::debug!("Slider drag started: {:?}", id);
-            }
-            Message::SliderDragEnd => {
-                self.active_slider = None;
-                log::debug!("Slider drag ended");
-            }
-
-            // Image manipulation
-            Message::SetBrightness(value) => {
-                self.brightness = value;
-                log::debug!("☀️  Brightness: {:.2}", self.brightness);
-            }
-            Message::SetContrast(value) => {
-                self.contrast = value;
-                log::debug!("🎛️  Contrast: {:.2}", self.contrast);
-            }
-            Message::SetGamma(value) => {
-                self.gamma = value;
-                log::debug!("📊 Gamma: {:.2}", self.gamma);
-            }
-            Message::SetHueShift(value) => {
-                self.hue_shift = value;
-                log::debug!("🎨 Hue shift: {:.2}", self.hue_shift);
-            }
-            Message::ResetImageSettings => {
-                self.brightness = 0.0;
-                self.contrast = 1.0;
-                self.gamma = 1.0;
-                self.hue_shift = 0.0;
-                log::debug!("🔄 Image settings reset");
-            }
-
-            // Settings
-            Message::ToggleDebugInfo => {
-                self.show_debug_info = !self.show_debug_info;
-                log::debug!("🐛 Debug info: {}", if self.show_debug_info { "ON" } else { "OFF" });
-            }
-            Message::SetTheme(theme) => {
-                self.theme = theme.clone();
-                log::debug!("🎨 Theme changed to: {:?}", self.theme.choice);
-            }
-
-            // FPS counter - called every frame
+            Message::Navigation(msg) => self.handle_navigation(msg),
+            Message::Counter(msg) => self.handle_counter(msg),
+            Message::ImageView(msg) => self.handle_image_view(msg),
+            Message::ImageSettings(msg) => self.handle_image_settings(msg),
+            Message::ImageLoad(msg) => self.handle_image_load(msg),
+            Message::UI(msg) => self.handle_ui(msg),
             Message::Tick => {
                 self.frame_count += 1;
                 let elapsed = self.last_fps_time.elapsed();
-                // Update FPS every second
                 if elapsed.as_secs_f32() >= 1.0 {
                     self.fps = self.frame_count as f32 / elapsed.as_secs_f32();
                     self.frame_count = 0;
                     self.last_fps_time = Instant::now();
                 }
-            }
-
-            // Scrolling
-            Message::Scroll(offset) => {
-                self.scroll_offset = offset;
-                log::debug!("📜 Scroll offset: {:.1}", self.scroll_offset);
-            }
-            Message::ScrollbarDragStart => {
-                self.scrollbar_dragging = true;
-                log::debug!("📜 Scrollbar drag started");
-            }
-            Message::ScrollbarDragEnd => {
-                self.scrollbar_dragging = false;
-                log::debug!("📜 Scrollbar drag ended");
-            }
-
-            // Image loading
-            Message::LoadFolder => {
-                log::info!("📂 Opening folder dialog...");
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                        log::info!("📂 Selected folder: {:?}", folder);
-                        // Find all image files in the folder
-                        let image_extensions = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
-                        let mut paths: Vec<PathBuf> = std::fs::read_dir(&folder)
-                            .ok()
-                            .into_iter()
-                            .flatten()
-                            .filter_map(|entry| entry.ok())
-                            .map(|entry| entry.path())
-                            .filter(|path| {
-                                path.extension()
-                                    .and_then(|ext| ext.to_str())
-                                    .map(|ext| image_extensions.contains(&ext.to_lowercase().as_str()))
-                                    .unwrap_or(false)
-                            })
-                            .collect();
-                        paths.sort();
-
-                        if paths.is_empty() {
-                            self.status_message = Some("No images found in folder".to_string());
-                            log::warn!("📂 No images found in folder");
-                        } else {
-                            let count = paths.len();
-                            self.loaded_image_paths = paths;
-                            self.current_image_index = 0;
-                            self.status_message = Some(format!("Loaded {} images", count));
-                            log::info!("📂 Found {} images", count);
-
-                            // Load the first image
-                            self.load_current_image();
-                        }
-                    }
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    self.status_message = Some("Opening file picker...".to_string());
-                    log::info!("📂 Opening WASM file picker...");
-                    // Trigger the file input - this is fire-and-forget, results come via WasmImagesLoaded
-                    open_wasm_file_picker();
-                }
-            }
-            Message::FolderLoaded(paths) => {
-                // FolderLoaded is only used on native (WASM uses WasmFilesLoaded)
-                self.loaded_image_paths = paths;
-                self.current_image_index = 0;
-                #[cfg(not(target_arch = "wasm32"))]
-                if !self.loaded_image_paths.is_empty() {
-                    self.load_current_image();
-                }
-            }
-            Message::NextImage => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if !self.loaded_image_paths.is_empty() {
-                        self.current_image_index = (self.current_image_index + 1) % self.loaded_image_paths.len();
-                        self.load_current_image();
-                        // Reset view when changing images
-                        self.zoom = 1.0;
-                        self.pan_x = 0.0;
-                        self.pan_y = 0.0;
-                    }
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    if !self.wasm_image_bytes.is_empty() {
-                        self.current_image_index = (self.current_image_index + 1) % self.wasm_image_bytes.len();
-                        self.load_wasm_image_at_index(self.current_image_index);
-                        // Reset view when changing images
-                        self.zoom = 1.0;
-                        self.pan_x = 0.0;
-                        self.pan_y = 0.0;
-                    }
-                }
-            }
-            Message::PreviousImage => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if !self.loaded_image_paths.is_empty() {
-                        self.current_image_index = if self.current_image_index == 0 {
-                            self.loaded_image_paths.len() - 1
-                        } else {
-                            self.current_image_index - 1
-                        };
-                        self.load_current_image();
-                        // Reset view when changing images
-                        self.zoom = 1.0;
-                        self.pan_x = 0.0;
-                        self.pan_y = 0.0;
-                    }
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    if !self.wasm_image_bytes.is_empty() {
-                        self.current_image_index = if self.current_image_index == 0 {
-                            self.wasm_image_bytes.len() - 1
-                        } else {
-                            self.current_image_index - 1
-                        };
-                        self.load_wasm_image_at_index(self.current_image_index);
-                        // Reset view when changing images
-                        self.zoom = 1.0;
-                        self.pan_x = 0.0;
-                        self.pan_y = 0.0;
-                    }
-                }
-            }
-            Message::ImageLoaded(handle) => {
-                self.current_image = handle;
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WasmFilesLoaded(files) => {
-                log::info!("📂 WASM: {} files loaded (lazy - not decoded yet)", files.len());
-                if files.is_empty() {
-                    self.status_message = Some("No files selected".to_string());
-                    return;
-                }
-
-                // Store raw bytes for lazy decoding
-                self.wasm_image_bytes = files;
-                // Clear the decode cache since we have new files
-                self.wasm_decoded_cache.clear();
-                self.current_image_index = 0;
-
-                // Load and decode only the first image
-                self.load_wasm_image_at_index(0);
             }
         }
     }
@@ -568,7 +367,7 @@ impl Application for HvatApp {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(files) = take_wasm_pending_files() {
-                return Some(Message::WasmFilesLoaded(files));
+                return Some(Message::ImageLoad(ImageLoadMessage::WasmFilesLoaded(files)));
             }
         }
         Some(Message::Tick)
@@ -587,22 +386,22 @@ impl Application for HvatApp {
             ))
             .push(Element::new(
                 button("Home")
-                    .on_press(Message::SwitchTab(Tab::Home))
+                    .on_press(Message::switch_tab(Tab::Home))
                     .width(100.0),
             ))
             .push(Element::new(
                 button("Counter")
-                    .on_press(Message::SwitchTab(Tab::Counter))
+                    .on_press(Message::switch_tab(Tab::Counter))
                     .width(100.0),
             ))
             .push(Element::new(
                 button("Image")
-                    .on_press(Message::SwitchTab(Tab::ImageViewer))
+                    .on_press(Message::switch_tab(Tab::ImageViewer))
                     .width(100.0),
             ))
             .push(Element::new(
                 button("Settings")
-                    .on_press(Message::SwitchTab(Tab::Settings))
+                    .on_press(Message::switch_tab(Tab::Settings))
                     .width(100.0),
             ))
             // FPS counter
@@ -628,11 +427,11 @@ impl Application for HvatApp {
 
         // Wrap content in scrollable - use Fill to expand with window
         let scrollable_content = scrollable(Element::new(content))
-            .scroll_offset(self.scroll_offset)
-            .dragging(self.scrollbar_dragging)
-            .on_scroll(Message::Scroll)
-            .on_drag_start(|| Message::ScrollbarDragStart)
-            .on_drag_end(|| Message::ScrollbarDragEnd);
+            .scroll_offset(self.widget_state.scroll.offset)
+            .dragging(self.widget_state.scroll.is_dragging)
+            .on_scroll(Message::scroll)
+            .on_drag_start(Message::scrollbar_drag_start)
+            .on_drag_end(Message::scrollbar_drag_end);
 
         Element::new(
             container(Element::new(
@@ -648,6 +447,241 @@ impl Application for HvatApp {
 }
 
 impl HvatApp {
+    // ========================================================================
+    // Message Handlers - Grouped by message category
+    // ========================================================================
+
+    fn handle_navigation(&mut self, msg: NavigationMessage) {
+        match msg {
+            NavigationMessage::SwitchTab(tab) => {
+                log::debug!("🔄 Switching to tab: {:?}", tab);
+                self.current_tab = tab;
+            }
+        }
+    }
+
+    fn handle_counter(&mut self, msg: CounterMessage) {
+        match msg {
+            CounterMessage::Increment => {
+                self.counter += 1;
+                log::debug!("➕ Counter incremented: {}", self.counter);
+            }
+            CounterMessage::Decrement => {
+                self.counter -= 1;
+                log::debug!("➖ Counter decremented: {}", self.counter);
+            }
+            CounterMessage::Reset => {
+                self.counter = 0;
+                log::debug!("🔄 Counter reset");
+            }
+        }
+    }
+
+    fn handle_image_view(&mut self, msg: ImageViewMessage) {
+        match msg {
+            ImageViewMessage::ZoomIn => {
+                self.zoom = (self.zoom * 1.2).min(5.0);
+                log::debug!("🔍 Zoom in: {:.2}x", self.zoom);
+            }
+            ImageViewMessage::ZoomOut => {
+                self.zoom = (self.zoom / 1.2).max(0.2);
+                log::debug!("🔍 Zoom out: {:.2}x", self.zoom);
+            }
+            ImageViewMessage::ResetView => {
+                self.zoom = 1.0;
+                self.pan_x = 0.0;
+                self.pan_y = 0.0;
+                log::debug!("🔄 View reset");
+            }
+            ImageViewMessage::PanLeft => {
+                self.pan_x -= 10.0;
+                log::debug!("⬅️  Pan left: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+            }
+            ImageViewMessage::PanRight => {
+                self.pan_x += 10.0;
+                log::debug!("➡️  Pan right: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+            }
+            ImageViewMessage::PanUp => {
+                self.pan_y -= 10.0;
+                log::debug!("⬆️  Pan up: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+            }
+            ImageViewMessage::PanDown => {
+                self.pan_y += 10.0;
+                log::debug!("⬇️  Pan down: ({:.0}, {:.0})", self.pan_x, self.pan_y);
+            }
+            ImageViewMessage::Pan(pan) => {
+                self.pan_x = pan.0;
+                self.pan_y = pan.1;
+            }
+            ImageViewMessage::ZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y) => {
+                let old_zoom = self.zoom;
+                let cursor_rel_x = cursor_x - widget_center_x;
+                let cursor_rel_y = cursor_y - widget_center_y;
+                let img_x = (cursor_rel_x - self.pan_x) / old_zoom;
+                let img_y = (cursor_rel_y - self.pan_y) / old_zoom;
+                self.zoom = new_zoom;
+                self.pan_x = cursor_rel_x - img_x * new_zoom;
+                self.pan_y = cursor_rel_y - img_y * new_zoom;
+                log::debug!("🔍 Zoom-to-cursor: {:.2}x at ({:.1}, {:.1}), pan: ({:.1}, {:.1})",
+                    self.zoom, cursor_x, cursor_y, self.pan_x, self.pan_y);
+            }
+            ImageViewMessage::DragStart(pos) => {
+                self.widget_state.image.start_drag(pos);
+                log::debug!("Pan drag started at ({:.1}, {:.1})", pos.0, pos.1);
+            }
+            ImageViewMessage::DragMove(pos) => {
+                if let Some((dx, dy)) = self.widget_state.image.update_drag(pos) {
+                    self.pan_x += dx;
+                    self.pan_y += dy;
+                    if dx.abs() > 1.0 || dy.abs() > 1.0 {
+                        log::debug!("🖐️ Panning: delta({:.1}, {:.1}) -> pan({:.1}, {:.1})", dx, dy, self.pan_x, self.pan_y);
+                    }
+                }
+            }
+            ImageViewMessage::DragEnd => {
+                self.widget_state.image.end_drag();
+                log::debug!("Pan drag ended");
+            }
+        }
+    }
+
+    fn handle_image_settings(&mut self, msg: ImageSettingsMessage) {
+        match msg {
+            ImageSettingsMessage::SliderDragStart(id) => {
+                self.widget_state.slider.start_drag(id);
+                log::debug!("Slider drag started: {:?}", id);
+            }
+            ImageSettingsMessage::SliderDragEnd => {
+                self.widget_state.slider.end_drag();
+                log::debug!("Slider drag ended");
+            }
+            ImageSettingsMessage::SetBrightness(value) => {
+                self.brightness = value;
+                log::debug!("☀️  Brightness: {:.2}", self.brightness);
+            }
+            ImageSettingsMessage::SetContrast(value) => {
+                self.contrast = value;
+                log::debug!("🎛️  Contrast: {:.2}", self.contrast);
+            }
+            ImageSettingsMessage::SetGamma(value) => {
+                self.gamma = value;
+                log::debug!("📊 Gamma: {:.2}", self.gamma);
+            }
+            ImageSettingsMessage::SetHueShift(value) => {
+                self.hue_shift = value;
+                log::debug!("🎨 Hue shift: {:.2}", self.hue_shift);
+            }
+            ImageSettingsMessage::Reset => {
+                self.brightness = 0.0;
+                self.contrast = 1.0;
+                self.gamma = 1.0;
+                self.hue_shift = 0.0;
+                log::debug!("🔄 Image settings reset");
+            }
+        }
+    }
+
+    fn handle_image_load(&mut self, msg: ImageLoadMessage) {
+        match msg {
+            ImageLoadMessage::LoadFolder => {
+                log::info!("📂 Opening folder dialog...");
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        log::info!("📂 Selected folder: {:?}", folder);
+                        match self.image_cache.load_from_folder(&folder) {
+                            Ok(count) if count > 0 => {
+                                self.current_image_index = 0;
+                                self.status_message = Some(format!("Loaded {} images", count));
+                                log::info!("📂 Found {} images", count);
+                                self.load_current_image();
+                            }
+                            Ok(_) => {
+                                self.status_message = Some("No images found in folder".to_string());
+                                log::warn!("📂 No images found in folder");
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Error reading folder: {}", e));
+                                log::error!("📂 Error reading folder: {}", e);
+                            }
+                        }
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.status_message = Some("Opening file picker...".to_string());
+                    log::info!("📂 Opening WASM file picker...");
+                    open_wasm_file_picker();
+                }
+            }
+            ImageLoadMessage::FolderLoaded(_paths) => {
+                // Deprecated - LoadFolder now handles loading directly
+            }
+            ImageLoadMessage::NextImage => {
+                if !self.image_cache.is_empty() {
+                    self.current_image_index = self.image_cache.next_index(self.current_image_index);
+                    self.load_current_image();
+                    self.zoom = 1.0;
+                    self.pan_x = 0.0;
+                    self.pan_y = 0.0;
+                }
+            }
+            ImageLoadMessage::PreviousImage => {
+                if !self.image_cache.is_empty() {
+                    self.current_image_index = self.image_cache.prev_index(self.current_image_index);
+                    self.load_current_image();
+                    self.zoom = 1.0;
+                    self.pan_x = 0.0;
+                    self.pan_y = 0.0;
+                }
+            }
+            ImageLoadMessage::ImageLoaded(handle) => {
+                self.current_image = handle;
+            }
+            #[cfg(target_arch = "wasm32")]
+            ImageLoadMessage::WasmFilesLoaded(files) => {
+                log::info!("📂 WASM: {} files loaded (lazy - not decoded yet)", files.len());
+                if files.is_empty() {
+                    self.status_message = Some("No files selected".to_string());
+                    return;
+                }
+                let count = self.image_cache.load_from_bytes(files);
+                self.current_image_index = 0;
+                self.status_message = Some(format!("Loaded {} images", count));
+                self.load_current_image();
+            }
+        }
+    }
+
+    fn handle_ui(&mut self, msg: UIMessage) {
+        match msg {
+            UIMessage::Scroll(offset) => {
+                self.widget_state.scroll.set_offset(offset);
+                log::debug!("📜 Scroll offset: {:.1}", offset);
+            }
+            UIMessage::ScrollbarDragStart => {
+                self.widget_state.scroll.start_drag();
+                log::debug!("📜 Scrollbar drag started");
+            }
+            UIMessage::ScrollbarDragEnd => {
+                self.widget_state.scroll.end_drag();
+                log::debug!("📜 Scrollbar drag ended");
+            }
+            UIMessage::ToggleDebugInfo => {
+                self.show_debug_info = !self.show_debug_info;
+                log::debug!("🐛 Debug info: {}", if self.show_debug_info { "ON" } else { "OFF" });
+            }
+            UIMessage::SetTheme(theme) => {
+                self.theme = theme.clone();
+                log::debug!("🎨 Theme changed to: {:?}", self.theme.choice);
+            }
+        }
+    }
+
+    // ========================================================================
+    // View Methods
+    // ========================================================================
+
     fn view_home(&self, text_color: Color) -> Column<'static, Message> {
         column()
             .push(Element::new(
@@ -712,17 +746,17 @@ impl HvatApp {
                 row()
                     .push(Element::new(
                         button("Increment")
-                            .on_press(Message::Increment)
+                            .on_press(Message::increment())
                             .width(150.0),
                     ))
                     .push(Element::new(
                         button("Decrement")
-                            .on_press(Message::Decrement)
+                            .on_press(Message::decrement())
                             .width(150.0),
                     ))
                     .push(Element::new(
                         button("Reset")
-                            .on_press(Message::Reset)
+                            .on_press(Message::Counter(CounterMessage::Reset))
                             .width(150.0),
                     ))
                     .spacing(15.0),
@@ -743,16 +777,14 @@ impl HvatApp {
         let image_widget = pan_zoom_image(self.current_image.clone())
             .pan((self.pan_x, self.pan_y))
             .zoom(self.zoom)
-            .dragging(self.image_dragging)
+            .dragging(self.widget_state.image.is_dragging)
             .adjustments(adjustments)
             .width(Length::Units(600.0))
             .height(Length::Units(400.0))
-            .on_drag_start(Message::ImageDragStart)
-            .on_drag_move(Message::ImageDragMove)
-            .on_drag_end(|| Message::ImageDragEnd)
-            .on_zoom(|new_zoom, cursor_x, cursor_y, widget_cx, widget_cy| {
-                Message::ImageZoomAtPoint(new_zoom, cursor_x, cursor_y, widget_cx, widget_cy)
-            });
+            .on_drag_start(Message::image_drag_start)
+            .on_drag_move(Message::image_drag_move)
+            .on_drag_end(Message::image_drag_end)
+            .on_zoom(Message::image_zoom_at_point);
 
         // Status text
         let status_text = self.status_message.as_deref().unwrap_or("No images loaded");
@@ -768,17 +800,17 @@ impl HvatApp {
                 row()
                     .push(Element::new(
                         button("Load Folder")
-                            .on_press(Message::LoadFolder)
+                            .on_press(Message::load_folder())
                             .width(120.0),
                     ))
                     .push(Element::new(
                         button("< Prev")
-                            .on_press(Message::PreviousImage)
+                            .on_press(Message::previous_image())
                             .width(80.0),
                     ))
                     .push(Element::new(
                         button("Next >")
-                            .on_press(Message::NextImage)
+                            .on_press(Message::next_image())
                             .width(80.0),
                     ))
                     .push(Element::new(
@@ -810,17 +842,17 @@ impl HvatApp {
                 row()
                     .push(Element::new(
                         button("Zoom In")
-                            .on_press(Message::ZoomIn)
+                            .on_press(Message::zoom_in())
                             .width(90.0),
                     ))
                     .push(Element::new(
                         button("Zoom Out")
-                            .on_press(Message::ZoomOut)
+                            .on_press(Message::zoom_out())
                             .width(90.0),
                     ))
                     .push(Element::new(
                         button("Reset View")
-                            .on_press(Message::ResetView)
+                            .on_press(Message::reset_view())
                             .width(90.0),
                     ))
                     .spacing(10.0),
@@ -842,11 +874,11 @@ impl HvatApp {
                     .push(Element::new(
                         slider(-1.0, 1.0, self.brightness)
                             .id(SliderId::Brightness)
-                            .dragging(self.active_slider == Some(SliderId::Brightness))
+                            .dragging(self.widget_state.slider.is_dragging(SliderId::Brightness))
                             .width(Length::Units(200.0))
-                            .on_drag_start(Message::SliderDragStart)
-                            .on_change(Message::SetBrightness)
-                            .on_drag_end(|| Message::SliderDragEnd),
+                            .on_drag_start(Message::slider_drag_start)
+                            .on_change(Message::set_brightness)
+                            .on_drag_end(Message::slider_drag_end),
                     ))
                     .spacing(10.0),
             ))
@@ -861,11 +893,11 @@ impl HvatApp {
                     .push(Element::new(
                         slider(0.1, 3.0, self.contrast)
                             .id(SliderId::Contrast)
-                            .dragging(self.active_slider == Some(SliderId::Contrast))
+                            .dragging(self.widget_state.slider.is_dragging(SliderId::Contrast))
                             .width(Length::Units(200.0))
-                            .on_drag_start(Message::SliderDragStart)
-                            .on_change(Message::SetContrast)
-                            .on_drag_end(|| Message::SliderDragEnd),
+                            .on_drag_start(Message::slider_drag_start)
+                            .on_change(Message::set_contrast)
+                            .on_drag_end(Message::slider_drag_end),
                     ))
                     .spacing(10.0),
             ))
@@ -880,11 +912,11 @@ impl HvatApp {
                     .push(Element::new(
                         slider(0.1, 3.0, self.gamma)
                             .id(SliderId::Gamma)
-                            .dragging(self.active_slider == Some(SliderId::Gamma))
+                            .dragging(self.widget_state.slider.is_dragging(SliderId::Gamma))
                             .width(Length::Units(200.0))
-                            .on_drag_start(Message::SliderDragStart)
-                            .on_change(Message::SetGamma)
-                            .on_drag_end(|| Message::SliderDragEnd),
+                            .on_drag_start(Message::slider_drag_start)
+                            .on_change(Message::set_gamma)
+                            .on_drag_end(Message::slider_drag_end),
                     ))
                     .spacing(10.0),
             ))
@@ -899,18 +931,18 @@ impl HvatApp {
                     .push(Element::new(
                         slider(-180.0, 180.0, self.hue_shift)
                             .id(SliderId::HueShift)
-                            .dragging(self.active_slider == Some(SliderId::HueShift))
+                            .dragging(self.widget_state.slider.is_dragging(SliderId::HueShift))
                             .width(Length::Units(200.0))
-                            .on_drag_start(Message::SliderDragStart)
-                            .on_change(Message::SetHueShift)
-                            .on_drag_end(|| Message::SliderDragEnd),
+                            .on_drag_start(Message::slider_drag_start)
+                            .on_change(Message::set_hue_shift)
+                            .on_drag_end(Message::slider_drag_end),
                     ))
                     .spacing(10.0),
             ))
             // Reset button
             .push(Element::new(
                 button("Reset Image Settings")
-                    .on_press(Message::ResetImageSettings)
+                    .on_press(Message::reset_image_settings())
                     .width(180.0),
             ))
             .spacing(8.0)
@@ -935,12 +967,12 @@ impl HvatApp {
                             row()
                                 .push(Element::new(
                                     button("Dark Theme")
-                                        .on_press(Message::SetTheme(Theme::dark()))
+                                        .on_press(Message::set_theme(Theme::dark()))
                                         .width(120.0),
                                 ))
                                 .push(Element::new(
                                     button("Light Theme")
-                                        .on_press(Message::SetTheme(Theme::light()))
+                                        .on_press(Message::set_theme(Theme::light()))
                                         .width(120.0),
                                 ))
                                 .spacing(10.0),
@@ -963,7 +995,7 @@ impl HvatApp {
                             } else {
                                 "Show Debug Info"
                             })
-                            .on_press(Message::ToggleDebugInfo)
+                            .on_press(Message::toggle_debug_info())
                             .width(150.0),
                         ))
                         .spacing(15.0),
@@ -973,225 +1005,28 @@ impl HvatApp {
             .spacing(20.0)
     }
 
-    /// Load the current image from the loaded_image_paths (native only)
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Load the current image using the unified image cache (works on both native and WASM).
     fn load_current_image(&mut self) {
-        self.load_native_image_at_index(self.current_image_index, true);
+        let index = self.current_image_index;
+
+        // Load the current image
+        if let Some(handle) = self.image_cache.get_or_load(index) {
+            self.current_image = handle;
+
+            // Update status message
+            let name = self.image_cache.get_name(index).unwrap_or_default();
+            self.status_message = Some(format!(
+                "Image {}/{}: {}",
+                index + 1,
+                self.image_cache.len(),
+                name
+            ));
+        } else {
+            self.status_message = Some("Failed to load image".to_string());
+        }
+
         // Preload adjacent images
-        self.preload_adjacent_images();
-    }
-
-    /// Native: Load and decode an image at the given index (with caching)
-    #[cfg(not(target_arch = "wasm32"))]
-    fn load_native_image_at_index(&mut self, index: usize, set_current: bool) {
-        if index >= self.loaded_image_paths.len() {
-            return;
-        }
-
-        let path = &self.loaded_image_paths[index];
-
-        // Check cache first
-        if let Some(handle) = self.native_decoded_cache.get(&index) {
-            if set_current {
-                log::info!("🖼️ Using cached image: {:?} (index {})", path.file_name(), index);
-                self.current_image = handle.clone();
-                self.status_message = Some(format!(
-                    "Image {}/{}: {}",
-                    index + 1,
-                    self.loaded_image_paths.len(),
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                ));
-            }
-            return;
-        }
-
-        log::info!("🖼️ Loading image: {:?}", path);
-
-        match image::open(path) {
-            Ok(img) => {
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let data = rgba.into_raw();
-                let handle = ImageHandle::from_rgba8(data, width, height);
-
-                log::info!("🖼️ Loaded {}x{} image", width, height);
-
-                // Cache the decoded image
-                self.native_decoded_cache.insert(index, handle.clone());
-
-                if set_current {
-                    self.current_image = handle;
-                    self.status_message = Some(format!(
-                        "Image {}/{}: {}",
-                        index + 1,
-                        self.loaded_image_paths.len(),
-                        path.file_name().unwrap_or_default().to_string_lossy()
-                    ));
-                }
-            }
-            Err(e) => {
-                if set_current {
-                    self.status_message = Some(format!("Failed to load image: {}", e));
-                }
-                log::error!("🖼️ Failed to load image: {}", e);
-            }
-        }
-    }
-
-    /// Native: Preload adjacent images based on preload_count
-    #[cfg(not(target_arch = "wasm32"))]
-    fn preload_adjacent_images(&mut self) {
-        let total = self.loaded_image_paths.len();
-        if total == 0 {
-            return;
-        }
-
-        let current = self.current_image_index;
-
-        // Preload next images
-        for i in 1..=self.preload_count {
-            let next_idx = (current + i) % total;
-            if !self.native_decoded_cache.contains_key(&next_idx) {
-                log::debug!("🖼️ Preloading next image at index {}", next_idx);
-                self.load_native_image_at_index(next_idx, false);
-            }
-        }
-
-        // Preload previous images
-        for i in 1..=self.preload_count {
-            let prev_idx = if current >= i {
-                current - i
-            } else {
-                total - (i - current)
-            };
-            if !self.native_decoded_cache.contains_key(&prev_idx) {
-                log::debug!("🖼️ Preloading prev image at index {}", prev_idx);
-                self.load_native_image_at_index(prev_idx, false);
-            }
-        }
-
-        // Clean up cache - keep only images within preload range
-        let keep_indices: std::collections::HashSet<usize> = (0..=self.preload_count)
-            .flat_map(|i| {
-                let next = (current + i) % total;
-                let prev = if current >= i { current - i } else { total - (i - current) };
-                vec![next, prev]
-            })
-            .collect();
-
-        self.native_decoded_cache.retain(|idx, _| keep_indices.contains(idx));
-    }
-
-    /// WASM: Load the current image and preload adjacent images
-    #[cfg(target_arch = "wasm32")]
-    fn load_wasm_image_at_index(&mut self, index: usize) {
-        self.load_wasm_image_at_index_impl(index, true);
-        // Preload adjacent images
-        self.preload_adjacent_wasm_images();
-    }
-
-    /// WASM: Load and decode an image at the given index (with caching)
-    #[cfg(target_arch = "wasm32")]
-    fn load_wasm_image_at_index_impl(&mut self, index: usize, set_current: bool) {
-        if index >= self.wasm_image_bytes.len() {
-            return;
-        }
-
-        let (name, _) = &self.wasm_image_bytes[index];
-        let name = name.clone();
-
-        // Check cache first
-        if let Some(handle) = self.wasm_decoded_cache.get(&index) {
-            if set_current {
-                log::info!("🖼️ Using cached image: {} (index {})", name, index);
-                self.current_image = handle.clone();
-                self.status_message = Some(format!(
-                    "Image {}/{}: {}",
-                    index + 1,
-                    self.wasm_image_bytes.len(),
-                    name
-                ));
-            }
-            return;
-        }
-
-        // Decode on demand
-        let bytes = &self.wasm_image_bytes[index].1;
-        log::info!("🖼️ Decoding image: {} ({} bytes)", name, bytes.len());
-
-        match image::load_from_memory(bytes) {
-            Ok(img) => {
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let data = rgba.into_raw();
-                let handle = ImageHandle::from_rgba8(data, width, height);
-
-                log::info!("🖼️ Decoded {}: {}x{}", name, width, height);
-
-                // Cache the decoded image
-                self.wasm_decoded_cache.insert(index, handle.clone());
-
-                if set_current {
-                    self.current_image = handle;
-                    self.status_message = Some(format!(
-                        "Image {}/{}: {}",
-                        index + 1,
-                        self.wasm_image_bytes.len(),
-                        name
-                    ));
-                }
-            }
-            Err(e) => {
-                if set_current {
-                    self.status_message = Some(format!("Failed to decode {}: {}", name, e));
-                }
-                log::error!("🖼️ Failed to decode {}: {}", name, e);
-            }
-        }
-    }
-
-    /// WASM: Preload adjacent images based on preload_count
-    #[cfg(target_arch = "wasm32")]
-    fn preload_adjacent_wasm_images(&mut self) {
-        let total = self.wasm_image_bytes.len();
-        if total == 0 {
-            return;
-        }
-
-        let current = self.current_image_index;
-
-        // Preload next images
-        for i in 1..=self.preload_count {
-            let next_idx = (current + i) % total;
-            if !self.wasm_decoded_cache.contains_key(&next_idx) {
-                log::debug!("🖼️ Preloading next image at index {}", next_idx);
-                self.load_wasm_image_at_index_impl(next_idx, false);
-            }
-        }
-
-        // Preload previous images
-        for i in 1..=self.preload_count {
-            let prev_idx = if current >= i {
-                current - i
-            } else {
-                total - (i - current)
-            };
-            if !self.wasm_decoded_cache.contains_key(&prev_idx) {
-                log::debug!("🖼️ Preloading prev image at index {}", prev_idx);
-                self.load_wasm_image_at_index_impl(prev_idx, false);
-            }
-        }
-
-        // Clean up cache - keep only images within preload range
-        let keep_indices: std::collections::HashSet<usize> = (0..=self.preload_count)
-            .flat_map(|i| {
-                let next = (current + i) % total;
-                let prev = if current >= i { current - i } else { total - (i - current) };
-                vec![next, prev]
-            })
-            .collect();
-
-        self.wasm_decoded_cache.retain(|idx, _| keep_indices.contains(idx));
+        self.image_cache.preload_adjacent(index);
     }
 }
 
@@ -1316,14 +1151,13 @@ pub fn open_wasm_file_picker() {
                 return;
             }
 
-            // Filter to only image files
-            let image_extensions = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif"];
+            // Filter to only image files using the centralized check
             let mut image_files = Vec::new();
             for i in 0..count {
                 if let Some(file) = files.get(i) {
-                    let name = file.name().to_lowercase();
-                    if image_extensions.iter().any(|ext| name.ends_with(ext)) {
-                        image_files.push(files.get(i).unwrap());
+                    let name = file.name();
+                    if crate::image_cache::is_image_file(&name) {
+                        image_files.push(file);
                     }
                 }
             }
