@@ -186,12 +186,62 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         app_state.handle_event(ui_event);
                         window.request_redraw();
                     }
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if let Some(key) = convert_key(&event.logical_key) {
+                            let modifiers = crate::Modifiers::default(); // TODO: track modifiers
+                            let ui_event = match event.state {
+                                winit::event::ElementState::Pressed => crate::Event::KeyPressed {
+                                    key,
+                                    modifiers,
+                                },
+                                winit::event::ElementState::Released => crate::Event::KeyReleased {
+                                    key,
+                                    modifiers,
+                                },
+                            };
+                            app_state.handle_event(ui_event);
+                            window.request_redraw();
+                        }
+                    }
                     _ => {}
                 },
                 _ => {}
             }
         })
         .map_err(|e| format!("Event loop error: {:?}", e))
+}
+
+/// Convert winit key to hvat_ui key.
+fn convert_key(key: &winit::keyboard::Key) -> Option<crate::Key> {
+    use winit::keyboard::{Key as WinitKey, NamedKey};
+    match key {
+        WinitKey::Named(named) => match named {
+            NamedKey::Enter => Some(crate::Key::Enter),
+            NamedKey::Escape => Some(crate::Key::Escape),
+            NamedKey::Backspace => Some(crate::Key::Backspace),
+            NamedKey::Delete => Some(crate::Key::Delete),
+            NamedKey::Tab => Some(crate::Key::Tab),
+            NamedKey::Space => Some(crate::Key::Space),
+            NamedKey::ArrowUp => Some(crate::Key::Up),
+            NamedKey::ArrowDown => Some(crate::Key::Down),
+            NamedKey::ArrowLeft => Some(crate::Key::Left),
+            NamedKey::ArrowRight => Some(crate::Key::Right),
+            NamedKey::Home => Some(crate::Key::Home),
+            NamedKey::End => Some(crate::Key::End),
+            NamedKey::PageUp => Some(crate::Key::PageUp),
+            NamedKey::PageDown => Some(crate::Key::PageDown),
+            _ => None,
+        },
+        WinitKey::Character(c) => {
+            let chars: Vec<char> = c.chars().collect();
+            if chars.len() == 1 {
+                Some(crate::Key::Char(chars[0]))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Run an application with the given settings (WASM version).
@@ -428,6 +478,23 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         // Send event to widgets
                         app_state.handle_event(ui_event);
                         window.request_redraw();
+                    }
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if let Some(key) = convert_key(&event.logical_key) {
+                            let modifiers = crate::Modifiers::default(); // TODO: track modifiers
+                            let ui_event = match event.state {
+                                winit::event::ElementState::Pressed => crate::Event::KeyPressed {
+                                    key,
+                                    modifiers,
+                                },
+                                winit::event::ElementState::Released => crate::Event::KeyReleased {
+                                    key,
+                                    modifiers,
+                                },
+                            };
+                            app_state.handle_event(ui_event);
+                            window.request_redraw();
+                        }
                     }
                     _ => {}
                 },

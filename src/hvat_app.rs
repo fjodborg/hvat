@@ -1,9 +1,11 @@
 // The main HVAT application - shared between native and WASM builds
 
+use crate::annotation::{AnnotationStore, AnnotationTool, Category, DrawingState, Point};
 use crate::image_cache::ImageCache;
 use crate::widget_state::WidgetState;
 use hvat_ui::{
     widgets::*, Application, Color, Element, ImageAdjustments, ImageHandle, Length,
+    Overlay, OverlayItem, OverlayShape,
 };
 use std::path::PathBuf;
 use web_time::Instant;
@@ -110,6 +112,12 @@ pub struct HvatApp {
     // === Transient UI state (drag states, hover, etc.) ===
     widget_state: WidgetState,
 
+    // === Annotation system ===
+    /// Annotation storage per image (keyed by image name/path)
+    annotations_map: std::collections::HashMap<String, AnnotationStore>,
+    /// Current drawing state (tool, in-progress points)
+    drawing_state: DrawingState,
+
     // === FPS tracking ===
     frame_count: u32,
     last_fps_time: Instant,
@@ -192,6 +200,30 @@ pub enum UIMessage {
     SetTheme(Theme),
 }
 
+/// Messages for annotation tools and operations.
+#[derive(Debug, Clone)]
+pub enum AnnotationMessage {
+    // Tool selection
+    SetTool(AnnotationTool),
+    // Category management
+    SetCategory(u32),
+    AddCategory(String),
+    // Drawing operations
+    StartDrawing(f32, f32),
+    ContinueDrawing(f32, f32),
+    FinishDrawing,
+    /// Force finish polygon (right-click or Enter) - closes polygon regardless of mouse state
+    ForceFinishPolygon,
+    CancelDrawing,
+    // Selection
+    SelectAnnotation(Option<u64>),
+    DeleteSelected,
+    // Import/Export
+    ExportJson,
+    ImportJson,
+    ClearAll,
+}
+
 /// Top-level message enum that delegates to sub-message types.
 /// This keeps the match arms organized and easier to maintain.
 #[derive(Debug, Clone)]
@@ -208,6 +240,8 @@ pub enum Message {
     ImageLoad(ImageLoadMessage),
     /// UI state (scroll, theme, debug)
     UI(UIMessage),
+    /// Annotation tools and operations
+    Annotation(AnnotationMessage),
     /// FPS tick (called every frame)
     Tick,
 }
@@ -303,6 +337,38 @@ impl Message {
     pub fn set_theme(theme: Theme) -> Self {
         Message::UI(UIMessage::SetTheme(theme))
     }
+
+    // Annotation shortcuts
+    pub fn set_annotation_tool(tool: AnnotationTool) -> Self {
+        Message::Annotation(AnnotationMessage::SetTool(tool))
+    }
+    pub fn set_annotation_category(id: u32) -> Self {
+        Message::Annotation(AnnotationMessage::SetCategory(id))
+    }
+    pub fn start_drawing(x: f32, y: f32) -> Self {
+        Message::Annotation(AnnotationMessage::StartDrawing(x, y))
+    }
+    pub fn continue_drawing(x: f32, y: f32) -> Self {
+        Message::Annotation(AnnotationMessage::ContinueDrawing(x, y))
+    }
+    pub fn finish_drawing() -> Self {
+        Message::Annotation(AnnotationMessage::FinishDrawing)
+    }
+    pub fn force_finish_polygon() -> Self {
+        Message::Annotation(AnnotationMessage::ForceFinishPolygon)
+    }
+    pub fn cancel_drawing() -> Self {
+        Message::Annotation(AnnotationMessage::CancelDrawing)
+    }
+    pub fn delete_selected_annotation() -> Self {
+        Message::Annotation(AnnotationMessage::DeleteSelected)
+    }
+    pub fn export_annotations() -> Self {
+        Message::Annotation(AnnotationMessage::ExportJson)
+    }
+    pub fn clear_annotations() -> Self {
+        Message::Annotation(AnnotationMessage::ClearAll)
+    }
 }
 
 
@@ -332,6 +398,8 @@ impl Application for HvatApp {
             current_image_index: 0,
             status_message: None,
             widget_state: WidgetState::new(),
+            annotations_map: std::collections::HashMap::new(),
+            drawing_state: DrawingState::new(),
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
@@ -350,6 +418,7 @@ impl Application for HvatApp {
             Message::ImageSettings(msg) => self.handle_image_settings(msg),
             Message::ImageLoad(msg) => self.handle_image_load(msg),
             Message::UI(msg) => self.handle_ui(msg),
+            Message::Annotation(msg) => self.handle_annotation(msg),
             Message::Tick => {
                 self.frame_count += 1;
                 let elapsed = self.last_fps_time.elapsed();
@@ -447,6 +516,28 @@ impl Application for HvatApp {
 }
 
 impl HvatApp {
+    // ========================================================================
+    // Annotation Helpers
+    // ========================================================================
+
+    /// Get the current image key for annotation storage.
+    fn current_image_key(&self) -> String {
+        self.image_cache.get_name(self.current_image_index).unwrap_or_else(|| "default".to_string())
+    }
+
+    /// Get annotations for the current image (creates empty store if needed).
+    fn annotations(&self) -> &AnnotationStore {
+        static EMPTY: std::sync::OnceLock<AnnotationStore> = std::sync::OnceLock::new();
+        let key = self.current_image_key();
+        self.annotations_map.get(&key).unwrap_or_else(|| EMPTY.get_or_init(AnnotationStore::new))
+    }
+
+    /// Get mutable annotations for the current image (creates empty store if needed).
+    fn annotations_mut(&mut self) -> &mut AnnotationStore {
+        let key = self.current_image_key();
+        self.annotations_map.entry(key).or_insert_with(AnnotationStore::new)
+    }
+
     // ========================================================================
     // Message Handlers - Grouped by message category
     // ========================================================================
@@ -678,6 +769,177 @@ impl HvatApp {
         }
     }
 
+    fn handle_annotation(&mut self, msg: AnnotationMessage) {
+        match msg {
+            AnnotationMessage::SetTool(tool) => {
+                self.drawing_state.tool = tool;
+                // Cancel any in-progress drawing when switching tools
+                self.drawing_state.cancel();
+                log::debug!("🖌️ Annotation tool: {:?}", tool);
+            }
+            AnnotationMessage::SetCategory(id) => {
+                self.drawing_state.current_category = id;
+                log::debug!("🏷️ Category: {}", id);
+            }
+            AnnotationMessage::AddCategory(name) => {
+                let id = self.annotations().categories().count() as u32;
+                self.annotations_mut().add_category(Category::new(id, name.clone()));
+                log::debug!("🏷️ Added category: {} (id={})", name, id);
+            }
+            AnnotationMessage::StartDrawing(x, y) => {
+                match self.drawing_state.tool {
+                    AnnotationTool::Select => {
+                        // Hit test for selection
+                        let hit = self.annotations().hit_test(&Point::new(x, y));
+                        self.annotations_mut().select(hit);
+                        if let Some(id) = hit {
+                            log::debug!("🔍 Selected annotation {}", id);
+                        }
+                    }
+                    AnnotationTool::Point => {
+                        // Point tool: create immediately on click
+                        let category = self.drawing_state.current_category;
+                        let id = self.annotations_mut().add(
+                            category,
+                            crate::annotation::Shape::Point(Point::new(x, y))
+                        );
+                        log::info!("✅ Created point annotation {} at ({:.1}, {:.1})", id, x, y);
+                    }
+                    AnnotationTool::BoundingBox => {
+                        // Start drawing for bbox
+                        self.drawing_state.start(Point::new(x, y));
+                        log::debug!("✏️ Started bbox at ({:.1}, {:.1})", x, y);
+                    }
+                    AnnotationTool::Polygon => {
+                        if self.drawing_state.is_drawing {
+                            // Check if clicking near first point to close polygon
+                            if self.drawing_state.points.len() >= 3 {
+                                if let Some(first) = self.drawing_state.points.first() {
+                                    let click_point = Point::new(x, y);
+                                    // Close threshold in image coordinates (adjustable)
+                                    const CLOSE_THRESHOLD: f32 = 15.0;
+                                    if first.distance_to(&click_point) < CLOSE_THRESHOLD / self.zoom {
+                                        // Close the polygon
+                                        let category = self.drawing_state.current_category;
+                                        if let Some(shape) = self.drawing_state.finish() {
+                                            let id = self.annotations_mut().add(category, shape);
+                                            log::info!("✅ Closed polygon annotation {} (category={})", id, category);
+                                        }
+                                        return;
+                                    }
+                                }
+                            }
+                            // Not closing - add another point
+                            self.drawing_state.add_point(Point::new(x, y));
+                            log::debug!("✏️ Added polygon point at ({:.1}, {:.1}), total: {}", x, y, self.drawing_state.points.len());
+                        } else {
+                            // Start new polygon
+                            self.drawing_state.start(Point::new(x, y));
+                            log::debug!("✏️ Started polygon at ({:.1}, {:.1})", x, y);
+                        }
+                    }
+                }
+            }
+            AnnotationMessage::ContinueDrawing(x, y) => {
+                if self.drawing_state.is_drawing {
+                    match self.drawing_state.tool {
+                        AnnotationTool::BoundingBox => {
+                            // For bbox, we need exactly 2 points - add second if missing, else update
+                            if self.drawing_state.points.len() == 1 {
+                                self.drawing_state.add_point(Point::new(x, y));
+                            } else {
+                                self.drawing_state.update_last(Point::new(x, y));
+                            }
+                        }
+                        AnnotationTool::Polygon => {
+                            // For polygon, we don't add points on move - only on click
+                            // (ContinueDrawing for polygon should just update preview)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            AnnotationMessage::FinishDrawing => {
+                // This is called on mouse release - only finish bbox, NOT polygon
+                // Polygon is finished via ForceFinishPolygon (right-click/Enter) or clicking first point
+                match self.drawing_state.tool {
+                    AnnotationTool::BoundingBox => {
+                        let category = self.drawing_state.current_category;
+                        if let Some(shape) = self.drawing_state.finish() {
+                            let id = self.annotations_mut().add(category, shape);
+                            log::info!("✅ Created bbox annotation {} (category={})", id, category);
+                        }
+                    }
+                    AnnotationTool::Polygon => {
+                        // Do nothing on mouse release for polygon - keep drawing
+                        log::debug!("📝 Polygon continues (use right-click or click first point to close)");
+                    }
+                    _ => {
+                        // Point tool handles creation in StartDrawing, Select doesn't create
+                    }
+                }
+            }
+            AnnotationMessage::ForceFinishPolygon => {
+                // Called via right-click or Enter key - force close polygon if valid
+                if self.drawing_state.tool == AnnotationTool::Polygon && self.drawing_state.is_drawing {
+                    if self.drawing_state.points.len() >= 3 {
+                        let category = self.drawing_state.current_category;
+                        if let Some(shape) = self.drawing_state.finish() {
+                            let id = self.annotations_mut().add(category, shape);
+                            log::info!("✅ Created polygon annotation {} (category={})", id, category);
+                        }
+                    } else {
+                        log::debug!("📝 Polygon needs at least 3 points, currently has {}", self.drawing_state.points.len());
+                    }
+                }
+            }
+            AnnotationMessage::CancelDrawing => {
+                self.drawing_state.cancel();
+                log::debug!("❌ Drawing cancelled");
+            }
+            AnnotationMessage::SelectAnnotation(id) => {
+                self.annotations_mut().select(id);
+                log::debug!("🔍 Selected annotation: {:?}", id);
+            }
+            AnnotationMessage::DeleteSelected => {
+                if let Some(id) = self.annotations().selected() {
+                    self.annotations_mut().remove(id);
+                    log::info!("🗑️ Deleted annotation {}", id);
+                }
+            }
+            AnnotationMessage::ExportJson => {
+                match self.annotations().to_json() {
+                    Ok(json) => {
+                        log::info!("📤 Exported {} annotations to JSON", self.annotations().len());
+                        // In a real app, we'd save to file or clipboard
+                        // For now, just log a preview
+                        if json.len() > 200 {
+                            log::debug!("JSON preview: {}...", &json[..200]);
+                        } else {
+                            log::debug!("JSON: {}", json);
+                        }
+                        self.status_message = Some(format!("Exported {} annotations", self.annotations().len()));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to export JSON: {}", e);
+                        self.status_message = Some(format!("Export failed: {}", e));
+                    }
+                }
+            }
+            AnnotationMessage::ImportJson => {
+                // TODO: Implement file picker for importing
+                log::info!("📥 Import not yet implemented");
+                self.status_message = Some("Import not yet implemented".to_string());
+            }
+            AnnotationMessage::ClearAll => {
+                let count = self.annotations().len();
+                self.annotations_mut().clear();
+                log::info!("🗑️ Cleared {} annotations", count);
+                self.status_message = Some(format!("Cleared {} annotations", count));
+            }
+        }
+    }
+
     // ========================================================================
     // View Methods
     // ========================================================================
@@ -764,6 +1026,72 @@ impl HvatApp {
             .spacing(30.0)
     }
 
+    /// Build an overlay from the current annotations and drawing state.
+    fn build_overlay(&self) -> Overlay {
+        let mut overlay = Overlay::new();
+
+        // Add all annotations
+        let annotations = self.annotations();
+        for ann in annotations.iter() {
+            // Get category color
+            let cat_color = annotations
+                .get_category(ann.category_id)
+                .map(|c| Color::new(c.color[0], c.color[1], c.color[2], c.color[3]))
+                .unwrap_or(Color::rgb(0.7, 0.7, 0.7));
+
+            let shape = match &ann.shape {
+                crate::annotation::Shape::Point(p) => OverlayShape::Point {
+                    x: p.x,
+                    y: p.y,
+                    radius: 6.0,
+                },
+                crate::annotation::Shape::BoundingBox(b) => OverlayShape::Rect {
+                    x: b.x,
+                    y: b.y,
+                    width: b.width,
+                    height: b.height,
+                },
+                crate::annotation::Shape::Polygon(poly) => OverlayShape::Polygon {
+                    vertices: poly.vertices.iter().map(|p| (p.x, p.y)).collect(),
+                    closed: poly.closed,
+                },
+            };
+
+            let selected = annotations.selected() == Some(ann.id);
+            overlay.push(OverlayItem::new(shape, cat_color).selected(selected));
+        }
+
+        // Add preview for in-progress drawing
+        if let Some(preview_shape) = self.drawing_state.preview() {
+            let cat_color = annotations
+                .get_category(self.drawing_state.current_category)
+                .map(|c| Color::new(c.color[0], c.color[1], c.color[2], 0.5))
+                .unwrap_or(Color::new(0.7, 0.7, 0.7, 0.5));
+
+            let shape = match preview_shape {
+                crate::annotation::Shape::Point(p) => OverlayShape::Point {
+                    x: p.x,
+                    y: p.y,
+                    radius: 6.0,
+                },
+                crate::annotation::Shape::BoundingBox(b) => OverlayShape::Rect {
+                    x: b.x,
+                    y: b.y,
+                    width: b.width,
+                    height: b.height,
+                },
+                crate::annotation::Shape::Polygon(poly) => OverlayShape::Polygon {
+                    vertices: poly.vertices.iter().map(|p| (p.x, p.y)).collect(),
+                    closed: false, // Preview is always open
+                },
+            };
+
+            overlay.set_preview(Some(OverlayItem::new(shape, cat_color)));
+        }
+
+        overlay
+    }
+
     fn view_image_viewer(&self, text_color: Color) -> Column<'_, Message> {
         // Create image adjustments from current settings
         let adjustments = ImageAdjustments {
@@ -773,18 +1101,28 @@ impl HvatApp {
             hue_shift: self.hue_shift,
         };
 
+        // Build the annotation overlay
+        let overlay = self.build_overlay();
+
         // Create the pan/zoom image widget
         let image_widget = pan_zoom_image(self.current_image.clone())
             .pan((self.pan_x, self.pan_y))
             .zoom(self.zoom)
             .dragging(self.widget_state.image.is_dragging)
+            .drawing(self.drawing_state.is_drawing)
             .adjustments(adjustments)
+            .overlay(overlay)
             .width(Length::Units(600.0))
             .height(Length::Units(400.0))
             .on_drag_start(Message::image_drag_start)
             .on_drag_move(Message::image_drag_move)
             .on_drag_end(Message::image_drag_end)
-            .on_zoom(Message::image_zoom_at_point);
+            .on_zoom(Message::image_zoom_at_point)
+            // Annotation callbacks
+            .on_click(|(x, y)| Message::start_drawing(x, y))
+            .on_draw_move(|(x, y)| Message::continue_drawing(x, y))
+            .on_draw_end(Message::finish_drawing)
+            .on_space(Message::force_finish_polygon);
 
         // Status text
         let status_text = self.status_message.as_deref().unwrap_or("No images loaded");
@@ -833,7 +1171,7 @@ impl HvatApp {
                     .border_width(2.0),
             ))
             .push(Element::new(
-                text("Drag to pan, scroll to zoom")
+                text("Middle-click drag to pan, scroll to zoom")
                     .size(12.0)
                     .color(Color::rgb(0.6, 0.6, 0.6)),
             ))
@@ -945,7 +1283,76 @@ impl HvatApp {
                     .on_press(Message::reset_image_settings())
                     .width(180.0),
             ))
+            // Annotation toolbar
+            .push(Element::new(
+                text("Annotation Tools:")
+                    .size(14.0)
+                    .color(self.theme.accent_color()),
+            ))
+            .push(Element::new(self.view_annotation_toolbar(text_color)))
+            // Annotation info
+            .push(Element::new(
+                text(format!(
+                    "Annotations: {} | Tool: {:?} | {}",
+                    self.annotations().len(),
+                    self.drawing_state.tool,
+                    if self.drawing_state.is_drawing { "Drawing..." } else { "Ready" }
+                ))
+                .size(12.0)
+                .color(text_color),
+            ))
             .spacing(8.0)
+    }
+
+    fn view_annotation_toolbar(&self, _text_color: Color) -> Row<'static, Message> {
+        let tool = self.drawing_state.tool;
+
+        // Tool selection buttons with visual indication of active tool
+        let select_btn = if tool == AnnotationTool::Select {
+            button("Select *").on_press(Message::set_annotation_tool(AnnotationTool::Select)).width(80.0)
+        } else {
+            button("Select").on_press(Message::set_annotation_tool(AnnotationTool::Select)).width(80.0)
+        };
+
+        let bbox_btn = if tool == AnnotationTool::BoundingBox {
+            button("BBox *").on_press(Message::set_annotation_tool(AnnotationTool::BoundingBox)).width(80.0)
+        } else {
+            button("BBox").on_press(Message::set_annotation_tool(AnnotationTool::BoundingBox)).width(80.0)
+        };
+
+        let poly_btn = if tool == AnnotationTool::Polygon {
+            button("Polygon *").on_press(Message::set_annotation_tool(AnnotationTool::Polygon)).width(80.0)
+        } else {
+            button("Polygon").on_press(Message::set_annotation_tool(AnnotationTool::Polygon)).width(80.0)
+        };
+
+        let point_btn = if tool == AnnotationTool::Point {
+            button("Point *").on_press(Message::set_annotation_tool(AnnotationTool::Point)).width(80.0)
+        } else {
+            button("Point").on_press(Message::set_annotation_tool(AnnotationTool::Point)).width(80.0)
+        };
+
+        row()
+            .push(Element::new(select_btn))
+            .push(Element::new(bbox_btn))
+            .push(Element::new(poly_btn))
+            .push(Element::new(point_btn))
+            .push(Element::new(
+                button("Delete")
+                    .on_press(Message::delete_selected_annotation())
+                    .width(70.0),
+            ))
+            .push(Element::new(
+                button("Export")
+                    .on_press(Message::export_annotations())
+                    .width(70.0),
+            ))
+            .push(Element::new(
+                button("Clear")
+                    .on_press(Message::clear_annotations())
+                    .width(60.0),
+            ))
+            .spacing(5.0)
     }
 
     fn view_settings(&self, text_color: Color) -> Column<'static, Message> {

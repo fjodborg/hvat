@@ -13,6 +13,13 @@ pub use widget_state::{WidgetState, ImageViewState, SliderState, ScrollState};
 mod zoom_math;
 pub use zoom_math::Transform;
 
+// Annotation system for image labeling
+mod annotation;
+pub use annotation::{
+    Annotation, AnnotationStore, AnnotationTool, BoundingBox, Category,
+    DrawingState, Point, Polygon, Shape,
+};
+
 // HVAT application (shared between native and WASM)
 mod hvat_app;
 pub use hvat_app::HvatApp;

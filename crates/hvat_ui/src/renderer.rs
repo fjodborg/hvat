@@ -54,6 +54,27 @@ enum DrawCommand {
         color: Color,
         width: f32,
     },
+    DrawLine {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        color: Color,
+        width: f32,
+    },
+    FillCircle {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: Color,
+    },
+    StrokeCircle {
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: Color,
+        width: f32,
+    },
     DrawText {
         text: String,
         position: Point,
@@ -299,6 +320,46 @@ impl Renderer {
         });
     }
 
+    /// Draw a line segment.
+    pub fn draw_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, color: Color, width: f32) {
+        let (sx1, sy1) = self.state.to_screen_point(x1, y1);
+        let (sx2, sy2) = self.state.to_screen_point(x2, y2);
+
+        self.emit_with_clip(DrawCommand::DrawLine {
+            x1: sx1,
+            y1: sy1,
+            x2: sx2,
+            y2: sy2,
+            color,
+            width,
+        });
+    }
+
+    /// Draw a filled circle.
+    pub fn fill_circle(&mut self, cx: f32, cy: f32, radius: f32, color: Color) {
+        let (scx, scy) = self.state.to_screen_point(cx, cy);
+
+        self.emit_with_clip(DrawCommand::FillCircle {
+            cx: scx,
+            cy: scy,
+            radius,
+            color,
+        });
+    }
+
+    /// Draw a circle outline.
+    pub fn stroke_circle(&mut self, cx: f32, cy: f32, radius: f32, color: Color, width: f32) {
+        let (scx, scy) = self.state.to_screen_point(cx, cy);
+
+        self.emit_with_clip(DrawCommand::StrokeCircle {
+            cx: scx,
+            cy: scy,
+            radius,
+            color,
+            width,
+        });
+    }
+
     /// Draw text at a position.
     pub fn draw_text(&mut self, text: &str, position: Point, color: Color, size: f32) {
         let (screen_x, screen_y) = self.state.to_screen_point(position.x, position.y);
@@ -400,6 +461,20 @@ impl Renderer {
                 DrawCommand::StrokeRect { rect, .. } |
                 DrawCommand::DrawImage { rect, .. } => {
                     rects_overlap(rect, &clip)
+                }
+                DrawCommand::DrawLine { x1, y1, x2, y2, width, .. } => {
+                    // Approximate line bounds
+                    let min_x = x1.min(*x2) - width;
+                    let min_y = y1.min(*y2) - width;
+                    let max_x = x1.max(*x2) + width;
+                    let max_y = y1.max(*y2) + width;
+                    let line_rect = Rectangle::new(min_x, min_y, max_x - min_x, max_y - min_y);
+                    rects_overlap(&line_rect, &clip)
+                }
+                DrawCommand::FillCircle { cx, cy, radius, .. } |
+                DrawCommand::StrokeCircle { cx, cy, radius, .. } => {
+                    let circle_rect = Rectangle::new(cx - radius, cy - radius, radius * 2.0, radius * 2.0);
+                    rects_overlap(&circle_rect, &clip)
                 }
                 DrawCommand::DrawText { position, size, .. } => {
                     // Approximate text bounds
@@ -713,6 +788,41 @@ impl Renderer {
                         let (vb, ib, count) = ColorPipeline::create_stroke_rect_vertices(
                             &self.gpu_ctx.device,
                             rect.x, rect.y, rect.width, rect.height,
+                            [color.r, color.g, color.b, color.a],
+                            *width,
+                            self.width as f32, self.height as f32,
+                        );
+                        pass.set_vertex_buffer(0, vb.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
+                        pass.draw_indexed(0..count, 0, 0..1);
+                    }
+                    DrawCommand::DrawLine { x1, y1, x2, y2, color, width } => {
+                        let (vb, ib, count) = ColorPipeline::create_line_vertices(
+                            &self.gpu_ctx.device,
+                            *x1, *y1, *x2, *y2,
+                            [color.r, color.g, color.b, color.a],
+                            *width,
+                            self.width as f32, self.height as f32,
+                        );
+                        pass.set_vertex_buffer(0, vb.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
+                        pass.draw_indexed(0..count, 0, 0..1);
+                    }
+                    DrawCommand::FillCircle { cx, cy, radius, color } => {
+                        let (vb, ib, count) = ColorPipeline::create_circle_vertices(
+                            &self.gpu_ctx.device,
+                            *cx, *cy, *radius,
+                            [color.r, color.g, color.b, color.a],
+                            self.width as f32, self.height as f32,
+                        );
+                        pass.set_vertex_buffer(0, vb.slice(..));
+                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
+                        pass.draw_indexed(0..count, 0, 0..1);
+                    }
+                    DrawCommand::StrokeCircle { cx, cy, radius, color, width } => {
+                        let (vb, ib, count) = ColorPipeline::create_stroke_circle_vertices(
+                            &self.gpu_ctx.device,
+                            *cx, *cy, *radius,
                             [color.r, color.g, color.b, color.a],
                             *width,
                             self.width as f32, self.height as f32,

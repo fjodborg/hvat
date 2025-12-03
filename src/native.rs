@@ -5,7 +5,7 @@ use crate::app::{initialize_app, run_event_loop};
 
 pub fn run() {
     println!("HVAT - Native Application");
-    println!("Controls: Drag to pan, scroll to zoom, R to reset");
+    println!("Controls: Middle-click drag to pan, scroll to zoom, R to reset");
     println!();
 
     let event_loop = EventLoop::new().expect("couldn't create event loop");

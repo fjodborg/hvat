@@ -158,3 +158,178 @@ impl Pipeline for ColorPipeline {
         &self.render_pipeline
     }
 }
+
+impl ColorPipeline {
+    /// Create vertex and index buffers for a line segment.
+    pub fn create_line_vertices(
+        device: &wgpu::Device,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        color: [f32; 4],
+        thickness: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> (wgpu::Buffer, wgpu::Buffer, u32) {
+        // Convert to NDC
+        let x1_ndc = (x1 / window_width) * 2.0 - 1.0;
+        let y1_ndc = 1.0 - (y1 / window_height) * 2.0;
+        let x2_ndc = (x2 / window_width) * 2.0 - 1.0;
+        let y2_ndc = 1.0 - (y2 / window_height) * 2.0;
+
+        // Calculate perpendicular direction for thickness
+        let dx = x2_ndc - x1_ndc;
+        let dy = y2_ndc - y1_ndc;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 0.0001 {
+            // Zero-length line
+            return Self::create_rect_vertices(device, x1, y1, 1.0, 1.0, color, window_width, window_height);
+        }
+
+        // Normalize and scale by half thickness (in NDC)
+        let t_x = (thickness / window_width) * 2.0 / 2.0;
+        let t_y = (thickness / window_height) * 2.0 / 2.0;
+        let nx = -dy / len * t_y;
+        let ny = dx / len * t_x;
+
+        let vertices = [
+            ColorVertex { position: [x1_ndc - nx, y1_ndc - ny], color },
+            ColorVertex { position: [x1_ndc + nx, y1_ndc + ny], color },
+            ColorVertex { position: [x2_ndc + nx, y2_ndc + ny], color },
+            ColorVertex { position: [x2_ndc - nx, y2_ndc - ny], color },
+        ];
+
+        let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Line Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Line Index Buffer"),
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        (vertex_buffer, index_buffer, indices.len() as u32)
+    }
+
+    /// Create vertex and index buffers for a filled circle.
+    pub fn create_circle_vertices(
+        device: &wgpu::Device,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: [f32; 4],
+        window_width: f32,
+        window_height: f32,
+    ) -> (wgpu::Buffer, wgpu::Buffer, u32) {
+        const SEGMENTS: usize = 16;
+
+        let cx_ndc = (cx / window_width) * 2.0 - 1.0;
+        let cy_ndc = 1.0 - (cy / window_height) * 2.0;
+        let rx = (radius / window_width) * 2.0;
+        let ry = (radius / window_height) * 2.0;
+
+        let mut vertices = Vec::with_capacity(SEGMENTS + 1);
+        // Center vertex
+        vertices.push(ColorVertex { position: [cx_ndc, cy_ndc], color });
+
+        // Circle vertices
+        for i in 0..SEGMENTS {
+            let angle = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
+            let x = cx_ndc + rx * angle.cos();
+            let y = cy_ndc + ry * angle.sin();
+            vertices.push(ColorVertex { position: [x, y], color });
+        }
+
+        // Indices for triangle fan
+        let mut indices = Vec::with_capacity(SEGMENTS * 3);
+        for i in 0..SEGMENTS {
+            indices.push(0u16);
+            indices.push((i + 1) as u16);
+            indices.push(((i + 1) % SEGMENTS + 1) as u16);
+        }
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Circle Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Circle Index Buffer"),
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        (vertex_buffer, index_buffer, indices.len() as u32)
+    }
+
+    /// Create vertex and index buffers for a stroked circle (outline).
+    pub fn create_stroke_circle_vertices(
+        device: &wgpu::Device,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: [f32; 4],
+        thickness: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> (wgpu::Buffer, wgpu::Buffer, u32) {
+        const SEGMENTS: usize = 24;
+
+        let cx_ndc = (cx / window_width) * 2.0 - 1.0;
+        let cy_ndc = 1.0 - (cy / window_height) * 2.0;
+        let rx_inner = ((radius - thickness / 2.0) / window_width) * 2.0;
+        let ry_inner = ((radius - thickness / 2.0) / window_height) * 2.0;
+        let rx_outer = ((radius + thickness / 2.0) / window_width) * 2.0;
+        let ry_outer = ((radius + thickness / 2.0) / window_height) * 2.0;
+
+        let mut vertices = Vec::with_capacity(SEGMENTS * 2);
+
+        // Generate inner and outer ring vertices
+        for i in 0..SEGMENTS {
+            let angle = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+            // Inner vertex
+            vertices.push(ColorVertex {
+                position: [cx_ndc + rx_inner * cos_a, cy_ndc + ry_inner * sin_a],
+                color,
+            });
+            // Outer vertex
+            vertices.push(ColorVertex {
+                position: [cx_ndc + rx_outer * cos_a, cy_ndc + ry_outer * sin_a],
+                color,
+            });
+        }
+
+        // Indices forming quads between inner and outer ring
+        let mut indices = Vec::with_capacity(SEGMENTS * 6);
+        for i in 0..SEGMENTS {
+            let i0 = (i * 2) as u16;
+            let i1 = (i * 2 + 1) as u16;
+            let i2 = ((i + 1) % SEGMENTS * 2) as u16;
+            let i3 = ((i + 1) % SEGMENTS * 2 + 1) as u16;
+            indices.extend_from_slice(&[i0, i1, i3, i0, i3, i2]);
+        }
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Stroke Circle Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Stroke Circle Index Buffer"),
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        (vertex_buffer, index_buffer, indices.len() as u32)
+    }
+}
