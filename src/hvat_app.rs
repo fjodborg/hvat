@@ -110,9 +110,18 @@ pub struct HvatApp {
     current_image_index: usize,
     /// Status message to display
     status_message: Option<String>,
-    /// WASM: Loaded image data (name, rgba, width, height)
+    /// Number of adjacent images to preload (before and after current)
+    preload_count: usize,
+    /// Native: Cache of decoded images (index -> ImageHandle)
+    #[cfg(not(target_arch = "wasm32"))]
+    native_decoded_cache: std::collections::HashMap<usize, ImageHandle>,
+    /// WASM: Raw image bytes (not decoded) for lazy loading
+    /// Stores (filename, raw_bytes) - decoding happens on demand
     #[cfg(target_arch = "wasm32")]
-    wasm_loaded_images: Vec<(String, ImageHandle)>,
+    wasm_image_bytes: Vec<(String, Vec<u8>)>,
+    /// WASM: Cache of decoded images (index -> ImageHandle)
+    #[cfg(target_arch = "wasm32")]
+    wasm_decoded_cache: std::collections::HashMap<usize, ImageHandle>,
 }
 
 #[derive(Debug, Clone)]
@@ -171,12 +180,10 @@ pub enum Message {
     NextImage,
     PreviousImage,
     ImageLoaded(ImageHandle),
-    /// WASM: Image data loaded from file input (filename, rgba data, width, height)
+    /// WASM: Raw file bytes loaded from file input (filename, raw_bytes)
+    /// These are NOT decoded yet - decoding happens lazily
     #[cfg(target_arch = "wasm32")]
-    WasmImageLoaded(String, Vec<u8>, u32, u32),
-    /// WASM: Multiple images loaded
-    #[cfg(target_arch = "wasm32")]
-    WasmImagesLoaded(Vec<(String, Vec<u8>, u32, u32)>),
+    WasmFilesLoaded(Vec<(String, Vec<u8>)>),
 }
 
 
@@ -213,8 +220,13 @@ impl Application for HvatApp {
             loaded_image_paths: Vec::new(),
             current_image_index: 0,
             status_message: None,
+            preload_count: 1, // Preload 1 image before and after current
+            #[cfg(not(target_arch = "wasm32"))]
+            native_decoded_cache: std::collections::HashMap::new(),
             #[cfg(target_arch = "wasm32")]
-            wasm_loaded_images: Vec::new(),
+            wasm_image_bytes: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            wasm_decoded_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -463,8 +475,10 @@ impl Application for HvatApp {
                 }
             }
             Message::FolderLoaded(paths) => {
+                // FolderLoaded is only used on native (WASM uses WasmFilesLoaded)
                 self.loaded_image_paths = paths;
                 self.current_image_index = 0;
+                #[cfg(not(target_arch = "wasm32"))]
                 if !self.loaded_image_paths.is_empty() {
                     self.load_current_image();
                 }
@@ -483,16 +497,9 @@ impl Application for HvatApp {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    if !self.wasm_loaded_images.is_empty() {
-                        self.current_image_index = (self.current_image_index + 1) % self.wasm_loaded_images.len();
-                        let (name, handle) = &self.wasm_loaded_images[self.current_image_index];
-                        self.current_image = handle.clone();
-                        self.status_message = Some(format!(
-                            "Image {}/{}: {}",
-                            self.current_image_index + 1,
-                            self.wasm_loaded_images.len(),
-                            name
-                        ));
+                    if !self.wasm_image_bytes.is_empty() {
+                        self.current_image_index = (self.current_image_index + 1) % self.wasm_image_bytes.len();
+                        self.load_wasm_image_at_index(self.current_image_index);
                         // Reset view when changing images
                         self.zoom = 1.0;
                         self.pan_x = 0.0;
@@ -518,20 +525,13 @@ impl Application for HvatApp {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    if !self.wasm_loaded_images.is_empty() {
+                    if !self.wasm_image_bytes.is_empty() {
                         self.current_image_index = if self.current_image_index == 0 {
-                            self.wasm_loaded_images.len() - 1
+                            self.wasm_image_bytes.len() - 1
                         } else {
                             self.current_image_index - 1
                         };
-                        let (name, handle) = &self.wasm_loaded_images[self.current_image_index];
-                        self.current_image = handle.clone();
-                        self.status_message = Some(format!(
-                            "Image {}/{}: {}",
-                            self.current_image_index + 1,
-                            self.wasm_loaded_images.len(),
-                            name
-                        ));
+                        self.load_wasm_image_at_index(self.current_image_index);
                         // Reset view when changing images
                         self.zoom = 1.0;
                         self.pan_x = 0.0;
@@ -544,50 +544,31 @@ impl Application for HvatApp {
             }
 
             #[cfg(target_arch = "wasm32")]
-            Message::WasmImageLoaded(name, data, width, height) => {
-                log::info!("📂 WASM: Single image loaded: {} ({}x{})", name, width, height);
-                let handle = ImageHandle::from_rgba8(data, width, height);
-                self.wasm_loaded_images = vec![(name.clone(), handle.clone())];
-                self.current_image = handle;
-                self.current_image_index = 0;
-                self.status_message = Some(format!("Loaded: {}", name));
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            Message::WasmImagesLoaded(images) => {
-                log::info!("📂 WASM: {} images loaded", images.len());
-                if images.is_empty() {
-                    self.status_message = Some("No images selected".to_string());
+            Message::WasmFilesLoaded(files) => {
+                log::info!("📂 WASM: {} files loaded (lazy - not decoded yet)", files.len());
+                if files.is_empty() {
+                    self.status_message = Some("No files selected".to_string());
                     return;
                 }
 
-                self.wasm_loaded_images = images
-                    .into_iter()
-                    .map(|(name, data, width, height)| {
-                        let handle = ImageHandle::from_rgba8(data, width, height);
-                        (name, handle)
-                    })
-                    .collect();
-
+                // Store raw bytes for lazy decoding
+                self.wasm_image_bytes = files;
+                // Clear the decode cache since we have new files
+                self.wasm_decoded_cache.clear();
                 self.current_image_index = 0;
-                if let Some((name, handle)) = self.wasm_loaded_images.first() {
-                    self.current_image = handle.clone();
-                    self.status_message = Some(format!(
-                        "Image 1/{}: {}",
-                        self.wasm_loaded_images.len(),
-                        name
-                    ));
-                }
+
+                // Load and decode only the first image
+                self.load_wasm_image_at_index(0);
             }
         }
     }
 
     fn tick(&self) -> Option<Self::Message> {
-        // In WASM, check for pending images from file picker
+        // In WASM, check for pending files from file picker
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(images) = take_wasm_pending_images() {
-                return Some(Message::WasmImagesLoaded(images));
+            if let Some(files) = take_wasm_pending_files() {
+                return Some(Message::WasmFilesLoaded(files));
             }
         }
         Some(Message::Tick)
@@ -992,13 +973,38 @@ impl HvatApp {
             .spacing(20.0)
     }
 
-    /// Load the current image from the loaded_image_paths
+    /// Load the current image from the loaded_image_paths (native only)
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_current_image(&mut self) {
-        if self.current_image_index >= self.loaded_image_paths.len() {
+        self.load_native_image_at_index(self.current_image_index, true);
+        // Preload adjacent images
+        self.preload_adjacent_images();
+    }
+
+    /// Native: Load and decode an image at the given index (with caching)
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_native_image_at_index(&mut self, index: usize, set_current: bool) {
+        if index >= self.loaded_image_paths.len() {
             return;
         }
 
-        let path = &self.loaded_image_paths[self.current_image_index];
+        let path = &self.loaded_image_paths[index];
+
+        // Check cache first
+        if let Some(handle) = self.native_decoded_cache.get(&index) {
+            if set_current {
+                log::info!("🖼️ Using cached image: {:?} (index {})", path.file_name(), index);
+                self.current_image = handle.clone();
+                self.status_message = Some(format!(
+                    "Image {}/{}: {}",
+                    index + 1,
+                    self.loaded_image_paths.len(),
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ));
+            }
+            return;
+        }
+
         log::info!("🖼️ Loading image: {:?}", path);
 
         match image::open(path) {
@@ -1006,20 +1012,186 @@ impl HvatApp {
                 let rgba = img.to_rgba8();
                 let (width, height) = rgba.dimensions();
                 let data = rgba.into_raw();
-                self.current_image = ImageHandle::from_rgba8(data, width, height);
-                self.status_message = Some(format!(
-                    "Image {}/{}: {}",
-                    self.current_image_index + 1,
-                    self.loaded_image_paths.len(),
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                ));
+                let handle = ImageHandle::from_rgba8(data, width, height);
+
                 log::info!("🖼️ Loaded {}x{} image", width, height);
+
+                // Cache the decoded image
+                self.native_decoded_cache.insert(index, handle.clone());
+
+                if set_current {
+                    self.current_image = handle;
+                    self.status_message = Some(format!(
+                        "Image {}/{}: {}",
+                        index + 1,
+                        self.loaded_image_paths.len(),
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    ));
+                }
             }
             Err(e) => {
-                self.status_message = Some(format!("Failed to load image: {}", e));
+                if set_current {
+                    self.status_message = Some(format!("Failed to load image: {}", e));
+                }
                 log::error!("🖼️ Failed to load image: {}", e);
             }
         }
+    }
+
+    /// Native: Preload adjacent images based on preload_count
+    #[cfg(not(target_arch = "wasm32"))]
+    fn preload_adjacent_images(&mut self) {
+        let total = self.loaded_image_paths.len();
+        if total == 0 {
+            return;
+        }
+
+        let current = self.current_image_index;
+
+        // Preload next images
+        for i in 1..=self.preload_count {
+            let next_idx = (current + i) % total;
+            if !self.native_decoded_cache.contains_key(&next_idx) {
+                log::debug!("🖼️ Preloading next image at index {}", next_idx);
+                self.load_native_image_at_index(next_idx, false);
+            }
+        }
+
+        // Preload previous images
+        for i in 1..=self.preload_count {
+            let prev_idx = if current >= i {
+                current - i
+            } else {
+                total - (i - current)
+            };
+            if !self.native_decoded_cache.contains_key(&prev_idx) {
+                log::debug!("🖼️ Preloading prev image at index {}", prev_idx);
+                self.load_native_image_at_index(prev_idx, false);
+            }
+        }
+
+        // Clean up cache - keep only images within preload range
+        let keep_indices: std::collections::HashSet<usize> = (0..=self.preload_count)
+            .flat_map(|i| {
+                let next = (current + i) % total;
+                let prev = if current >= i { current - i } else { total - (i - current) };
+                vec![next, prev]
+            })
+            .collect();
+
+        self.native_decoded_cache.retain(|idx, _| keep_indices.contains(idx));
+    }
+
+    /// WASM: Load the current image and preload adjacent images
+    #[cfg(target_arch = "wasm32")]
+    fn load_wasm_image_at_index(&mut self, index: usize) {
+        self.load_wasm_image_at_index_impl(index, true);
+        // Preload adjacent images
+        self.preload_adjacent_wasm_images();
+    }
+
+    /// WASM: Load and decode an image at the given index (with caching)
+    #[cfg(target_arch = "wasm32")]
+    fn load_wasm_image_at_index_impl(&mut self, index: usize, set_current: bool) {
+        if index >= self.wasm_image_bytes.len() {
+            return;
+        }
+
+        let (name, _) = &self.wasm_image_bytes[index];
+        let name = name.clone();
+
+        // Check cache first
+        if let Some(handle) = self.wasm_decoded_cache.get(&index) {
+            if set_current {
+                log::info!("🖼️ Using cached image: {} (index {})", name, index);
+                self.current_image = handle.clone();
+                self.status_message = Some(format!(
+                    "Image {}/{}: {}",
+                    index + 1,
+                    self.wasm_image_bytes.len(),
+                    name
+                ));
+            }
+            return;
+        }
+
+        // Decode on demand
+        let bytes = &self.wasm_image_bytes[index].1;
+        log::info!("🖼️ Decoding image: {} ({} bytes)", name, bytes.len());
+
+        match image::load_from_memory(bytes) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                let data = rgba.into_raw();
+                let handle = ImageHandle::from_rgba8(data, width, height);
+
+                log::info!("🖼️ Decoded {}: {}x{}", name, width, height);
+
+                // Cache the decoded image
+                self.wasm_decoded_cache.insert(index, handle.clone());
+
+                if set_current {
+                    self.current_image = handle;
+                    self.status_message = Some(format!(
+                        "Image {}/{}: {}",
+                        index + 1,
+                        self.wasm_image_bytes.len(),
+                        name
+                    ));
+                }
+            }
+            Err(e) => {
+                if set_current {
+                    self.status_message = Some(format!("Failed to decode {}: {}", name, e));
+                }
+                log::error!("🖼️ Failed to decode {}: {}", name, e);
+            }
+        }
+    }
+
+    /// WASM: Preload adjacent images based on preload_count
+    #[cfg(target_arch = "wasm32")]
+    fn preload_adjacent_wasm_images(&mut self) {
+        let total = self.wasm_image_bytes.len();
+        if total == 0 {
+            return;
+        }
+
+        let current = self.current_image_index;
+
+        // Preload next images
+        for i in 1..=self.preload_count {
+            let next_idx = (current + i) % total;
+            if !self.wasm_decoded_cache.contains_key(&next_idx) {
+                log::debug!("🖼️ Preloading next image at index {}", next_idx);
+                self.load_wasm_image_at_index_impl(next_idx, false);
+            }
+        }
+
+        // Preload previous images
+        for i in 1..=self.preload_count {
+            let prev_idx = if current >= i {
+                current - i
+            } else {
+                total - (i - current)
+            };
+            if !self.wasm_decoded_cache.contains_key(&prev_idx) {
+                log::debug!("🖼️ Preloading prev image at index {}", prev_idx);
+                self.load_wasm_image_at_index_impl(prev_idx, false);
+            }
+        }
+
+        // Clean up cache - keep only images within preload range
+        let keep_indices: std::collections::HashSet<usize> = (0..=self.preload_count)
+            .flat_map(|i| {
+                let next = (current + i) % total;
+                let prev = if current >= i { current - i } else { total - (i - current) };
+                vec![next, prev]
+            })
+            .collect();
+
+        self.wasm_decoded_cache.retain(|idx, _| keep_indices.contains(idx));
     }
 }
 
@@ -1079,20 +1251,20 @@ fn create_test_image(width: u32, height: u32) -> ImageHandle {
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    /// Global storage for loaded images - the app polls this via tick()
-    static WASM_PENDING_IMAGES: RefCell<Option<Vec<(String, Vec<u8>, u32, u32)>>> = const { RefCell::new(None) };
+    /// Global storage for loaded files (raw bytes, not decoded) - the app polls this via tick()
+    static WASM_PENDING_FILES: RefCell<Option<Vec<(String, Vec<u8>)>>> = const { RefCell::new(None) };
 }
 
-/// Check if there are pending images loaded from WASM file picker
+/// Check if there are pending files loaded from WASM file picker
 #[cfg(target_arch = "wasm32")]
-pub fn take_wasm_pending_images() -> Option<Vec<(String, Vec<u8>, u32, u32)>> {
-    WASM_PENDING_IMAGES.with(|pending| pending.borrow_mut().take())
+pub fn take_wasm_pending_files() -> Option<Vec<(String, Vec<u8>)>> {
+    WASM_PENDING_FILES.with(|pending| pending.borrow_mut().take())
 }
 
 #[cfg(target_arch = "wasm32")]
-fn set_wasm_pending_images(images: Vec<(String, Vec<u8>, u32, u32)>) {
-    WASM_PENDING_IMAGES.with(|pending| {
-        *pending.borrow_mut() = Some(images);
+fn set_wasm_pending_files(files: Vec<(String, Vec<u8>)>) {
+    WASM_PENDING_FILES.with(|pending| {
+        *pending.borrow_mut() = Some(files);
     });
 }
 
@@ -1119,8 +1291,8 @@ pub fn open_wasm_file_picker() {
     input.set_attribute("webkitdirectory", "").expect("failed to set webkitdirectory");
     input.set_attribute("directory", "").expect("failed to set directory"); // Firefox fallback
 
-    // Store results as they load
-    let results: Rc<RefCell<Vec<(String, Vec<u8>, u32, u32)>>> = Rc::new(RefCell::new(Vec::new()));
+    // Store raw file bytes as they load (lazy loading - no decoding here)
+    let results: Rc<RefCell<Vec<(String, Vec<u8>)>>> = Rc::new(RefCell::new(Vec::new()));
     let total_files: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
     let loaded_files: Rc<RefCell<usize>> = Rc::new(RefCell::new(0));
 
@@ -1144,72 +1316,99 @@ pub fn open_wasm_file_picker() {
                 return;
             }
 
-            *total_clone.borrow_mut() = count as usize;
-            log::info!("📂 Selected {} files", count);
-
+            // Filter to only image files
+            let image_extensions = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif"];
+            let mut image_files = Vec::new();
             for i in 0..count {
                 if let Some(file) = files.get(i) {
-                    let name = file.name();
-                    log::info!("📂 Loading file: {}", name);
-
-                    let reader = FileReader::new().expect("failed to create FileReader");
-
-                    let results_inner = results_clone.clone();
-                    let loaded_inner = loaded_clone.clone();
-                    let total_inner = total_clone.clone();
-                    let name_clone = name.clone();
-
-                    // Handle load complete
-                    let onload = Closure::wrap(Box::new(move |event: Event| {
-                        let reader: FileReader = event
-                            .target()
-                            .expect("no target")
-                            .dyn_into()
-                            .expect("not FileReader");
-
-                        if let Ok(result) = reader.result() {
-                            let array = js_sys::Uint8Array::new(&result);
-                            let bytes = array.to_vec();
-
-                            log::info!("📂 File {} loaded: {} bytes", name_clone, bytes.len());
-
-                            // Decode image using the image crate
-                            match image::load_from_memory(&bytes) {
-                                Ok(img) => {
-                                    let rgba = img.to_rgba8();
-                                    let (width, height) = rgba.dimensions();
-                                    let data = rgba.into_raw();
-
-                                    log::info!("📂 Decoded {}: {}x{}", name_clone, width, height);
-
-                                    results_inner
-                                        .borrow_mut()
-                                        .push((name_clone.clone(), data, width, height));
-                                }
-                                Err(e) => {
-                                    log::error!("📂 Failed to decode {}: {}", name_clone, e);
-                                }
-                            }
-                        }
-
-                        // Check if all files loaded
-                        *loaded_inner.borrow_mut() += 1;
-                        let loaded = *loaded_inner.borrow();
-                        let total = *total_inner.borrow();
-
-                        if loaded >= total {
-                            log::info!("📂 All {} files loaded", total);
-                            let images = results_inner.borrow().clone();
-                            set_wasm_pending_images(images);
-                        }
-                    }) as Box<dyn FnMut(Event)>);
-
-                    reader.set_onload(Some(onload.as_ref().unchecked_ref()));
-                    onload.forget(); // Leak the closure to keep it alive
-
-                    // Read as array buffer
-                    reader.read_as_array_buffer(&file).expect("failed to read");
+                    let name = file.name().to_lowercase();
+                    if image_extensions.iter().any(|ext| name.ends_with(ext)) {
+                        image_files.push(files.get(i).unwrap());
+                    }
                 }
+            }
+
+            if image_files.is_empty() {
+                log::warn!("📂 No image files found");
+                set_wasm_pending_files(Vec::new());
+                return;
+            }
+
+            let image_count = image_files.len();
+
+            // Show warning for large folders (> 50 images)
+            const LARGE_FOLDER_THRESHOLD: usize = 50;
+            if image_count > LARGE_FOLDER_THRESHOLD {
+                let window = web_sys::window().expect("no window");
+                let message = format!(
+                    "Warning: You selected {} images.\n\n\
+                    Loading many images in the browser can use significant memory.\n\n\
+                    For large datasets, the native desktop application is recommended.\n\n\
+                    Continue anyway?",
+                    image_count
+                );
+
+                // Use confirm() dialog - returns true if user clicks OK
+                let confirmed = window.confirm_with_message(&message).unwrap_or(false);
+                if !confirmed {
+                    log::info!("📂 User cancelled loading {} images", image_count);
+                    set_wasm_pending_files(Vec::new());
+                    return;
+                }
+                log::info!("📂 User confirmed loading {} images", image_count);
+            }
+
+            *total_clone.borrow_mut() = image_count;
+            log::info!("📂 Found {} image files (lazy loading - will decode on demand)", image_count);
+
+            for file in image_files {
+                let name = file.name();
+                log::info!("📂 Reading file: {}", name);
+
+                let reader = FileReader::new().expect("failed to create FileReader");
+
+                let results_inner = results_clone.clone();
+                let loaded_inner = loaded_clone.clone();
+                let total_inner = total_clone.clone();
+                let name_clone = name.clone();
+
+                // Handle load complete - store raw bytes, no decoding
+                let onload = Closure::wrap(Box::new(move |event: Event| {
+                    let reader: FileReader = event
+                        .target()
+                        .expect("no target")
+                        .dyn_into()
+                        .expect("not FileReader");
+
+                    if let Ok(result) = reader.result() {
+                        let array = js_sys::Uint8Array::new(&result);
+                        let bytes = array.to_vec();
+
+                        log::info!("📂 File {} read: {} bytes (not decoded yet)", name_clone, bytes.len());
+
+                        // Store raw bytes - decoding happens lazily when viewing
+                        results_inner
+                            .borrow_mut()
+                            .push((name_clone.clone(), bytes));
+                    }
+
+                    // Check if all files loaded
+                    *loaded_inner.borrow_mut() += 1;
+                    let loaded = *loaded_inner.borrow();
+                    let total = *total_inner.borrow();
+
+                    if loaded >= total {
+                        log::info!("📂 All {} files read (will decode on demand)", total);
+                        let files = results_inner.borrow().clone();
+                        set_wasm_pending_files(files);
+                    }
+                }) as Box<dyn FnMut(Event)>);
+
+                reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                onload.forget(); // Leak the closure to keep it alive
+
+                // Read as array buffer
+                reader.read_as_array_buffer(&file).expect("failed to read");
             }
         }
     }) as Box<dyn FnMut(Event)>);

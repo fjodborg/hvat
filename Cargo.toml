@@ -26,7 +26,17 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "Document"] }
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "HtmlInputElement",
+    "File",
+    "FileList",
+    "FileReader",
+    "Blob",
+    "Event",
+    "EventTarget",
+] }
 winit = "0.29"
 wgpu = "27"
 
@@ -35,6 +45,7 @@ pollster = "0.3"
 env_logger = "0.11"
 winit = "0.29"
 wgpu = "27"
+rfd = "0.15"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
