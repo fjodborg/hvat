@@ -25,3 +25,6 @@ pub use row::{row, Row};
 pub use scrollable::{scrollable, Scrollable};
 pub use slider::{slider, Slider, SliderId};
 pub use text::{text, Text};
+
+// Re-export Element for convenience (it's actually in the element module)
+pub use crate::Element;

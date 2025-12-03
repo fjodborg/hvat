@@ -1,13 +1,21 @@
-// Shared application logic
+//! HVAT - Hyperspectral Annotation Tool
+//!
+//! A GPU-accelerated desktop and web application for hyperspectral image annotation.
+
+// Shared application logic (legacy, being phased out)
 mod app;
+
+// ============================================================================
+// Core Modules
+// ============================================================================
 
 // Image caching abstraction (unified native/WASM)
 mod image_cache;
-pub use image_cache::{ImageCache, IMAGE_EXTENSIONS, is_image_file};
+pub use image_cache::{is_image_file, ImageCache, IMAGE_EXTENSIONS};
 
 // Widget state management layer
 mod widget_state;
-pub use widget_state::{WidgetState, ImageViewState, SliderState, ScrollState};
+pub use widget_state::{ImageViewState, ScrollState, SliderState, WidgetState};
 
 // Zoom-to-cursor mathematics (extracted for testability)
 mod zoom_math;
@@ -16,29 +24,74 @@ pub use zoom_math::Transform;
 // Annotation system for image labeling
 mod annotation;
 pub use annotation::{
-    Annotation, AnnotationStore, AnnotationTool, BoundingBox, Category,
-    DrawingState, Point, Polygon, Shape,
+    Annotation, AnnotationStore, AnnotationTool, BoundingBox, Category, DrawingState, Point,
+    Polygon, Shape,
 };
+
+// ============================================================================
+// Application Modules (modularized from hvat_app.rs)
+// ============================================================================
+
+// Message types and constructors
+mod message;
+pub use message::{
+    AnnotationMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage, ImageViewMessage,
+    Message, NavigationMessage, Tab, UIMessage,
+};
+
+// Theme system
+mod theme;
+pub use theme::{Theme, ThemeChoice};
+
+// View building functions
+mod views;
+pub use views::{
+    build_overlay, view_annotation_toolbar, view_counter, view_home, view_image_viewer,
+    view_settings,
+};
+
+// Message handlers
+mod handlers;
+pub use handlers::{
+    handle_annotation, handle_counter, handle_image_load, handle_image_settings, handle_image_view,
+    handle_navigation, handle_ui, AnnotationState, ImageLoadState,
+};
+
+// WASM file loading utilities
+mod wasm_file;
+pub use wasm_file::{open_wasm_file_picker, take_wasm_pending_files};
+
+// ============================================================================
+// Main Application
+// ============================================================================
 
 // HVAT application (shared between native and WASM)
 mod hvat_app;
 pub use hvat_app::HvatApp;
 
-// WASM entry point for hvat
+// ============================================================================
+// Platform Entry Points
+// ============================================================================
+
+// WASM entry point
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
 #[cfg(target_arch = "wasm32")]
 pub use wasm::*;
 
-// Native entry point for hvat
+// Native entry point
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::run;
 
-// Placeholder public API for the library
+// ============================================================================
+// Public API
+// ============================================================================
+
+/// Initialize the HVAT library.
 pub fn init() {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -48,7 +101,7 @@ pub fn init() {
     }
 }
 
-// Test image generator
+/// Generate a test image with a colorful gradient pattern.
 pub fn generate_test_image(width: u32, height: u32) -> Vec<u8> {
     let mut data = Vec::with_capacity((width * height * 4) as usize);
 

@@ -1,0 +1,268 @@
+//! Hierarchical message system for HVAT application.
+//!
+//! Messages are organized into categories for maintainability:
+//! - NavigationMessage: Tab switching
+//! - CounterMessage: Counter demo
+//! - ImageViewMessage: Pan/zoom/drag
+//! - ImageSettingsMessage: Brightness/contrast/gamma/hue
+//! - ImageLoadMessage: File loading
+//! - UIMessage: Scroll/theme/debug
+//! - AnnotationMessage: Annotation tools and operations
+
+use crate::annotation::AnnotationTool;
+use crate::theme::Theme;
+use hvat_ui::widgets::SliderId;
+use hvat_ui::ImageHandle;
+use std::path::PathBuf;
+
+/// Application tabs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Tab {
+    Home,
+    Counter,
+    ImageViewer,
+    Settings,
+}
+
+/// Messages related to navigation between tabs/views.
+#[derive(Debug, Clone)]
+pub enum NavigationMessage {
+    SwitchTab(Tab),
+}
+
+/// Messages for the counter demo.
+#[derive(Debug, Clone)]
+pub enum CounterMessage {
+    Increment,
+    Decrement,
+    Reset,
+}
+
+/// Messages for image viewer controls (pan, zoom, drag).
+#[derive(Debug, Clone)]
+pub enum ImageViewMessage {
+    // Button controls
+    ZoomIn,
+    ZoomOut,
+    ResetView,
+    PanLeft,
+    PanRight,
+    PanUp,
+    PanDown,
+    // Widget callbacks
+    Pan((f32, f32)),
+    /// (new_zoom, cursor_x, cursor_y, widget_center_x, widget_center_y)
+    ZoomAtPoint(f32, f32, f32, f32, f32),
+    DragStart((f32, f32)),
+    DragMove((f32, f32)),
+    DragEnd,
+}
+
+/// Messages for image manipulation settings (brightness, contrast, etc.).
+#[derive(Debug, Clone)]
+pub enum ImageSettingsMessage {
+    // Slider drag state
+    SliderDragStart(SliderId),
+    SliderDragEnd,
+    // Value changes
+    SetBrightness(f32),
+    SetContrast(f32),
+    SetGamma(f32),
+    SetHueShift(f32),
+    Reset,
+}
+
+/// Messages for image loading and navigation between images.
+#[derive(Debug, Clone)]
+pub enum ImageLoadMessage {
+    LoadFolder,
+    FolderLoaded(Vec<PathBuf>),
+    NextImage,
+    PreviousImage,
+    ImageLoaded(ImageHandle),
+    #[cfg(target_arch = "wasm32")]
+    WasmFilesLoaded(Vec<(String, Vec<u8>)>),
+}
+
+/// Messages for UI state (scrolling, debug, theme).
+#[derive(Debug, Clone)]
+pub enum UIMessage {
+    // Scrolling
+    Scroll(f32),
+    ScrollbarDragStart,
+    ScrollbarDragEnd,
+    // Settings
+    ToggleDebugInfo,
+    SetTheme(Theme),
+}
+
+/// Messages for annotation tools and operations.
+#[derive(Debug, Clone)]
+pub enum AnnotationMessage {
+    // Tool selection
+    SetTool(AnnotationTool),
+    // Category management
+    SetCategory(u32),
+    AddCategory(String),
+    // Drawing operations
+    StartDrawing(f32, f32),
+    ContinueDrawing(f32, f32),
+    FinishDrawing,
+    /// Force finish polygon (Space key) - closes polygon regardless of mouse state
+    ForceFinishPolygon,
+    CancelDrawing,
+    // Selection
+    SelectAnnotation(Option<u64>),
+    DeleteSelected,
+    // Import/Export
+    ExportJson,
+    ImportJson,
+    ClearAll,
+}
+
+/// Top-level message enum that delegates to sub-message types.
+/// This keeps the match arms organized and easier to maintain.
+#[derive(Debug, Clone)]
+pub enum Message {
+    /// Navigation between tabs
+    Navigation(NavigationMessage),
+    /// Counter demo messages
+    Counter(CounterMessage),
+    /// Image viewer (pan/zoom/drag)
+    ImageView(ImageViewMessage),
+    /// Image manipulation settings
+    ImageSettings(ImageSettingsMessage),
+    /// Image loading and file management
+    ImageLoad(ImageLoadMessage),
+    /// UI state (scroll, theme, debug)
+    UI(UIMessage),
+    /// Annotation tools and operations
+    Annotation(AnnotationMessage),
+    /// FPS tick (called every frame)
+    Tick,
+}
+
+// ============================================================================
+// Convenience constructors for common messages
+// ============================================================================
+
+impl Message {
+    // Navigation shortcuts
+    pub fn switch_tab(tab: Tab) -> Self {
+        Message::Navigation(NavigationMessage::SwitchTab(tab))
+    }
+
+    // Counter shortcuts
+    pub fn increment() -> Self {
+        Message::Counter(CounterMessage::Increment)
+    }
+    pub fn decrement() -> Self {
+        Message::Counter(CounterMessage::Decrement)
+    }
+
+    // Image view shortcuts
+    pub fn zoom_in() -> Self {
+        Message::ImageView(ImageViewMessage::ZoomIn)
+    }
+    pub fn zoom_out() -> Self {
+        Message::ImageView(ImageViewMessage::ZoomOut)
+    }
+    pub fn reset_view() -> Self {
+        Message::ImageView(ImageViewMessage::ResetView)
+    }
+    pub fn image_drag_start(pos: (f32, f32)) -> Self {
+        Message::ImageView(ImageViewMessage::DragStart(pos))
+    }
+    pub fn image_drag_move(pos: (f32, f32)) -> Self {
+        Message::ImageView(ImageViewMessage::DragMove(pos))
+    }
+    pub fn image_drag_end() -> Self {
+        Message::ImageView(ImageViewMessage::DragEnd)
+    }
+    pub fn image_zoom_at_point(new_zoom: f32, cursor_x: f32, cursor_y: f32, cx: f32, cy: f32) -> Self {
+        Message::ImageView(ImageViewMessage::ZoomAtPoint(new_zoom, cursor_x, cursor_y, cx, cy))
+    }
+
+    // Image settings shortcuts
+    pub fn slider_drag_start(id: SliderId) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SliderDragStart(id))
+    }
+    pub fn slider_drag_end() -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SliderDragEnd)
+    }
+    pub fn set_brightness(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetBrightness(v))
+    }
+    pub fn set_contrast(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetContrast(v))
+    }
+    pub fn set_gamma(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetGamma(v))
+    }
+    pub fn set_hue_shift(v: f32) -> Self {
+        Message::ImageSettings(ImageSettingsMessage::SetHueShift(v))
+    }
+    pub fn reset_image_settings() -> Self {
+        Message::ImageSettings(ImageSettingsMessage::Reset)
+    }
+
+    // Image load shortcuts
+    pub fn load_folder() -> Self {
+        Message::ImageLoad(ImageLoadMessage::LoadFolder)
+    }
+    pub fn next_image() -> Self {
+        Message::ImageLoad(ImageLoadMessage::NextImage)
+    }
+    pub fn previous_image() -> Self {
+        Message::ImageLoad(ImageLoadMessage::PreviousImage)
+    }
+
+    // UI shortcuts
+    pub fn scroll(offset: f32) -> Self {
+        Message::UI(UIMessage::Scroll(offset))
+    }
+    pub fn scrollbar_drag_start() -> Self {
+        Message::UI(UIMessage::ScrollbarDragStart)
+    }
+    pub fn scrollbar_drag_end() -> Self {
+        Message::UI(UIMessage::ScrollbarDragEnd)
+    }
+    pub fn toggle_debug_info() -> Self {
+        Message::UI(UIMessage::ToggleDebugInfo)
+    }
+    pub fn set_theme(theme: Theme) -> Self {
+        Message::UI(UIMessage::SetTheme(theme))
+    }
+
+    // Annotation shortcuts
+    pub fn set_annotation_tool(tool: AnnotationTool) -> Self {
+        Message::Annotation(AnnotationMessage::SetTool(tool))
+    }
+    pub fn set_annotation_category(id: u32) -> Self {
+        Message::Annotation(AnnotationMessage::SetCategory(id))
+    }
+    pub fn start_drawing(x: f32, y: f32) -> Self {
+        Message::Annotation(AnnotationMessage::StartDrawing(x, y))
+    }
+    pub fn continue_drawing(x: f32, y: f32) -> Self {
+        Message::Annotation(AnnotationMessage::ContinueDrawing(x, y))
+    }
+    pub fn finish_drawing() -> Self {
+        Message::Annotation(AnnotationMessage::FinishDrawing)
+    }
+    pub fn force_finish_polygon() -> Self {
+        Message::Annotation(AnnotationMessage::ForceFinishPolygon)
+    }
+    pub fn cancel_drawing() -> Self {
+        Message::Annotation(AnnotationMessage::CancelDrawing)
+    }
+    pub fn delete_selected_annotation() -> Self {
+        Message::Annotation(AnnotationMessage::DeleteSelected)
+    }
+    pub fn export_annotations() -> Self {
+        Message::Annotation(AnnotationMessage::ExportJson)
+    }
+    pub fn clear_annotations() -> Self {
+        Message::Annotation(AnnotationMessage::ClearAll)
+    }
+}
