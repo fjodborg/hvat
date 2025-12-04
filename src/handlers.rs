@@ -353,9 +353,9 @@ pub fn handle_ui(
                 log::debug!("📜 Scroll Y offset: {:.1}", offset);
             }
         }
-        UIMessage::ScrollbarDragStartY => {
-            widget_state.scroll.start_drag_y();
-            log::debug!("📜 Scrollbar Y drag started");
+        UIMessage::ScrollbarDragStartY(mouse_y) => {
+            widget_state.scroll.start_drag_y(mouse_y);
+            log::debug!("📜 Scrollbar Y drag started at y={:.1}", mouse_y);
         }
         UIMessage::ScrollbarDragEndY => {
             widget_state.scroll.end_drag_y();
@@ -369,9 +369,9 @@ pub fn handle_ui(
                 log::debug!("📜 Scroll X offset: {:.1}", offset);
             }
         }
-        UIMessage::ScrollbarDragStartX => {
-            widget_state.scroll.start_drag_x();
-            log::debug!("📜 Scrollbar X drag started");
+        UIMessage::ScrollbarDragStartX(mouse_x) => {
+            widget_state.scroll.start_drag_x(mouse_x);
+            log::debug!("📜 Scrollbar X drag started at x={:.1}", mouse_x);
         }
         UIMessage::ScrollbarDragEndX => {
             widget_state.scroll.end_drag_x();
@@ -384,9 +384,9 @@ pub fn handle_ui(
                 log::debug!("📜 Sidebar scroll Y offset: {:.1}", offset);
             }
         }
-        UIMessage::SidebarScrollbarDragStartY => {
-            widget_state.sidebar_scroll.start_drag_y();
-            log::debug!("📜 Sidebar scrollbar Y drag started");
+        UIMessage::SidebarScrollbarDragStartY(mouse_y) => {
+            widget_state.sidebar_scroll.start_drag_y(mouse_y);
+            log::debug!("📜 Sidebar scrollbar Y drag started at y={:.1}", mouse_y);
         }
         UIMessage::SidebarScrollbarDragEndY => {
             widget_state.sidebar_scroll.end_drag_y();

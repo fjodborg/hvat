@@ -11,8 +11,8 @@ use crate::ui_constants::{
 use crate::views::helpers::tool_button;
 use crate::widget_state::WidgetState;
 use hvat_ui::widgets::{
-    button, collapsible, column, container, dropdown, hyperspectral_image, row, slider, text,
-    titled_container, Column, Element, Row, SliderId,
+    button, collapsible, column, container, dropdown, hyperspectral_image, row, scrollable, slider,
+    text, titled_container, Column, Element, Row, ScrollDirection, SliderId,
 };
 use hvat_ui::{
     BandSelectionUniform, Color, HyperspectralImageHandle, ImageAdjustments, Length, Overlay,
@@ -96,7 +96,8 @@ fn view_annotation_toolbar_compact(
                 .push(tool_button("Box", AnnotationTool::BoundingBox, tool))
                 .push(tool_button("Poly", AnnotationTool::Polygon, tool))
                 .push(tool_button("Pt", AnnotationTool::Point, tool))
-                .spacing(spacing::TIGHT),
+                .spacing(spacing::TIGHT)
+                .wrap(), // Wrap to next line if not enough space
         ))
         .push(Element::new(
             row()
@@ -115,7 +116,8 @@ fn view_annotation_toolbar_compact(
                         .on_press(Message::clear_annotations())
                         .width(50.0),
                 ))
-                .spacing(spacing::TIGHT),
+                .spacing(spacing::TIGHT)
+                .wrap(), // Wrap to next line if not enough space
         ))
         .spacing(spacing::TIGHT)
 }
@@ -164,6 +166,7 @@ pub fn view_image_viewer<'a>(
     );
 
     // Create the GPU-accelerated hyperspectral image widget
+    // Uses Fill to expand to available space
     let image_widget = hyperspectral_image(hyperspectral_handle.clone(), band_uniform)
         .pan((pan_x, pan_y))
         .zoom(zoom)
@@ -171,8 +174,8 @@ pub fn view_image_viewer<'a>(
         .drawing(drawing_state.is_drawing)
         .adjustments(adjustments)
         .overlay(overlay)
-        .width(Length::Units(img_const::WIDTH))
-        .height(Length::Units(img_const::HEIGHT))
+        .width(Length::Fill)
+        .height(Length::Fill)
         .on_drag_start(Message::image_drag_start)
         .on_drag_move(Message::image_drag_move)
         .on_drag_end(Message::image_drag_end)
@@ -182,8 +185,9 @@ pub fn view_image_viewer<'a>(
         .on_draw_end(Message::finish_drawing)
         .on_space(Message::force_finish_polygon);
 
-    // === LEFT PANEL: Image with titled container ===
+    // === LEFT PANEL: Image with titled container (fills available space) ===
     let image_panel = titled_container("Image", Element::new(image_widget))
+        .fill()
         .padding(padding::MINIMAL)
         .border(colors::BORDER)
         .border_width(img_const::BORDER_WIDTH)
@@ -314,21 +318,44 @@ pub fn view_image_viewer<'a>(
         )))
         .spacing(spacing::TIGHT);
 
-    // Main layout: image panel + sidebar
+    // Main layout: image panel (fills) + sidebar (fixed width, scrollable, fills height)
+    // Sidebar scrollable fills available height (no fixed height specified)
+    let mut sidebar_scrollable = scrollable(Element::new(sidebar))
+        .direction(ScrollDirection::Vertical)
+        .width(sidebar_const::WIDTH + 20.0) // Content width + scrollbar
+        // No height specified - fills available space
+        .scroll_offset_y(widget_state.sidebar_scroll.offset_y)
+        .dragging_y(widget_state.sidebar_scroll.is_dragging_y)
+        .on_scroll_y(Message::sidebar_scroll_y)
+        .on_drag_start_y(Message::sidebar_scrollbar_drag_start_y)
+        .on_drag_end_y(Message::sidebar_scrollbar_drag_end_y);
+
+    // Pass drag start position for relative scrollbar dragging
+    if let (Some(mouse_y), Some(scroll_y)) = (
+        widget_state.sidebar_scroll.drag_start_mouse_y,
+        widget_state.sidebar_scroll.drag_start_scroll_y,
+    ) {
+        sidebar_scrollable = sidebar_scrollable.drag_start_y(mouse_y, scroll_y);
+    }
+
+    // Wrap in container with border for debugging
+    let sidebar_with_border = container(Element::new(sidebar_scrollable))
+        .border(colors::BORDER);
+
+    // Help text at the bottom
+    let help_text = text("Middle-click drag to pan, scroll to zoom")
+        .size(text_const::SMALL)
+        .color(colors::MUTED_TEXT);
+
+    // Sidebar column: scrollable content fills, help text at bottom
+    let sidebar_column = column()
+        .push(Element::new(sidebar_with_border))
+        .push(Element::new(help_text))
+        .spacing(spacing::TIGHT);
+
     row()
-        .push(Element::new(
-            column()
-                .push(Element::new(image_panel))
-                .push(Element::new(
-                    text("Middle-click drag to pan, scroll to zoom")
-                        .size(text_const::SMALL)
-                        .color(colors::MUTED_TEXT),
-                ))
-                .spacing(spacing::TIGHT),
-        ))
-        .push(Element::new(
-            container(Element::new(sidebar)).padding(0.0),
-        ))
+        .push(Element::new(image_panel))
+        .push(Element::new(sidebar_column))
         .spacing(sidebar_const::GAP)
 }
 

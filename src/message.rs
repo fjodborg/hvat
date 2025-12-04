@@ -103,15 +103,18 @@ pub enum ImageLoadMessage {
 pub enum UIMessage {
     // Main content vertical scrolling
     ScrollY(f32),
-    ScrollbarDragStartY,
+    /// Scrollbar drag start with mouse Y position for relative dragging
+    ScrollbarDragStartY(f32),
     ScrollbarDragEndY,
     // Main content horizontal scrolling
     ScrollX(f32),
-    ScrollbarDragStartX,
+    /// Scrollbar drag start with mouse X position for relative dragging
+    ScrollbarDragStartX(f32),
     ScrollbarDragEndX,
     // Sidebar scrolling (independent)
     SidebarScrollY(f32),
-    SidebarScrollbarDragStartY,
+    /// Sidebar scrollbar drag start with mouse Y position for relative dragging
+    SidebarScrollbarDragStartY(f32),
     SidebarScrollbarDragEndY,
     // Settings
     ToggleDebugInfo,
@@ -278,8 +281,8 @@ impl Message {
     pub fn scroll_y(offset: f32) -> Self {
         Message::UI(UIMessage::ScrollY(offset))
     }
-    pub fn scrollbar_drag_start_y() -> Self {
-        Message::UI(UIMessage::ScrollbarDragStartY)
+    pub fn scrollbar_drag_start_y(mouse_y: f32) -> Self {
+        Message::UI(UIMessage::ScrollbarDragStartY(mouse_y))
     }
     pub fn scrollbar_drag_end_y() -> Self {
         Message::UI(UIMessage::ScrollbarDragEndY)
@@ -288,8 +291,8 @@ impl Message {
     pub fn scroll_x(offset: f32) -> Self {
         Message::UI(UIMessage::ScrollX(offset))
     }
-    pub fn scrollbar_drag_start_x() -> Self {
-        Message::UI(UIMessage::ScrollbarDragStartX)
+    pub fn scrollbar_drag_start_x(mouse_x: f32) -> Self {
+        Message::UI(UIMessage::ScrollbarDragStartX(mouse_x))
     }
     pub fn scrollbar_drag_end_x() -> Self {
         Message::UI(UIMessage::ScrollbarDragEndX)
@@ -298,8 +301,8 @@ impl Message {
     pub fn sidebar_scroll_y(offset: f32) -> Self {
         Message::UI(UIMessage::SidebarScrollY(offset))
     }
-    pub fn sidebar_scrollbar_drag_start_y() -> Self {
-        Message::UI(UIMessage::SidebarScrollbarDragStartY)
+    pub fn sidebar_scrollbar_drag_start_y(mouse_y: f32) -> Self {
+        Message::UI(UIMessage::SidebarScrollbarDragStartY(mouse_y))
     }
     pub fn sidebar_scrollbar_drag_end_y() -> Self {
         Message::UI(UIMessage::SidebarScrollbarDragEndY)

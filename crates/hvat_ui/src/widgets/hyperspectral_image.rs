@@ -318,8 +318,13 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
             400.0
         };
 
-        let width = self.width.resolve(available_width, available_width);
-        let height = self.height.resolve(available_height, available_height);
+        // Resolve requested dimensions
+        let requested_width = self.width.resolve(available_width, available_width);
+        let requested_height = self.height.resolve(available_height, available_height);
+
+        // Allow shrinking: take minimum of requested and available space
+        let width = requested_width.min(available_width);
+        let height = requested_height.min(available_height);
 
         let size = limits.resolve(width, height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);

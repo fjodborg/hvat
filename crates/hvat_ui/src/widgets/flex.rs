@@ -21,10 +21,13 @@ pub enum FlexDirection {
 /// - Configurable direction (row or column)
 /// - Spacing between children
 /// - Fill-behavior where children with 0 size in the main axis share remaining space
+/// - Wrap mode for horizontal layouts (wraps to next line when content exceeds width)
 pub struct FlexLayout<'a, Message> {
     children: Vec<Element<'a, Message>>,
     spacing: f32,
     direction: FlexDirection,
+    /// Whether to wrap children to next line when they exceed available width (horizontal only)
+    wrap: bool,
 }
 
 impl<'a, Message> FlexLayout<'a, Message> {
@@ -34,6 +37,7 @@ impl<'a, Message> FlexLayout<'a, Message> {
             children: Vec::new(),
             spacing: 0.0,
             direction,
+            wrap: false,
         }
     }
 
@@ -53,6 +57,7 @@ impl<'a, Message> FlexLayout<'a, Message> {
             children,
             spacing: 0.0,
             direction,
+            wrap: false,
         }
     }
 
@@ -71,6 +76,13 @@ impl<'a, Message> FlexLayout<'a, Message> {
     /// Set the layout direction.
     pub fn direction(mut self, direction: FlexDirection) -> Self {
         self.direction = direction;
+        self
+    }
+
+    /// Enable wrap mode (horizontal layouts only).
+    /// When enabled, children wrap to the next line when they exceed available width.
+    pub fn wrap(mut self) -> Self {
+        self.wrap = true;
         self
     }
 
@@ -195,11 +207,87 @@ impl<'a, Message> FlexLayout<'a, Message> {
 
         (child_sizes, fill_size)
     }
+
+    /// Calculate wrapped layout for horizontal flex with wrap enabled.
+    /// Returns Vec of (child_bounds, row_index) for each child, plus total height.
+    fn calculate_wrapped_layout(&self, bounds: &Rectangle) -> (Vec<Rectangle>, f32) {
+        let child_limits = Limits::fill();
+        let mut positions: Vec<Rectangle> = Vec::new();
+        let mut x = bounds.x;
+        let mut y = bounds.y;
+        let mut row_height: f32 = 0.0;
+        let mut total_height: f32 = 0.0;
+
+        for (i, child) in self.children.iter().enumerate() {
+            let child_layout = child.widget().layout(&child_limits);
+            let size = child_layout.size();
+
+            // Check if we need to wrap to next line
+            if i > 0 && x + size.width > bounds.x + bounds.width {
+                // Move to next line
+                y += row_height + self.spacing;
+                x = bounds.x;
+                row_height = 0.0;
+            }
+
+            // Add spacing between items on same row
+            if i > 0 && x > bounds.x {
+                x += self.spacing;
+            }
+
+            positions.push(Rectangle::new(x, y, size.width, size.height));
+            x += size.width;
+            row_height = row_height.max(size.height);
+            total_height = (y - bounds.y) + row_height;
+        }
+
+        (positions, total_height)
+    }
 }
 
 impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
     fn layout(&self, limits: &Limits) -> Layout {
-        let child_limits = Limits::fill();
+        // For wrapped horizontal layout, we need to consider available width
+        if self.wrap && self.is_horizontal() && limits.max_width.is_finite() {
+            let child_limits = Limits::fill();
+            let mut x: f32 = 0.0;
+            let mut y: f32 = 0.0;
+            let mut row_height: f32 = 0.0;
+            let mut max_width: f32 = 0.0;
+
+            for (i, child) in self.children.iter().enumerate() {
+                let child_layout = child.widget().layout(&child_limits);
+                let size = child_layout.size();
+
+                // Check if we need to wrap
+                if i > 0 && x + size.width > limits.max_width {
+                    y += row_height + self.spacing;
+                    max_width = max_width.max(x - self.spacing);
+                    x = 0.0;
+                    row_height = 0.0;
+                }
+
+                if i > 0 && x > 0.0 {
+                    x += self.spacing;
+                }
+
+                x += size.width;
+                row_height = row_height.max(size.height);
+            }
+
+            max_width = max_width.max(x);
+            let total_height = y + row_height;
+
+            return Layout::new(Rectangle::new(0.0, 0.0, max_width, total_height));
+        }
+
+        // Non-wrapped layout (original behavior)
+        // For vertical layouts, propagate width constraint to children so wrapped rows can work
+        let child_limits = if !self.is_horizontal() && limits.max_width.is_finite() {
+            Limits::with_range(0.0, limits.max_width, 0.0, f32::INFINITY)
+        } else {
+            Limits::fill()
+        };
         let mut total_main: f32 = 0.0;
         let mut max_cross: f32 = 0.0;
 
@@ -239,6 +327,17 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
             );
         }
 
+        // Handle wrapped horizontal layout
+        if self.wrap && self.is_horizontal() {
+            let (positions, _) = self.calculate_wrapped_layout(&bounds);
+            for (i, child) in self.children.iter().enumerate() {
+                let positioned_layout = Layout::new(positions[i]);
+                child.widget().draw(renderer, &positioned_layout);
+            }
+            return;
+        }
+
+        // Non-wrapped layout (original behavior)
         let (child_sizes, fill_size) = self.calculate_child_sizes(&bounds);
 
         // Position children and collect for drawing
@@ -277,6 +376,20 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
 
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
         let bounds = layout.bounds();
+
+        // Handle wrapped horizontal layout
+        if self.wrap && self.is_horizontal() {
+            let (positions, _) = self.calculate_wrapped_layout(&bounds);
+            for (i, child) in self.children.iter_mut().enumerate() {
+                let positioned_layout = Layout::new(positions[i]);
+                if let Some(message) = child.widget_mut().on_event(event, &positioned_layout) {
+                    return Some(message);
+                }
+            }
+            return None;
+        }
+
+        // Non-wrapped layout (original behavior)
         let (child_sizes, fill_size) = self.calculate_child_sizes(&bounds);
 
         // Cache values to avoid borrowing self during iteration

@@ -384,8 +384,10 @@ impl Application for HvatApp {
         };
 
         // Wrap content in scrollable - supports both vertical and horizontal scrolling
+        // fill_viewport enables children with Length::Fill to expand to fill the viewport
         let scrollable_content = scrollable(content)
             .direction(ScrollDirection::Both)
+            .fill_viewport()
             .scroll_offset_y(self.widget_state.scroll.offset_y)
             .scroll_offset_x(self.widget_state.scroll.offset_x)
             .dragging_y(self.widget_state.scroll.is_dragging_y)

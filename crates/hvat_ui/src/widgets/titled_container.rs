@@ -38,6 +38,8 @@ pub struct TitledContainer<'a, Message> {
     border_width: f32,
     /// Background color for the content area
     background: Option<Color>,
+    /// Whether to fill available space
+    fill: bool,
 }
 
 impl<'a, Message> TitledContainer<'a, Message> {
@@ -56,7 +58,14 @@ impl<'a, Message> TitledContainer<'a, Message> {
             border_color: None,
             border_width: 1.0,
             background: None,
+            fill: false,
         }
+    }
+
+    /// Make the container fill all available space.
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
+        self
     }
 
     /// Set the title position.
@@ -138,9 +147,27 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
         let child_layout = self.child.widget().layout(&child_limits);
         let child_size = child_layout.size();
 
-        // Container size: child + padding, capped by limits
-        let width = (child_size.width + self.content_padding * 2.0).min(limits.max_width);
-        let height = (child_size.height + self.content_padding * 2.0).min(limits.max_height);
+        // Container size depends on fill mode
+        let (width, height) = if self.fill {
+            // Fill mode: use all available space (up to limits)
+            // Return 0 when limits are infinite to signal "fill remaining space" to parent
+            let w = if limits.max_width.is_finite() {
+                limits.max_width
+            } else {
+                0.0 // Signal to parent that we want to fill
+            };
+            let h = if limits.max_height.is_finite() {
+                limits.max_height
+            } else {
+                0.0 // Signal to parent that we want to fill
+            };
+            (w, h)
+        } else {
+            // Content mode: size to child + padding, capped by limits
+            let w = (child_size.width + self.content_padding * 2.0).min(limits.max_width);
+            let h = (child_size.height + self.content_padding * 2.0).min(limits.max_height);
+            (w, h)
+        };
 
         Layout::new(Rectangle::new(0.0, 0.0, width, height))
     }

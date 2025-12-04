@@ -37,6 +37,12 @@ impl<'a, Message> Row<'a, Message> {
         self
     }
 
+    /// Enable wrap mode - children wrap to the next line when they exceed available width.
+    pub fn wrap(mut self) -> Self {
+        self.inner = self.inner.wrap();
+        self
+    }
+
     /// Get the number of children.
     pub fn len(&self) -> usize {
         self.inner.len()

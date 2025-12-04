@@ -86,6 +86,14 @@ pub struct ScrollState {
     pub is_dragging_y: bool,
     /// Whether the horizontal scrollbar is being dragged
     pub is_dragging_x: bool,
+    /// Mouse Y position when vertical drag started (for relative dragging)
+    pub drag_start_mouse_y: Option<f32>,
+    /// Scroll offset when vertical drag started
+    pub drag_start_scroll_y: Option<f32>,
+    /// Mouse X position when horizontal drag started (for relative dragging)
+    pub drag_start_mouse_x: Option<f32>,
+    /// Scroll offset when horizontal drag started
+    pub drag_start_scroll_x: Option<f32>,
 }
 
 impl ScrollState {
@@ -103,24 +111,32 @@ impl ScrollState {
         self.offset_x = offset;
     }
 
-    /// Start vertical scrollbar drag.
-    pub fn start_drag_y(&mut self) {
+    /// Start vertical scrollbar drag with mouse position for relative dragging.
+    pub fn start_drag_y(&mut self, mouse_y: f32) {
         self.is_dragging_y = true;
+        self.drag_start_mouse_y = Some(mouse_y);
+        self.drag_start_scroll_y = Some(self.offset_y);
     }
 
-    /// Start horizontal scrollbar drag.
-    pub fn start_drag_x(&mut self) {
+    /// Start horizontal scrollbar drag with mouse position for relative dragging.
+    pub fn start_drag_x(&mut self, mouse_x: f32) {
         self.is_dragging_x = true;
+        self.drag_start_mouse_x = Some(mouse_x);
+        self.drag_start_scroll_x = Some(self.offset_x);
     }
 
     /// End vertical scrollbar drag.
     pub fn end_drag_y(&mut self) {
         self.is_dragging_y = false;
+        self.drag_start_mouse_y = None;
+        self.drag_start_scroll_y = None;
     }
 
     /// End horizontal scrollbar drag.
     pub fn end_drag_x(&mut self) {
         self.is_dragging_x = false;
+        self.drag_start_mouse_x = None;
+        self.drag_start_scroll_x = None;
     }
 }
 
