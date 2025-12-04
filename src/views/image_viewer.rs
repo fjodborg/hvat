@@ -22,14 +22,18 @@ use hvat_ui::{
 };
 
 /// Build an overlay from annotations and drawing state.
-pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState) -> Overlay {
+pub fn build_overlay(
+    annotations: &AnnotationStore,
+    drawing_state: &DrawingState,
+    categories: &std::collections::HashMap<u32, Category>,
+) -> Overlay {
     let mut overlay = Overlay::new();
 
     // Add all annotations
     for ann in annotations.iter() {
-        // Get category color
-        let cat_color = annotations
-            .get_category(ann.category_id)
+        // Get category color from global categories
+        let cat_color = categories
+            .get(&ann.category_id)
             .map(|c| Color::new(c.color[0], c.color[1], c.color[2], c.color[3]))
             .unwrap_or(colors::DEFAULT_GRAY);
 
@@ -74,8 +78,8 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
 
     // Add preview for in-progress drawing
     if let Some(preview_shape) = drawing_state.preview() {
-        let cat_color = annotations
-            .get_category(drawing_state.current_category)
+        let cat_color = categories
+            .get(&drawing_state.current_category)
             .map(|c| Color::new(c.color[0], c.color[1], c.color[2], ann_const::PREVIEW_ALPHA))
             .unwrap_or(Color::new(0.7, 0.7, 0.7, ann_const::PREVIEW_ALPHA));
 
@@ -377,6 +381,7 @@ pub fn view_image_viewer<'a>(
     widget_state: &'a WidgetState,
     drawing_state: &'a DrawingState,
     annotations: &'a AnnotationStore,
+    categories: Vec<&'a Category>,
     status_message: Option<&'a str>,
     band_selection: &BandSelection,
     num_bands: usize,
@@ -385,6 +390,7 @@ pub fn view_image_viewer<'a>(
     image_settings_persistence: PersistenceMode,
     available_tags: &'a [Tag],
     current_image_tags: &'a HashSet<u32>,
+    image_dimensions: Option<(u32, u32)>,
 ) -> Row<'a, Message> {
     // Create image adjustments from current settings
     let adjustments = ImageAdjustments {
@@ -432,7 +438,9 @@ pub fn view_image_viewer<'a>(
         })
         .on_tool_key(Message::tool_shortcut)
         // Disable keyboard shortcuts when any text input is focused
-        .keyboard_disabled(widget_state.category_input.is_focused || widget_state.tag_input.is_focused);
+        .keyboard_disabled(widget_state.category_input.is_focused || widget_state.tag_input.is_focused)
+        // Report widget bounds for pixel ratio calculation
+        .on_layout(Message::report_widget_bounds);
 
     // === LEFT PANEL: Image with titled container (fills available space) ===
     let image_panel = titled_container("Image", Element::new(image_widget))
@@ -473,13 +481,51 @@ pub fn view_image_viewer<'a>(
                 .size(text_const::SMALL)
                 .color(text_color),
         ))
-        // View controls
-        .push(Element::new(
+        // View controls - zoom and pixel ratio
+        .push(Element::new({
+            // Calculate pixel ratio: how many image pixels per screen pixel
+            // Use actual widget bounds if available, otherwise use defaults
+            let (widget_w, widget_h) = widget_state.image.widget_bounds
+                .unwrap_or((img_const::WIDTH, img_const::HEIGHT));
+
+            let pixel_ratio_str = if let Some((img_w, img_h)) = image_dimensions {
+                let img_aspect = img_w as f32 / img_h as f32;
+                let widget_aspect = widget_w / widget_h;
+
+                // Fit scale: how much the image is scaled to fit widget at zoom=1.0
+                let fit_scale = if img_aspect > widget_aspect {
+                    // Image is wider - fit to width
+                    widget_w / img_w as f32
+                } else {
+                    // Image is taller - fit to height
+                    widget_h / img_h as f32
+                };
+
+                // Actual scale with current zoom
+                let actual_scale = fit_scale * zoom;
+
+                // Pixel ratio: image pixels per screen pixel (inverse of scale)
+                let ratio = 1.0 / actual_scale;
+
+                if ratio >= 1.0 {
+                    format!("1:{:.1}", ratio)
+                } else {
+                    format!("{:.1}:1", 1.0 / ratio)
+                }
+            } else {
+                "1:?".to_string()
+            };
+
             row()
                 .push(Element::new(
                     text(format!("Zoom: {:.1}x", zoom))
                         .size(text_const::SMALL)
                         .color(text_color),
+                ))
+                .push(Element::new(
+                    text(pixel_ratio_str)
+                        .size(text_const::SMALL)
+                        .color(colors::MUTED_TEXT),
                 ))
                 .push(Element::new(
                     button("+")
@@ -492,12 +538,17 @@ pub fn view_image_viewer<'a>(
                         .width(30.0),
                 ))
                 .push(Element::new(
-                    button("Reset")
-                        .on_press(Message::reset_view())
-                        .width(55.0),
+                    button("1:1")
+                        .on_press(Message::reset_to_one_to_one())
+                        .width(35.0),
                 ))
-                .spacing(spacing::TIGHT),
-        ))
+                .push(Element::new(
+                    button("Fit")
+                        .on_press(Message::reset_view())
+                        .width(35.0),
+                ))
+                .spacing(spacing::TIGHT)
+        }))
         // Image Settings section (collapsible)
         .push(Element::new(
             collapsible(
@@ -539,7 +590,7 @@ pub fn view_image_viewer<'a>(
         )))
         // Category selector (compact list with hotkeys 1-9)
         .push(Element::new(view_category_selector(
-            annotations.categories().collect(),
+            categories,
             drawing_state.current_category,
             text_color,
             &widget_state.category_input.new_category_name,

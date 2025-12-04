@@ -139,6 +139,12 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                     }
                     WindowEvent::Resized(size) => {
                         app_state.renderer.resize(size.width, size.height);
+                        // Send resize event to widgets so they can update their bounds
+                        let ui_event = crate::Event::WindowResized {
+                            width: size.width as f32,
+                            height: size.height as f32,
+                        };
+                        app_state.handle_event(ui_event);
                         window.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {
@@ -432,6 +438,12 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                             }
                         }
                         app_state.renderer.resize(render_width, render_height);
+                        // Send resize event to widgets so they can update their bounds
+                        let ui_event = crate::Event::WindowResized {
+                            width: render_width as f32,
+                            height: render_height as f32,
+                        };
+                        app_state.handle_event(ui_event);
                         window.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {

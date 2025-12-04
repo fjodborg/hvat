@@ -75,6 +75,8 @@ pub struct HvatApp {
     // === Annotation system ===
     /// Annotation storage per image (keyed by image name/path)
     annotations_map: HashMap<String, AnnotationStore>,
+    /// Global categories shared across all images
+    categories: HashMap<u32, crate::annotation::Category>,
     /// Current drawing state (tool, in-progress points)
     drawing_state: DrawingState,
     /// Cached overlay - rebuilt only when annotations or drawing state changes
@@ -209,6 +211,11 @@ impl Application for HvatApp {
             status_message: None,
             widget_state: WidgetState::new(),
             annotations_map: HashMap::new(),
+            categories: {
+                let mut cats = HashMap::new();
+                cats.insert(0, crate::annotation::Category::new(0, "Object"));
+                cats
+            },
             drawing_state: DrawingState::new(),
             cached_overlay: Overlay::new(),
             cached_overlay_image_key: String::new(),
@@ -239,6 +246,34 @@ impl Application for HvatApp {
                 handle_counter(msg, &mut self.counter);
             }
             Message::ImageView(msg) => {
+                // Handle ResetToOneToOne specially since it needs image dimensions
+                if matches!(msg, crate::message::ImageViewMessage::ResetToOneToOne) {
+                    if let Some((img_w, img_h)) = self.image_cache.get_dimensions(self.current_image_index) {
+                        // Calculate zoom for 1:1 pixel ratio
+                        // Use actual widget bounds if available, otherwise use defaults
+                        use crate::ui_constants::image_viewer as img_const;
+                        let (widget_w, widget_h) = self.widget_state.image.widget_bounds
+                            .unwrap_or((img_const::WIDTH, img_const::HEIGHT));
+                        let img_aspect = img_w as f32 / img_h as f32;
+                        let widget_aspect = widget_w / widget_h;
+
+                        // Fit scale: how much the image is scaled to fit widget at zoom=1.0
+                        let fit_scale = if img_aspect > widget_aspect {
+                            widget_w / img_w as f32
+                        } else {
+                            widget_h / img_h as f32
+                        };
+
+                        // For 1:1, we need actual_scale = 1.0
+                        // actual_scale = fit_scale * zoom
+                        // zoom = 1.0 / fit_scale
+                        self.zoom = (1.0 / fit_scale).clamp(crate::ui_constants::zoom::MIN, crate::ui_constants::zoom::MAX);
+                        self.pan_x = 0.0;
+                        self.pan_y = 0.0;
+                        log::debug!("🔍 Reset to 1:1 pixel ratio: zoom = {:.2}x", self.zoom);
+                    }
+                    return;
+                }
                 handle_image_view(
                     msg,
                     &mut self.zoom,
@@ -304,14 +339,14 @@ impl Application for HvatApp {
                 self.rebuild_overlay_if_dirty();
             }
             Message::UI(msg) => {
-                // Handle SubmitNewCategory specially since it needs access to annotations
+                // Handle SubmitNewCategory specially since it needs access to global categories
                 if matches!(msg, crate::message::UIMessage::SubmitNewCategory) {
                     let name = self.widget_state.category_input.new_category_name.trim().to_string();
                     if !name.is_empty() {
-                        // Find next category ID
-                        let next_id = self.annotations().categories().map(|c| c.id).max().unwrap_or(0) + 1;
-                        // Add category to the annotation store
-                        self.annotations_mut().add_category(crate::annotation::Category::new(next_id, &name));
+                        // Find next category ID from global categories
+                        let next_id = self.categories.keys().max().copied().unwrap_or(0) + 1;
+                        // Add category to global categories
+                        self.add_category(crate::annotation::Category::new(next_id, &name));
                         log::info!("🏷️ Added new category: {} (id={})", name, next_id);
                     }
                     // Always clear input and unfocus after submit (even if empty)
@@ -379,6 +414,7 @@ impl Application for HvatApp {
                 let image_key = self.current_image_key();
                 let mut state = AnnotationState {
                     annotations_map: &mut self.annotations_map,
+                    categories: &mut self.categories,
                     drawing_state: &mut self.drawing_state,
                     image_key,
                     zoom: self.zoom,
@@ -511,6 +547,7 @@ impl Application for HvatApp {
                 &self.widget_state,
                 &self.drawing_state,
                 self.annotations(),
+                self.categories().collect(),
                 self.status_message.as_deref(),
                 &self.band_selection,
                 self.num_bands(),
@@ -519,6 +556,7 @@ impl Application for HvatApp {
                 self.image_settings_persistence,
                 &self.available_tags,
                 self.current_image_tags(),
+                self.image_cache.get_dimensions(self.current_image_index),
             )),
             Tab::Settings => Element::new(view_settings(
                 &self.theme,
@@ -585,12 +623,19 @@ impl HvatApp {
             .unwrap_or_else(|| EMPTY.get_or_init(AnnotationStore::new))
     }
 
-    /// Get mutable annotations for the current image.
-    fn annotations_mut(&mut self) -> &mut AnnotationStore {
-        let key = self.current_image_key();
-        self.annotations_map
-            .entry(key)
-            .or_insert_with(AnnotationStore::new)
+    /// Get all categories (global, shared across all images).
+    pub fn categories(&self) -> impl Iterator<Item = &crate::annotation::Category> {
+        self.categories.values()
+    }
+
+    /// Get a category by ID.
+    pub fn get_category(&self, id: u32) -> Option<&crate::annotation::Category> {
+        self.categories.get(&id)
+    }
+
+    /// Add a new category.
+    pub fn add_category(&mut self, category: crate::annotation::Category) {
+        self.categories.insert(category.id, category);
     }
 
     /// Get tags for the current image.
@@ -626,8 +671,8 @@ impl HvatApp {
         let drawing_active = self.drawing_state.is_drawing;
 
         if image_changed || annotations_dirty || drawing_active {
-            // Rebuild overlay
-            self.cached_overlay = build_overlay(self.annotations(), &self.drawing_state);
+            // Rebuild overlay (pass global categories for color lookup)
+            self.cached_overlay = build_overlay(self.annotations(), &self.drawing_state, &self.categories);
             self.cached_overlay_image_key = image_key.clone();
 
             // Clear dirty flag

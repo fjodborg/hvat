@@ -73,6 +73,13 @@ pub fn handle_image_view(
             *pan_y = 0.0;
             log::debug!("🔄 View reset");
         }
+        ImageViewMessage::ResetToOneToOne => {
+            // Handled specially in hvat_app.rs since it needs image dimensions
+            // This arm exists for completeness but should not be reached
+        }
+        ImageViewMessage::ReportBounds(width, height) => {
+            widget_state.image.set_bounds(width, height);
+        }
         ImageViewMessage::PanLeft => {
             *pan_x -= zoom_const::PAN_STEP;
             log::debug!("⬅️  Pan left: ({:.0}, {:.0})", pan_x, pan_y);
@@ -465,6 +472,7 @@ pub fn handle_ui(
 /// State needed for annotation handler.
 pub struct AnnotationState<'a> {
     pub annotations_map: &'a mut HashMap<String, AnnotationStore>,
+    pub categories: &'a mut HashMap<u32, Category>,
     pub drawing_state: &'a mut DrawingState,
     pub image_key: String,
     pub zoom: f32,
@@ -498,6 +506,21 @@ impl<'a> AnnotationState<'a> {
                 .or_insert_with(AnnotationStore::new)
         }
     }
+
+    /// Get all global categories.
+    pub fn global_categories(&self) -> impl Iterator<Item = &Category> {
+        self.categories.values()
+    }
+
+    /// Add a category to global categories.
+    pub fn add_global_category(&mut self, category: Category) {
+        self.categories.insert(category.id, category);
+    }
+
+    /// Get a global category by ID.
+    pub fn get_global_category(&self, id: u32) -> Option<&Category> {
+        self.categories.get(&id)
+    }
 }
 
 /// Handle annotation messages.
@@ -514,8 +537,8 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             log::debug!("🏷️ Category: {}", id);
         }
         AnnotationMessage::SelectCategoryByHotkey(num) => {
-            // Map hotkey number (1-9) to category ID based on sorted order
-            let mut cat_ids: Vec<u32> = state.annotations().categories().map(|c| c.id).collect();
+            // Map hotkey number (1-9) to category ID based on sorted order (use global categories)
+            let mut cat_ids: Vec<u32> = state.global_categories().map(|c| c.id).collect();
             cat_ids.sort();
 
             // Hotkey 1 = index 0, hotkey 2 = index 1, etc.
@@ -534,10 +557,9 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             }
         }
         AnnotationMessage::AddCategory(name) => {
-            let id = state.annotations().categories().count() as u32;
-            state
-                .annotations_mut()
-                .add_category(Category::new(id, name.clone()));
+            // Add to global categories
+            let id = state.categories.keys().max().copied().unwrap_or(0) + 1;
+            state.add_global_category(Category::new(id, name.clone()));
             log::debug!("🏷️ Added category: {} (id={})", name, id);
         }
         AnnotationMessage::StartDrawing(x, y) => {

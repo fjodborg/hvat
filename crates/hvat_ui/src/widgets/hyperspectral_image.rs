@@ -53,6 +53,10 @@ pub struct HyperspectralImage<Message> {
     on_ctrl_number_key: Option<Box<dyn Fn(u8) -> Message>>,
     /// Callback when tool shortcut key pressed (b, m, p, s, Escape, Delete)
     on_tool_key: Option<Box<dyn Fn(char) -> Message>>,
+    /// Callback when layout is computed - reports widget bounds (width, height)
+    on_layout: Option<Box<dyn Fn(f32, f32) -> Message>>,
+    /// Last reported bounds (for change detection)
+    last_reported_bounds: Option<(f32, f32)>,
 }
 
 impl<Message> HyperspectralImage<Message> {
@@ -81,6 +85,8 @@ impl<Message> HyperspectralImage<Message> {
             on_number_key: None,
             on_ctrl_number_key: None,
             on_tool_key: None,
+            on_layout: None,
+            last_reported_bounds: None,
         }
     }
 
@@ -241,6 +247,16 @@ impl<Message> HyperspectralImage<Message> {
     /// When disabled, Space and number keys won't trigger callbacks.
     pub fn keyboard_disabled(mut self, disabled: bool) -> Self {
         self.keyboard_disabled = disabled;
+        self
+    }
+
+    /// Set the callback when layout is computed.
+    /// Reports widget bounds (width, height) so the app can calculate pixel ratios.
+    pub fn on_layout<F>(mut self, f: F) -> Self
+    where
+        F: Fn(f32, f32) -> Message + 'static,
+    {
+        self.on_layout = Some(Box::new(f));
         self
     }
 
@@ -412,7 +428,42 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
         let bounds = layout.bounds();
 
-        match event {
+        // Track current bounds for pixel ratio calculation
+        let current_bounds = (bounds.width, bounds.height);
+        let bounds_changed = self.last_reported_bounds != Some(current_bounds);
+
+        // Report bounds on WindowResized events
+        // We don't return early here - just update the callback and continue processing
+        if let Event::WindowResized { .. } = event {
+            if bounds_changed {
+                self.last_reported_bounds = Some(current_bounds);
+                if let Some(ref on_layout) = self.on_layout {
+                    return Some(on_layout(bounds.width, bounds.height));
+                }
+            }
+            // WindowResized doesn't need further widget processing (no interaction)
+            return None;
+        }
+
+        // Also report bounds on first mouse move within the widget (not on press/click)
+        // This ensures bounds are reported even before any resize event
+        // We only do this on MouseMoved to avoid intercepting click/drag start events
+        if bounds_changed {
+            if let Event::MouseMoved { position } = event {
+                if bounds.contains(*position) {
+                    // Always update last_reported_bounds to prevent repeated attempts
+                    self.last_reported_bounds = Some(current_bounds);
+                    // Only actually report if no interaction is happening
+                    if !self.is_dragging && !self.is_drawing {
+                        if let Some(ref on_layout) = self.on_layout {
+                            return Some(on_layout(bounds.width, bounds.height));
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = match event {
             // Left mouse - annotation drawing
             Event::MousePressed {
                 button: MouseButton::Left,
@@ -557,7 +608,9 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
                 None
             }
             _ => None,
-        }
+        };
+
+        result
     }
 }
 

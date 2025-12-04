@@ -15,6 +15,8 @@ pub struct ImageViewState {
     pub is_dragging: bool,
     /// Last drag position for calculating delta
     pub last_drag_pos: Option<(f32, f32)>,
+    /// Last known widget bounds (width, height) for pixel ratio calculation
+    pub widget_bounds: Option<(f32, f32)>,
 }
 
 impl ImageViewState {
@@ -44,6 +46,11 @@ impl ImageViewState {
     pub fn end_drag(&mut self) {
         self.is_dragging = false;
         self.last_drag_pos = None;
+    }
+
+    /// Update the widget bounds.
+    pub fn set_bounds(&mut self, width: f32, height: f32) {
+        self.widget_bounds = Some((width, height));
     }
 }
 

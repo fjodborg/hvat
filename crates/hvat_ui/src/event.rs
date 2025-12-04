@@ -21,6 +21,8 @@ pub enum Event {
     KeyPressed { key: Key, modifiers: Modifiers },
     /// Keyboard key released.
     KeyReleased { key: Key, modifiers: Modifiers },
+    /// Window was resized (width, height).
+    WindowResized { width: f32, height: f32 },
 }
 
 /// Result of handling an event, indicating whether it was consumed.

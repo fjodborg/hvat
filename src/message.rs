@@ -59,6 +59,8 @@ pub enum ImageViewMessage {
     ZoomIn,
     ZoomOut,
     ResetView,
+    /// Reset zoom to 1:1 pixel ratio (one screen pixel = one image pixel)
+    ResetToOneToOne,
     PanLeft,
     PanRight,
     PanUp,
@@ -70,6 +72,8 @@ pub enum ImageViewMessage {
     DragStart((f32, f32)),
     DragMove((f32, f32)),
     DragEnd,
+    /// Report widget bounds (width, height) for pixel ratio calculation
+    ReportBounds(f32, f32),
 }
 
 /// Messages for image manipulation settings (brightness, contrast, etc.).
@@ -338,6 +342,12 @@ impl Message {
     }
     pub fn reset_view() -> Self {
         Message::ImageView(ImageViewMessage::ResetView)
+    }
+    pub fn reset_to_one_to_one() -> Self {
+        Message::ImageView(ImageViewMessage::ResetToOneToOne)
+    }
+    pub fn report_widget_bounds(width: f32, height: f32) -> Self {
+        Message::ImageView(ImageViewMessage::ReportBounds(width, height))
     }
     pub fn image_drag_start(pos: (f32, f32)) -> Self {
         Message::ImageView(ImageViewMessage::DragStart(pos))
