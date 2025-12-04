@@ -27,7 +27,7 @@ use crate::message::ImageLoadMessage;
 use crate::wasm_file::take_wasm_pending_files;
 use hvat_ui::widgets::{button, column, container, modal, row, scrollable, text, Element, ScrollDirection};
 use hvat_ui::{Application, Color, HyperspectralImageHandle, ImageHandle};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use web_time::Instant;
 
 /// Main application state.
@@ -102,6 +102,12 @@ pub struct HvatApp {
     export_dialog_open: bool,
     /// Currently selected export format
     export_format: ExportFormat,
+
+    // === Image tagging ===
+    /// Available tag definitions
+    available_tags: Vec<Tag>,
+    /// Tags applied to each image (keyed by image name/path, value is set of tag IDs)
+    image_tags: HashMap<String, HashSet<u32>>,
 }
 
 /// Stored image manipulation settings for per-image persistence.
@@ -111,6 +117,44 @@ pub struct ImageSettings {
     pub contrast: f32,
     pub gamma: f32,
     pub hue_shift: f32,
+}
+
+/// An image tag definition.
+#[derive(Clone, Debug)]
+pub struct Tag {
+    pub id: u32,
+    pub name: String,
+    pub color: [f32; 4],
+}
+
+impl Tag {
+    /// Create a new tag with auto-generated color.
+    pub fn new(id: u32, name: impl Into<String>) -> Self {
+        // Generate distinct colors using golden angle
+        let hue = (id as f32 * 137.5) % 360.0;
+        let (r, g, b) = hsv_to_rgb(hue, 0.7, 0.9);
+        Self {
+            id,
+            name: name.into(),
+            color: [r, g, b, 1.0],
+        }
+    }
+}
+
+/// Convert HSV to RGB (same as Category color generation).
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    (r + m, g + m, b + m)
 }
 
 impl Default for ImageSettings {
@@ -177,6 +221,8 @@ impl Application for HvatApp {
             stored_image_settings: HashMap::new(),
             export_dialog_open: false,
             export_format: ExportFormat::default(),
+            available_tags: Vec::new(),
+            image_tags: HashMap::new(),
         }
     }
 
@@ -258,6 +304,32 @@ impl Application for HvatApp {
                 self.rebuild_overlay_if_dirty();
             }
             Message::UI(msg) => {
+                // Handle SubmitNewCategory specially since it needs access to annotations
+                if matches!(msg, crate::message::UIMessage::SubmitNewCategory) {
+                    let name = self.widget_state.category_input.new_category_name.trim().to_string();
+                    if !name.is_empty() {
+                        // Find next category ID
+                        let next_id = self.annotations().categories().map(|c| c.id).max().unwrap_or(0) + 1;
+                        // Add category to the annotation store
+                        self.annotations_mut().add_category(crate::annotation::Category::new(next_id, &name));
+                        log::info!("🏷️ Added new category: {} (id={})", name, next_id);
+                    }
+                    // Always clear input and unfocus after submit (even if empty)
+                    self.widget_state.category_input.clear();
+                }
+                // Handle SubmitNewTag specially since it needs access to available_tags
+                if matches!(msg, crate::message::UIMessage::SubmitNewTag) {
+                    let name = self.widget_state.tag_input.new_tag_name.trim().to_string();
+                    if !name.is_empty() {
+                        // Find next tag ID
+                        let next_id = self.available_tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                        // Add tag to available tags
+                        self.available_tags.push(Tag::new(next_id, &name));
+                        log::info!("🏷️ Added new tag: {} (id={})", name, next_id);
+                    }
+                    // Always clear input and unfocus after submit (even if empty)
+                    self.widget_state.tag_input.clear();
+                }
                 handle_ui(
                     msg,
                     &mut self.widget_state,
@@ -266,6 +338,42 @@ impl Application for HvatApp {
                     &mut self.band_persistence,
                     &mut self.image_settings_persistence,
                 );
+            }
+            Message::Tag(msg) => {
+                use crate::message::TagMessage;
+                match msg {
+                    TagMessage::ToggleTagByHotkey(num) => {
+                        // Map hotkey number (1-9) to tag ID based on sorted order
+                        let mut tag_ids: Vec<u32> = self.available_tags.iter().map(|t| t.id).collect();
+                        tag_ids.sort();
+                        let index = (num as usize).saturating_sub(1);
+                        if let Some(&tag_id) = tag_ids.get(index) {
+                            let tags = self.current_image_tags_mut();
+                            if tags.contains(&tag_id) {
+                                tags.remove(&tag_id);
+                                log::info!("🏷️ Removed tag {} from image (hotkey {})", tag_id, num);
+                            } else {
+                                tags.insert(tag_id);
+                                log::info!("🏷️ Added tag {} to image (hotkey {})", tag_id, num);
+                            }
+                        }
+                    }
+                    TagMessage::ToggleTag(tag_id) => {
+                        let tags = self.current_image_tags_mut();
+                        if tags.contains(&tag_id) {
+                            tags.remove(&tag_id);
+                            log::info!("🏷️ Removed tag {} from image", tag_id);
+                        } else {
+                            tags.insert(tag_id);
+                            log::info!("🏷️ Added tag {} to image", tag_id);
+                        }
+                    }
+                    TagMessage::AddTag(name) => {
+                        let next_id = self.available_tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                        self.available_tags.push(Tag::new(next_id, &name));
+                        log::info!("🏷️ Added new tag: {} (id={})", name, next_id);
+                    }
+                }
             }
             Message::Annotation(msg) => {
                 let image_key = self.current_image_key();
@@ -409,6 +517,8 @@ impl Application for HvatApp {
                 self.cached_overlay.clone(),
                 self.band_persistence,
                 self.image_settings_persistence,
+                &self.available_tags,
+                self.current_image_tags(),
             )),
             Tab::Settings => Element::new(view_settings(
                 &self.theme,
@@ -481,6 +591,21 @@ impl HvatApp {
         self.annotations_map
             .entry(key)
             .or_insert_with(AnnotationStore::new)
+    }
+
+    /// Get tags for the current image.
+    fn current_image_tags(&self) -> &HashSet<u32> {
+        static EMPTY: std::sync::OnceLock<HashSet<u32>> = std::sync::OnceLock::new();
+        let key = self.current_image_key();
+        self.image_tags
+            .get(&key)
+            .unwrap_or_else(|| EMPTY.get_or_init(HashSet::new))
+    }
+
+    /// Get mutable tags for the current image.
+    fn current_image_tags_mut(&mut self) -> &mut HashSet<u32> {
+        let key = self.current_image_key();
+        self.image_tags.entry(key).or_insert_with(HashSet::new)
     }
 
     /// Rebuild overlay if annotations are dirty or image changed.

@@ -124,6 +124,8 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
 
     // Track mouse state for event conversion
     let mut mouse_position = crate::Point::zero();
+    // Track keyboard modifier state
+    let mut current_modifiers = crate::Modifiers::default();
 
     // Run event loop
     event_loop
@@ -195,17 +197,25 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         app_state.handle_event(ui_event);
                         window.request_redraw();
                     }
+                    WindowEvent::ModifiersChanged(mods) => {
+                        let state = mods.state();
+                        current_modifiers = crate::Modifiers {
+                            shift: state.shift_key(),
+                            ctrl: state.control_key(),
+                            alt: state.alt_key(),
+                            meta: state.super_key(),
+                        };
+                    }
                     WindowEvent::KeyboardInput { event, .. } => {
                         if let Some(key) = convert_key(&event.logical_key) {
-                            let modifiers = crate::Modifiers::default(); // TODO: track modifiers
                             let ui_event = match event.state {
                                 winit::event::ElementState::Pressed => crate::Event::KeyPressed {
                                     key,
-                                    modifiers,
+                                    modifiers: current_modifiers,
                                 },
                                 winit::event::ElementState::Released => crate::Event::KeyReleased {
                                     key,
-                                    modifiers,
+                                    modifiers: current_modifiers,
                                 },
                             };
                             app_state.handle_event(ui_event);
@@ -382,6 +392,8 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
 
     // Track mouse state for event conversion
     let mut mouse_position = crate::Point::zero();
+    // Track keyboard modifier state
+    let mut current_modifiers = crate::Modifiers::default();
 
     // Run event loop
     event_loop
@@ -510,17 +522,25 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
                         app_state.handle_event(ui_event);
                         window.request_redraw();
                     }
+                    WindowEvent::ModifiersChanged(mods) => {
+                        let state = mods.state();
+                        current_modifiers = crate::Modifiers {
+                            shift: state.shift_key(),
+                            ctrl: state.control_key(),
+                            alt: state.alt_key(),
+                            meta: state.super_key(),
+                        };
+                    }
                     WindowEvent::KeyboardInput { event, .. } => {
                         if let Some(key) = convert_key(&event.logical_key) {
-                            let modifiers = crate::Modifiers::default(); // TODO: track modifiers
                             let ui_event = match event.state {
                                 winit::event::ElementState::Pressed => crate::Event::KeyPressed {
                                     key,
-                                    modifiers,
+                                    modifiers: current_modifiers,
                                 },
                                 winit::event::ElementState::Released => crate::Event::KeyReleased {
                                     key,
-                                    modifiers,
+                                    modifiers: current_modifiers,
                                 },
                             };
                             app_state.handle_event(ui_event);

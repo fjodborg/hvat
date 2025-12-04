@@ -439,6 +439,26 @@ pub fn handle_ui(
             widget_state.collapsible.toggle_band_settings();
             log::debug!("📦 Band settings collapsed: {}", widget_state.collapsible.band_settings_collapsed);
         }
+        UIMessage::SetNewCategoryText(text) => {
+            widget_state.category_input.set_text(text);
+        }
+        UIMessage::SetCategoryInputFocused(focused) => {
+            widget_state.category_input.set_focused(focused);
+        }
+        UIMessage::SubmitNewCategory => {
+            // This is handled in hvat_app.rs since we need access to annotations
+            // The handler there will add the category and clear the input
+        }
+        UIMessage::SetNewTagText(text) => {
+            widget_state.tag_input.set_text(text);
+        }
+        UIMessage::SetTagInputFocused(focused) => {
+            widget_state.tag_input.set_focused(focused);
+        }
+        UIMessage::SubmitNewTag => {
+            // This is handled in hvat_app.rs since we need access to available_tags
+            // The handler there will add the tag and clear the input
+        }
     }
 }
 
@@ -493,6 +513,20 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             state.drawing_state.current_category = id;
             log::debug!("🏷️ Category: {}", id);
         }
+        AnnotationMessage::SelectCategoryByHotkey(num) => {
+            // Map hotkey number (1-9) to category ID based on sorted order
+            let mut cat_ids: Vec<u32> = state.annotations().categories().map(|c| c.id).collect();
+            cat_ids.sort();
+
+            // Hotkey 1 = index 0, hotkey 2 = index 1, etc.
+            let index = (num as usize).saturating_sub(1);
+            if let Some(&cat_id) = cat_ids.get(index) {
+                state.drawing_state.current_category = cat_id;
+                log::debug!("🏷️ Category by hotkey {}: id={}", num, cat_id);
+            } else {
+                log::debug!("🏷️ Hotkey {} has no category (only {} exist)", num, cat_ids.len());
+            }
+        }
         AnnotationMessage::AddCategory(name) => {
             let id = state.annotations().categories().count() as u32;
             state
@@ -501,6 +535,10 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             log::debug!("🏷️ Added category: {} (id={})", name, id);
         }
         AnnotationMessage::StartDrawing(x, y) => {
+            // Clicking on image unfocuses any text input
+            state.widget_state.category_input.set_focused(false);
+            state.widget_state.tag_input.set_focused(false);
+
             match state.drawing_state.tool {
                 AnnotationTool::Select => {
                     // Hit test for selection

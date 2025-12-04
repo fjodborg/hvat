@@ -5,7 +5,7 @@
 
 use crate::{
     BandSelectionUniform, Color, Event, HyperspectralImageHandle, ImageAdjustments, Key, Layout,
-    Length, Limits, MouseButton, Overlay, OverlayShape, Rectangle, Renderer, Widget,
+    Length, Limits, Modifiers, MouseButton, Overlay, OverlayShape, Rectangle, Renderer, Widget,
 };
 
 /// An interactive hyperspectral image widget that supports panning, zooming, and band selection.
@@ -29,6 +29,8 @@ pub struct HyperspectralImage<Message> {
     adjustments: ImageAdjustments,
     /// Overlay shapes to draw on top of the image
     overlay: Overlay,
+    /// Whether keyboard shortcuts are disabled (e.g., when text input is focused)
+    keyboard_disabled: bool,
     /// Callback when pan drag starts (middle mouse)
     on_drag_start: Option<Box<dyn Fn((f32, f32)) -> Message>>,
     /// Callback when pan drag moves
@@ -45,6 +47,10 @@ pub struct HyperspectralImage<Message> {
     on_draw_end: Option<Box<dyn Fn() -> Message>>,
     /// Callback when Space key pressed (finish polygon)
     on_space: Option<Box<dyn Fn() -> Message>>,
+    /// Callback when number key pressed (category selection)
+    on_number_key: Option<Box<dyn Fn(u8) -> Message>>,
+    /// Callback when Ctrl+number key pressed (tag toggle)
+    on_ctrl_number_key: Option<Box<dyn Fn(u8) -> Message>>,
 }
 
 impl<Message> HyperspectralImage<Message> {
@@ -61,6 +67,7 @@ impl<Message> HyperspectralImage<Message> {
             is_drawing: false,
             adjustments: ImageAdjustments::new(),
             overlay: Overlay::new(),
+            keyboard_disabled: false,
             on_drag_start: None,
             on_drag_move: None,
             on_drag_end: None,
@@ -69,6 +76,8 @@ impl<Message> HyperspectralImage<Message> {
             on_draw_move: None,
             on_draw_end: None,
             on_space: None,
+            on_number_key: None,
+            on_ctrl_number_key: None,
         }
     }
 
@@ -195,6 +204,31 @@ impl<Message> HyperspectralImage<Message> {
         F: Fn() -> Message + 'static,
     {
         self.on_space = Some(Box::new(f));
+        self
+    }
+
+    /// Set the callback when number key (1-9) pressed for category selection.
+    pub fn on_number_key<F>(mut self, f: F) -> Self
+    where
+        F: Fn(u8) -> Message + 'static,
+    {
+        self.on_number_key = Some(Box::new(f));
+        self
+    }
+
+    /// Set the callback when Ctrl+number key (1-9) pressed for tag toggle.
+    pub fn on_ctrl_number_key<F>(mut self, f: F) -> Self
+    where
+        F: Fn(u8) -> Message + 'static,
+    {
+        self.on_ctrl_number_key = Some(Box::new(f));
+        self
+    }
+
+    /// Disable keyboard shortcuts (e.g., when a text input is focused).
+    /// When disabled, Space and number keys won't trigger callbacks.
+    pub fn keyboard_disabled(mut self, disabled: bool) -> Self {
+        self.keyboard_disabled = disabled;
         self
     }
 
@@ -391,12 +425,34 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
                 }
                 None
             }
-            // Space key - finish polygon
+            // Space key - finish polygon (disabled when text input is focused)
             Event::KeyPressed {
                 key: Key::Space, ..
-            } => {
+            } if !self.keyboard_disabled => {
                 if let Some(ref on_space) = self.on_space {
                     return Some(on_space());
+                }
+                None
+            }
+            // Ctrl+Number keys 1-9 - tag toggle (disabled when text input is focused)
+            Event::KeyPressed {
+                key: Key::Char(c),
+                modifiers,
+            } if *c >= '1' && *c <= '9' && modifiers.ctrl && !self.keyboard_disabled => {
+                if let Some(ref on_ctrl_number_key) = self.on_ctrl_number_key {
+                    let num = (*c as u8) - b'0';
+                    return Some(on_ctrl_number_key(num));
+                }
+                None
+            }
+            // Number keys 1-9 (without Ctrl) - category selection (disabled when text input is focused)
+            Event::KeyPressed {
+                key: Key::Char(c),
+                modifiers,
+            } if *c >= '1' && *c <= '9' && !modifiers.ctrl && !self.keyboard_disabled => {
+                if let Some(ref on_number_key) = self.on_number_key {
+                    let num = (*c as u8) - b'0';
+                    return Some(on_number_key(num));
                 }
                 None
             }

@@ -16,6 +16,7 @@ mod row;
 mod scrollable;
 mod slider;
 mod text;
+mod text_input;
 mod titled_container;
 
 pub use button::{button, Button};
@@ -34,6 +35,7 @@ pub use row::{row, Row};
 pub use scrollable::{scrollable, Scrollable};
 pub use slider::{slider, Slider, SliderId};
 pub use text::{text, Text};
+pub use text_input::{text_input, TextInput};
 pub use titled_container::{titled_container, TitledContainer, TitlePosition};
 
 // Re-export Element for convenience (it's actually in the element module)

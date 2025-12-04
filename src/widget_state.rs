@@ -241,6 +241,68 @@ impl CollapsibleState {
     }
 }
 
+/// State for category input field.
+#[derive(Debug, Clone, Default)]
+pub struct CategoryInputState {
+    /// Current text in the new category input field
+    pub new_category_name: String,
+    /// Whether the input field is focused
+    pub is_focused: bool,
+}
+
+impl CategoryInputState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update the input text.
+    pub fn set_text(&mut self, text: String) {
+        self.new_category_name = text;
+    }
+
+    /// Clear the input field.
+    pub fn clear(&mut self) {
+        self.new_category_name.clear();
+        self.is_focused = false;
+    }
+
+    /// Set focus state.
+    pub fn set_focused(&mut self, focused: bool) {
+        self.is_focused = focused;
+    }
+}
+
+/// State for tag input field.
+#[derive(Debug, Clone, Default)]
+pub struct TagInputState {
+    /// Current text in the new tag input field
+    pub new_tag_name: String,
+    /// Whether the input field is focused
+    pub is_focused: bool,
+}
+
+impl TagInputState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update the input text.
+    pub fn set_text(&mut self, text: String) {
+        self.new_tag_name = text;
+    }
+
+    /// Clear the input field.
+    pub fn clear(&mut self) {
+        self.new_tag_name.clear();
+        self.is_focused = false;
+    }
+
+    /// Set focus state.
+    pub fn set_focused(&mut self, focused: bool) {
+        self.is_focused = focused;
+    }
+}
+
 /// Combined widget state manager.
 ///
 /// This struct aggregates all transient UI state in one place,
@@ -260,6 +322,10 @@ pub struct WidgetState {
     pub dropdown: DropdownState,
     /// Collapsible container states
     pub collapsible: CollapsibleState,
+    /// Category input state
+    pub category_input: CategoryInputState,
+    /// Tag input state
+    pub tag_input: TagInputState,
 }
 
 impl WidgetState {

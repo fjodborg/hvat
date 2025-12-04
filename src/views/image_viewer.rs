@@ -1,9 +1,11 @@
 //! Image viewer view - main image viewing and annotation interface.
 
-use crate::annotation::{AnnotationStore, AnnotationTool, DrawingState, Shape};
+use crate::annotation::{AnnotationStore, AnnotationTool, Category, DrawingState, Shape};
+use crate::hvat_app::Tag;
 use crate::hyperspectral::BandSelection;
 use crate::message::{ExportFormat, Message, PersistenceMode};
 use crate::theme::Theme;
+use std::collections::HashSet;
 use crate::ui_constants::{
     annotation as ann_const, colors, image_viewer as img_const, padding,
     sidebar as sidebar_const, spacing, text as text_const, title_bar as title_const,
@@ -12,7 +14,7 @@ use crate::views::helpers::tool_button;
 use crate::widget_state::WidgetState;
 use hvat_ui::widgets::{
     button, collapsible, column, container, dropdown, hyperspectral_image, row, scrollable, slider,
-    text, titled_container, Column, Element, Row, ScrollDirection, SliderId,
+    text, text_input, titled_container, Column, Element, Row, ScrollDirection, SliderId,
 };
 use hvat_ui::{
     BandSelectionUniform, Color, HyperspectralImageHandle, ImageAdjustments, Length, Overlay,
@@ -176,6 +178,162 @@ fn view_format_buttons(current_format: ExportFormat) -> Column<'static, Message>
     col
 }
 
+/// Build the category selector (compact list with hotkeys).
+/// Shows categories as: "[color] 1. CategoryName [id]" with current selection highlighted.
+/// Includes text input for adding new categories.
+fn view_category_selector(
+    categories: Vec<&Category>,
+    current_category: u32,
+    _text_color: Color,
+    new_category_text: &str,
+    is_input_focused: bool,
+) -> Column<'static, Message> {
+    let mut col = column().spacing(2.0);
+
+    // Sort categories by ID for consistent display
+    let mut sorted_cats: Vec<_> = categories.into_iter().collect();
+    sorted_cats.sort_by_key(|c| c.id);
+
+    // Show up to 9 categories (hotkeys 1-9)
+    for (idx, cat) in sorted_cats.iter().take(9).enumerate() {
+        let hotkey = idx + 1; // 1-9
+        let is_selected = cat.id == current_category;
+
+        // Format: "1. Name [0]" where 1 is hotkey and [0] is category ID
+        let label = format!("{}. {} [{}]", hotkey, cat.name, cat.id);
+
+        // Get category color
+        let cat_color = Color::new(cat.color[0], cat.color[1], cat.color[2], cat.color[3]);
+
+        // Show ">" inside the color button when selected
+        let color_label = if is_selected { ">" } else { "" };
+
+        // Row with color square (with arrow if selected) and label button
+        let category_id = cat.id;
+        col = col.push(Element::new(
+            row()
+                .push(Element::new(
+                    button(color_label)
+                        .width(18.0)
+                        .height(18.0)
+                        .bg_color(cat_color),
+                ))
+                .push(Element::new(
+                    button(label)
+                        .on_press(Message::set_annotation_category(category_id))
+                        .width(sidebar_const::WIDTH - 32.0)
+                        .height(22.0),
+                ))
+                .spacing(4.0),
+        ));
+    }
+
+    // Add new category input row
+    col = col.push(Element::new(
+        row()
+            .push(Element::new(
+                text_input(new_category_text)
+                    .placeholder("New category...")
+                    .width(sidebar_const::WIDTH - 55.0)
+                    .height(24.0)
+                    .focused(is_input_focused)
+                    .on_change(Message::set_new_category_text)
+                    .on_focus(Message::set_category_input_focused)
+                    .on_submit(|_| Message::submit_new_category()),
+            ))
+            .push(Element::new(
+                button("+")
+                    .on_press(Message::submit_new_category())
+                    .width(35.0)
+                    .height(24.0),
+            ))
+            .spacing(spacing::TIGHT),
+    ));
+
+    col
+}
+
+/// Build the tag selector (compact list with Ctrl+hotkeys).
+/// Shows tags as: "[color] Ctrl+1. TagName" with checkmarks for active tags.
+/// Includes text input for adding new tags.
+fn view_tag_selector(
+    tags: &[Tag],
+    active_tags: &HashSet<u32>,
+    _text_color: Color,
+    new_tag_text: &str,
+    is_input_focused: bool,
+) -> Column<'static, Message> {
+    let mut col = column().spacing(2.0);
+
+    // Header
+    col = col.push(Element::new(
+        text("Image Tags (Ctrl+1-9)").size(text_const::SMALL),
+    ));
+
+    // Sort tags by ID for consistent display
+    let mut sorted_tags: Vec<_> = tags.iter().collect();
+    sorted_tags.sort_by_key(|t| t.id);
+
+    // Show up to 9 tags (hotkeys Ctrl+1-9)
+    for (idx, tag) in sorted_tags.iter().take(9).enumerate() {
+        let hotkey = idx + 1; // 1-9
+        let is_active = active_tags.contains(&tag.id);
+
+        // Format: "1. Name" where 1 is hotkey
+        let label = format!("{}. {}", hotkey, tag.name);
+
+        // Get tag color
+        let tag_color = Color::new(tag.color[0], tag.color[1], tag.color[2], tag.color[3]);
+
+        // Show checkmark inside the color button when active
+        let color_label = if is_active { "✓" } else { "" };
+
+        // Row with color square (with checkmark if active) and label button
+        let tag_id = tag.id;
+        col = col.push(Element::new(
+            row()
+                .push(Element::new(
+                    button(color_label)
+                        .on_press(Message::toggle_tag(tag_id))
+                        .width(18.0)
+                        .height(18.0)
+                        .bg_color(tag_color),
+                ))
+                .push(Element::new(
+                    button(label)
+                        .on_press(Message::toggle_tag(tag_id))
+                        .width(sidebar_const::WIDTH - 32.0)
+                        .height(22.0),
+                ))
+                .spacing(4.0),
+        ));
+    }
+
+    // Add new tag input row
+    col = col.push(Element::new(
+        row()
+            .push(Element::new(
+                text_input(new_tag_text)
+                    .placeholder("New tag...")
+                    .width(sidebar_const::WIDTH - 55.0)
+                    .height(24.0)
+                    .focused(is_input_focused)
+                    .on_change(Message::set_new_tag_text)
+                    .on_focus(Message::set_tag_input_focused)
+                    .on_submit(|_| Message::submit_new_tag()),
+            ))
+            .push(Element::new(
+                button("+")
+                    .on_press(Message::submit_new_tag())
+                    .width(35.0)
+                    .height(24.0),
+            ))
+            .spacing(spacing::TIGHT),
+    ));
+
+    col
+}
+
 /// Build the image viewer view.
 ///
 /// Layout: Main row with image panel (left) and sidebar (right).
@@ -202,6 +360,8 @@ pub fn view_image_viewer<'a>(
     overlay: Overlay,
     band_persistence: PersistenceMode,
     image_settings_persistence: PersistenceMode,
+    available_tags: &'a [Tag],
+    current_image_tags: &'a HashSet<u32>,
 ) -> Row<'a, Message> {
     // Create image adjustments from current settings
     let adjustments = ImageAdjustments {
@@ -237,7 +397,18 @@ pub fn view_image_viewer<'a>(
         .on_click(|(x, y)| Message::start_drawing(x, y))
         .on_draw_move(|(x, y)| Message::continue_drawing(x, y))
         .on_draw_end(Message::finish_drawing)
-        .on_space(Message::force_finish_polygon);
+        .on_space(Message::force_finish_polygon)
+        .on_number_key(|num| {
+            // Map hotkey (1-9) to category ID based on sorted order
+            // Hotkey 1 = first category (usually ID 0), etc.
+            Message::select_category_by_hotkey(num)
+        })
+        .on_ctrl_number_key(|num| {
+            // Ctrl+1-9 toggles tags
+            Message::toggle_tag_by_hotkey(num)
+        })
+        // Disable keyboard shortcuts when any text input is focused
+        .keyboard_disabled(widget_state.category_input.is_focused || widget_state.tag_input.is_focused);
 
     // === LEFT PANEL: Image with titled container (fills available space) ===
     let image_panel = titled_container("Image", Element::new(image_widget))
@@ -341,6 +512,22 @@ pub fn view_image_viewer<'a>(
         .push(Element::new(view_annotation_toolbar_compact(
             drawing_state.tool,
             text_color,
+        )))
+        // Category selector (compact list with hotkeys 1-9)
+        .push(Element::new(view_category_selector(
+            annotations.categories().collect(),
+            drawing_state.current_category,
+            text_color,
+            &widget_state.category_input.new_category_name,
+            widget_state.category_input.is_focused,
+        )))
+        // Tag selector (compact list with Ctrl+hotkeys 1-9)
+        .push(Element::new(view_tag_selector(
+            available_tags,
+            current_image_tags,
+            text_color,
+            &widget_state.tag_input.new_tag_name,
+            widget_state.tag_input.is_focused,
         )))
         .push(Element::new(
             text(format!(

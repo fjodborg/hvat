@@ -6,6 +6,7 @@ pub struct Button<Message> {
     on_press: Option<Message>,
     width: Option<f32>,
     height: Option<f32>,
+    bg_color: Option<Color>,
     is_hovered: bool,
 }
 
@@ -17,6 +18,7 @@ impl<Message: Clone> Button<Message> {
             on_press: None,
             width: None,
             height: None,
+            bg_color: None,
             is_hovered: false,
         }
     }
@@ -38,6 +40,12 @@ impl<Message: Clone> Button<Message> {
         self.height = Some(height);
         self
     }
+
+    /// Set the button background color.
+    pub fn bg_color(mut self, color: Color) -> Self {
+        self.bg_color = Some(color);
+        self
+    }
 }
 
 impl<Message: Clone> Widget<Message> for Button<Message> {
@@ -56,8 +64,20 @@ impl<Message: Clone> Widget<Message> for Button<Message> {
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
 
-        // Choose button color based on state
-        let button_color = if self.is_hovered {
+        // Choose button color based on state and custom bg_color
+        let button_color = if let Some(custom_color) = self.bg_color {
+            if self.is_hovered {
+                // Lighten the custom color slightly when hovered
+                Color::new(
+                    (custom_color.r + 0.1).min(1.0),
+                    (custom_color.g + 0.1).min(1.0),
+                    (custom_color.b + 0.1).min(1.0),
+                    custom_color.a,
+                )
+            } else {
+                custom_color
+            }
+        } else if self.is_hovered {
             Color::rgb(0.3, 0.4, 0.6) // Lighter blue when hovered
         } else {
             Color::rgb(0.2, 0.3, 0.5) // Normal blue

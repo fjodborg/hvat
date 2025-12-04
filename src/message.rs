@@ -130,6 +130,14 @@ pub enum UIMessage {
     // Collapsible state
     ToggleImageSettingsCollapsed,
     ToggleBandSettingsCollapsed,
+    // Category input state
+    SetNewCategoryText(String),
+    SetCategoryInputFocused(bool),
+    SubmitNewCategory,
+    // Tag input state
+    SetNewTagText(String),
+    SetTagInputFocused(bool),
+    SubmitNewTag,
 }
 
 /// Messages for hyperspectral band selection.
@@ -205,6 +213,8 @@ pub enum AnnotationMessage {
     SetTool(AnnotationTool),
     // Category management
     SetCategory(u32),
+    /// Select category by hotkey number (1-9), maps to sorted category order
+    SelectCategoryByHotkey(u8),
     AddCategory(String),
     // Drawing operations
     StartDrawing(f32, f32),
@@ -254,6 +264,17 @@ pub enum ProjectMessage {
     ProjectUploaded(String, String), // (filename, json_content)
 }
 
+/// Messages for image tagging operations.
+#[derive(Debug, Clone)]
+pub enum TagMessage {
+    /// Toggle a tag on the current image by hotkey (Ctrl+1-9)
+    ToggleTagByHotkey(u8),
+    /// Toggle a specific tag on the current image
+    ToggleTag(u32),
+    /// Add a new tag definition
+    AddTag(String),
+}
+
 /// Top-level message enum that delegates to sub-message types.
 /// This keeps the match arms organized and easier to maintain.
 #[derive(Debug, Clone)]
@@ -274,6 +295,8 @@ pub enum Message {
     Band(BandMessage),
     /// Annotation tools and operations
     Annotation(AnnotationMessage),
+    /// Image tagging
+    Tag(TagMessage),
     /// Project file management
     Project(ProjectMessage),
     /// FPS tick (called every frame)
@@ -418,6 +441,34 @@ impl Message {
     pub fn toggle_band_settings_collapsed() -> Self {
         Message::UI(UIMessage::ToggleBandSettingsCollapsed)
     }
+    // Category input shortcuts
+    pub fn set_new_category_text(text: String) -> Self {
+        Message::UI(UIMessage::SetNewCategoryText(text))
+    }
+    pub fn set_category_input_focused(focused: bool) -> Self {
+        Message::UI(UIMessage::SetCategoryInputFocused(focused))
+    }
+    pub fn submit_new_category() -> Self {
+        Message::UI(UIMessage::SubmitNewCategory)
+    }
+    // Tag input shortcuts
+    pub fn set_new_tag_text(text: String) -> Self {
+        Message::UI(UIMessage::SetNewTagText(text))
+    }
+    pub fn set_tag_input_focused(focused: bool) -> Self {
+        Message::UI(UIMessage::SetTagInputFocused(focused))
+    }
+    pub fn submit_new_tag() -> Self {
+        Message::UI(UIMessage::SubmitNewTag)
+    }
+
+    // Tag shortcuts
+    pub fn toggle_tag_by_hotkey(num: u8) -> Self {
+        Message::Tag(TagMessage::ToggleTagByHotkey(num))
+    }
+    pub fn toggle_tag(id: u32) -> Self {
+        Message::Tag(TagMessage::ToggleTag(id))
+    }
 
     // Annotation shortcuts
     pub fn set_annotation_tool(tool: AnnotationTool) -> Self {
@@ -425,6 +476,10 @@ impl Message {
     }
     pub fn set_annotation_category(id: u32) -> Self {
         Message::Annotation(AnnotationMessage::SetCategory(id))
+    }
+    /// Select category by hotkey (1-9 maps to sorted category order)
+    pub fn select_category_by_hotkey(num: u8) -> Self {
+        Message::Annotation(AnnotationMessage::SelectCategoryByHotkey(num))
     }
     pub fn start_drawing(x: f32, y: f32) -> Self {
         Message::Annotation(AnnotationMessage::StartDrawing(x, y))
