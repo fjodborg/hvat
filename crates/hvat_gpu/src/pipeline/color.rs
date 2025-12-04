@@ -332,4 +332,243 @@ impl ColorPipeline {
 
         (vertex_buffer, index_buffer, indices.len() as u32)
     }
+
+    // =========================================================================
+    // Batched vertex generation (no GPU buffer allocation)
+    // =========================================================================
+
+    /// Append vertices/indices for a filled rectangle to existing vectors.
+    /// Returns the number of indices added.
+    pub fn append_rect(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: [f32; 4],
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        let base_idx = vertices.len() as u16;
+
+        // Convert from screen coordinates to NDC (-1 to 1)
+        let x1 = (x / window_width) * 2.0 - 1.0;
+        let y1 = 1.0 - (y / window_height) * 2.0;
+        let x2 = ((x + width) / window_width) * 2.0 - 1.0;
+        let y2 = 1.0 - ((y + height) / window_height) * 2.0;
+
+        vertices.extend_from_slice(&[
+            ColorVertex { position: [x1, y1], color }, // Top-left
+            ColorVertex { position: [x2, y1], color }, // Top-right
+            ColorVertex { position: [x2, y2], color }, // Bottom-right
+            ColorVertex { position: [x1, y2], color }, // Bottom-left
+        ]);
+
+        indices.extend_from_slice(&[
+            base_idx, base_idx + 1, base_idx + 2,
+            base_idx, base_idx + 2, base_idx + 3,
+        ]);
+
+        6
+    }
+
+    /// Append vertices/indices for a stroked rectangle to existing vectors.
+    pub fn append_stroke_rect(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: [f32; 4],
+        thickness: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        let base_idx = vertices.len() as u16;
+
+        let x1 = (x / window_width) * 2.0 - 1.0;
+        let y1 = 1.0 - (y / window_height) * 2.0;
+        let x2 = ((x + width) / window_width) * 2.0 - 1.0;
+        let y2 = 1.0 - ((y + height) / window_height) * 2.0;
+
+        let t_x = (thickness / window_width) * 2.0;
+        let t_y = (thickness / window_height) * 2.0;
+
+        // 4 rectangles for the stroke (top, right, bottom, left)
+        vertices.extend_from_slice(&[
+            // Top edge (0-3)
+            ColorVertex { position: [x1, y1], color },
+            ColorVertex { position: [x2, y1], color },
+            ColorVertex { position: [x2, y1 - t_y], color },
+            ColorVertex { position: [x1, y1 - t_y], color },
+            // Right edge (4-7)
+            ColorVertex { position: [x2 - t_x, y1], color },
+            ColorVertex { position: [x2, y1], color },
+            ColorVertex { position: [x2, y2], color },
+            ColorVertex { position: [x2 - t_x, y2], color },
+            // Bottom edge (8-11)
+            ColorVertex { position: [x1, y2 + t_y], color },
+            ColorVertex { position: [x2, y2 + t_y], color },
+            ColorVertex { position: [x2, y2], color },
+            ColorVertex { position: [x1, y2], color },
+            // Left edge (12-15)
+            ColorVertex { position: [x1, y1], color },
+            ColorVertex { position: [x1 + t_x, y1], color },
+            ColorVertex { position: [x1 + t_x, y2], color },
+            ColorVertex { position: [x1, y2], color },
+        ]);
+
+        indices.extend_from_slice(&[
+            // Top
+            base_idx, base_idx + 1, base_idx + 2, base_idx, base_idx + 2, base_idx + 3,
+            // Right
+            base_idx + 4, base_idx + 5, base_idx + 6, base_idx + 4, base_idx + 6, base_idx + 7,
+            // Bottom
+            base_idx + 8, base_idx + 9, base_idx + 10, base_idx + 8, base_idx + 10, base_idx + 11,
+            // Left
+            base_idx + 12, base_idx + 13, base_idx + 14, base_idx + 12, base_idx + 14, base_idx + 15,
+        ]);
+
+        24
+    }
+
+    /// Append vertices/indices for a line to existing vectors.
+    pub fn append_line(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        color: [f32; 4],
+        thickness: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        let base_idx = vertices.len() as u16;
+
+        let x1_ndc = (x1 / window_width) * 2.0 - 1.0;
+        let y1_ndc = 1.0 - (y1 / window_height) * 2.0;
+        let x2_ndc = (x2 / window_width) * 2.0 - 1.0;
+        let y2_ndc = 1.0 - (y2 / window_height) * 2.0;
+
+        let dx = x2_ndc - x1_ndc;
+        let dy = y2_ndc - y1_ndc;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 0.0001 {
+            // Zero-length line - draw a small rect
+            return Self::append_rect(vertices, indices, x1, y1, 1.0, 1.0, color, window_width, window_height);
+        }
+
+        let t_x = (thickness / window_width) * 2.0 / 2.0;
+        let t_y = (thickness / window_height) * 2.0 / 2.0;
+        let nx = -dy / len * t_y;
+        let ny = dx / len * t_x;
+
+        vertices.extend_from_slice(&[
+            ColorVertex { position: [x1_ndc - nx, y1_ndc - ny], color },
+            ColorVertex { position: [x1_ndc + nx, y1_ndc + ny], color },
+            ColorVertex { position: [x2_ndc + nx, y2_ndc + ny], color },
+            ColorVertex { position: [x2_ndc - nx, y2_ndc - ny], color },
+        ]);
+
+        indices.extend_from_slice(&[
+            base_idx, base_idx + 1, base_idx + 2,
+            base_idx, base_idx + 2, base_idx + 3,
+        ]);
+
+        6
+    }
+
+    /// Append vertices/indices for a filled circle to existing vectors.
+    pub fn append_circle(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: [f32; 4],
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        const SEGMENTS: usize = 16;
+        let base_idx = vertices.len() as u16;
+
+        let cx_ndc = (cx / window_width) * 2.0 - 1.0;
+        let cy_ndc = 1.0 - (cy / window_height) * 2.0;
+        let rx = (radius / window_width) * 2.0;
+        let ry = (radius / window_height) * 2.0;
+
+        // Center vertex
+        vertices.push(ColorVertex { position: [cx_ndc, cy_ndc], color });
+
+        // Circle vertices
+        for i in 0..SEGMENTS {
+            let angle = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
+            vertices.push(ColorVertex {
+                position: [cx_ndc + rx * angle.cos(), cy_ndc + ry * angle.sin()],
+                color,
+            });
+        }
+
+        // Triangle fan indices
+        for i in 0..SEGMENTS {
+            indices.push(base_idx);
+            indices.push(base_idx + (i as u16) + 1);
+            indices.push(base_idx + ((i + 1) % SEGMENTS) as u16 + 1);
+        }
+
+        (SEGMENTS * 3) as u32
+    }
+
+    /// Append vertices/indices for a stroked circle to existing vectors.
+    pub fn append_stroke_circle(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        color: [f32; 4],
+        thickness: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        const SEGMENTS: usize = 24;
+        let base_idx = vertices.len() as u16;
+
+        let cx_ndc = (cx / window_width) * 2.0 - 1.0;
+        let cy_ndc = 1.0 - (cy / window_height) * 2.0;
+        let rx_inner = ((radius - thickness / 2.0) / window_width) * 2.0;
+        let ry_inner = ((radius - thickness / 2.0) / window_height) * 2.0;
+        let rx_outer = ((radius + thickness / 2.0) / window_width) * 2.0;
+        let ry_outer = ((radius + thickness / 2.0) / window_height) * 2.0;
+
+        // Inner and outer ring vertices
+        for i in 0..SEGMENTS {
+            let angle = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+            vertices.push(ColorVertex {
+                position: [cx_ndc + rx_inner * cos_a, cy_ndc + ry_inner * sin_a],
+                color,
+            });
+            vertices.push(ColorVertex {
+                position: [cx_ndc + rx_outer * cos_a, cy_ndc + ry_outer * sin_a],
+                color,
+            });
+        }
+
+        // Quads between inner and outer ring
+        for i in 0..SEGMENTS {
+            let i0 = base_idx + (i * 2) as u16;
+            let i1 = base_idx + (i * 2 + 1) as u16;
+            let i2 = base_idx + ((i + 1) % SEGMENTS * 2) as u16;
+            let i3 = base_idx + ((i + 1) % SEGMENTS * 2 + 1) as u16;
+            indices.extend_from_slice(&[i0, i1, i3, i0, i3, i2]);
+        }
+
+        (SEGMENTS * 6) as u32
+    }
 }

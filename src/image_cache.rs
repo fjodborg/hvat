@@ -205,6 +205,7 @@ impl ImageCache {
         }
 
         // Calculate indices to keep
+        // Use array literal instead of vec! to avoid heap allocation per iteration
         let keep_indices: HashSet<usize> = (0..=self.preload_count)
             .flat_map(|i| {
                 let next = (current_index + i) % total;
@@ -213,7 +214,7 @@ impl ImageCache {
                 } else {
                     total - (i - current_index)
                 };
-                vec![next, prev]
+                [next, prev]
             })
             .collect();
 

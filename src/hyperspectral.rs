@@ -8,13 +8,15 @@
 //! - Band selection state management
 
 use hvat_ui::{ImageHandle, HyperspectralImageHandle};
+use std::sync::Arc;
 
 /// A hyperspectral image with multiple spectral bands.
 #[derive(Clone)]
 pub struct HyperspectralImage {
     /// Raw pixel data for all bands, stored as [band0_pixels, band1_pixels, ...]
     /// Each band has width * height f32 values (normalized 0.0-1.0)
-    bands: Vec<Vec<f32>>,
+    /// Wrapped in Arc for efficient sharing with GPU handles.
+    bands: Arc<Vec<Vec<f32>>>,
     /// Image width in pixels
     pub width: u32,
     /// Image height in u32
@@ -37,7 +39,7 @@ impl HyperspectralImage {
             .collect();
 
         Self {
-            bands,
+            bands: Arc::new(bands),
             width,
             height,
             band_labels,
@@ -67,7 +69,7 @@ impl HyperspectralImage {
         }
 
         Self {
-            bands: vec![r_band, g_band, b_band],
+            bands: Arc::new(vec![r_band, g_band, b_band]),
             width,
             height,
             band_labels: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
@@ -95,10 +97,22 @@ impl HyperspectralImage {
     }
 
     /// Create a HyperspectralImageHandle for GPU-based rendering.
-    /// This uploads band data to the GPU once, then band selection changes
-    /// only require updating a uniform buffer (instant).
+    /// This shares the band data with the GPU handle via Arc (no data copy).
+    /// Band selection changes only require updating a uniform buffer (instant).
     pub fn to_gpu_handle(&self) -> HyperspectralImageHandle {
-        HyperspectralImageHandle::from_bands(self.bands.clone(), self.width, self.height)
+        // Share the Arc - no data cloning!
+        HyperspectralImageHandle::from_bands_arc(Arc::clone(&self.bands), self.width, self.height)
+    }
+
+    /// Consume this HyperspectralImage and create a GPU handle.
+    /// Use this when you no longer need the HyperspectralImage after creating
+    /// the GPU handle - it may allow the data to be moved instead of shared.
+    pub fn into_gpu_handle(self) -> HyperspectralImageHandle {
+        // Try to unwrap Arc if we have sole ownership, otherwise share
+        match Arc::try_unwrap(self.bands) {
+            Ok(bands) => HyperspectralImageHandle::from_bands(bands, self.width, self.height),
+            Err(arc) => HyperspectralImageHandle::from_bands_arc(arc, self.width, self.height),
+        }
     }
 
     /// Generate an RGB composite image from three bands.

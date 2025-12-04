@@ -17,8 +17,9 @@ use crate::hyperspectral::{generate_test_hyperspectral, BandSelection, Hyperspec
 use crate::image_cache::ImageCache;
 use crate::message::{Message, Tab};
 use crate::theme::Theme;
-use crate::views::{view_counter, view_home, view_image_viewer, view_settings};
+use crate::views::{build_overlay, view_counter, view_home, view_image_viewer, view_settings};
 use crate::widget_state::WidgetState;
+use hvat_ui::Overlay;
 
 #[cfg(target_arch = "wasm32")]
 use crate::message::ImageLoadMessage;
@@ -76,6 +77,10 @@ pub struct HvatApp {
     annotations_map: HashMap<String, AnnotationStore>,
     /// Current drawing state (tool, in-progress points)
     drawing_state: DrawingState,
+    /// Cached overlay - rebuilt only when annotations or drawing state changes
+    cached_overlay: Overlay,
+    /// Last image key used for cached overlay (invalidate on image change)
+    cached_overlay_image_key: String,
 
     // === FPS tracking ===
     frame_count: u32,
@@ -125,6 +130,8 @@ impl Application for HvatApp {
             widget_state: WidgetState::new(),
             annotations_map: HashMap::new(),
             drawing_state: DrawingState::new(),
+            cached_overlay: Overlay::new(),
+            cached_overlay_image_key: String::new(),
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
@@ -176,6 +183,8 @@ impl Application for HvatApp {
                     pan_y: &mut self.pan_y,
                 };
                 handle_image_load(msg, &mut state);
+                // Rebuild overlay when image changes (annotations are per-image)
+                self.rebuild_overlay_if_dirty();
             }
             Message::UI(msg) => {
                 handle_ui(
@@ -195,6 +204,8 @@ impl Application for HvatApp {
                     status_message: &mut self.status_message,
                 };
                 handle_annotation(msg, &mut state);
+                // Rebuild overlay if annotations changed
+                self.rebuild_overlay_if_dirty();
             }
             Message::Band(msg) => {
                 let num_bands = self.hyperspectral_image.num_bands();
@@ -296,6 +307,7 @@ impl Application for HvatApp {
                 self.status_message.as_deref(),
                 &self.band_selection,
                 self.num_bands(),
+                self.cached_overlay.clone(),
             )),
             Tab::Settings => Element::new(view_settings(
                 &self.theme,
@@ -346,6 +358,43 @@ impl HvatApp {
         self.annotations_map
             .get(&key)
             .unwrap_or_else(|| EMPTY.get_or_init(AnnotationStore::new))
+    }
+
+    /// Get mutable annotations for the current image.
+    fn annotations_mut(&mut self) -> &mut AnnotationStore {
+        let key = self.current_image_key();
+        self.annotations_map
+            .entry(key)
+            .or_insert_with(AnnotationStore::new)
+    }
+
+    /// Rebuild overlay if annotations are dirty or image changed.
+    fn rebuild_overlay_if_dirty(&mut self) {
+        let image_key = self.current_image_key();
+
+        // Check if image changed (invalidates cache)
+        let image_changed = self.cached_overlay_image_key != image_key;
+
+        // Check if annotations are dirty
+        let annotations_dirty = self
+            .annotations_map
+            .get(&image_key)
+            .map(|a| a.is_dirty())
+            .unwrap_or(false);
+
+        // Also check drawing state - preview needs updating during drawing
+        let drawing_active = self.drawing_state.is_drawing;
+
+        if image_changed || annotations_dirty || drawing_active {
+            // Rebuild overlay
+            self.cached_overlay = build_overlay(self.annotations(), &self.drawing_state);
+            self.cached_overlay_image_key = image_key.clone();
+
+            // Clear dirty flag
+            if let Some(store) = self.annotations_map.get_mut(&image_key) {
+                store.clear_dirty();
+            }
+        }
     }
 
     /// Get the number of bands in the hyperspectral image.

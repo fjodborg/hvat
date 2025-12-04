@@ -9,9 +9,10 @@ use std::sync::Arc;
 use winit::window::Window;
 
 use hvat_gpu::{
-    ColorPipeline, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform,
+    ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform,
     HyperspectralPipeline, HyperspectralGpuData, BandSelectionUniform,
 };
+use wgpu::util::DeviceExt;
 use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, FontSystem, Metrics,
     Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
@@ -968,97 +969,150 @@ impl Renderer {
             }
         }
 
-        // Render rectangles first
+        // Render shapes using batched approach
+        // Group shapes by scissor state and batch vertices/indices
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("UI Rects Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+            // Collect batches: each batch has a scissor rect and accumulated geometry
+            struct ShapeBatch {
+                scissor: Option<(u32, u32, u32, u32)>,
+                vertices: Vec<ColorVertex>,
+                indices: Vec<u16>,
+            }
 
-            pass.set_pipeline(&self.color_pipeline.render_pipeline);
-            pass.set_scissor_rect(0, 0, self.width, self.height);
+            let mut batches: Vec<ShapeBatch> = Vec::new();
+            let mut current_scissor: Option<(u32, u32, u32, u32)> = None;
 
-            // Render rectangles with scissor clipping
+            // Helper to get or create current batch
+            let window_width = self.width as f32;
+            let window_height = self.height as f32;
+
+            // Helper closure to get or create batch for current scissor
+            let mut get_batch = |batches: &mut Vec<ShapeBatch>, scissor: Option<(u32, u32, u32, u32)>| -> usize {
+                if let Some(idx) = batches.iter().position(|b| b.scissor == scissor) {
+                    idx
+                } else {
+                    batches.push(ShapeBatch {
+                        scissor,
+                        vertices: Vec::new(),
+                        indices: Vec::new(),
+                    });
+                    batches.len() - 1
+                }
+            };
+
             for cmd in &self.commands {
                 match cmd {
                     DrawCommand::PushClip(rect) => {
-                        if let Some((x, y, w, h)) = self.clip_to_scissor(rect) {
-                            pass.set_scissor_rect(x, y, w, h);
-                        }
+                        current_scissor = self.clip_to_scissor(rect);
                     }
                     DrawCommand::PopClip => {
-                        pass.set_scissor_rect(0, 0, self.width, self.height);
+                        current_scissor = None;
                     }
                     DrawCommand::FillRect { rect, color } => {
-                        let (vb, ib, count) = ColorPipeline::create_rect_vertices(
-                            &self.gpu_ctx.device,
+                        let idx = get_batch(&mut batches, current_scissor);
+                        let batch = &mut batches[idx];
+                        ColorPipeline::append_rect(
+                            &mut batch.vertices, &mut batch.indices,
                             rect.x, rect.y, rect.width, rect.height,
                             [color.r, color.g, color.b, color.a],
-                            self.width as f32, self.height as f32,
+                            window_width, window_height,
                         );
-                        pass.set_vertex_buffer(0, vb.slice(..));
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                        pass.draw_indexed(0..count, 0, 0..1);
                     }
                     DrawCommand::StrokeRect { rect, color, width } => {
-                        let (vb, ib, count) = ColorPipeline::create_stroke_rect_vertices(
-                            &self.gpu_ctx.device,
+                        let idx = get_batch(&mut batches, current_scissor);
+                        let batch = &mut batches[idx];
+                        ColorPipeline::append_stroke_rect(
+                            &mut batch.vertices, &mut batch.indices,
                             rect.x, rect.y, rect.width, rect.height,
                             [color.r, color.g, color.b, color.a],
                             *width,
-                            self.width as f32, self.height as f32,
+                            window_width, window_height,
                         );
-                        pass.set_vertex_buffer(0, vb.slice(..));
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                        pass.draw_indexed(0..count, 0, 0..1);
                     }
                     DrawCommand::DrawLine { x1, y1, x2, y2, color, width } => {
-                        let (vb, ib, count) = ColorPipeline::create_line_vertices(
-                            &self.gpu_ctx.device,
+                        let idx = get_batch(&mut batches, current_scissor);
+                        let batch = &mut batches[idx];
+                        ColorPipeline::append_line(
+                            &mut batch.vertices, &mut batch.indices,
                             *x1, *y1, *x2, *y2,
                             [color.r, color.g, color.b, color.a],
                             *width,
-                            self.width as f32, self.height as f32,
+                            window_width, window_height,
                         );
-                        pass.set_vertex_buffer(0, vb.slice(..));
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                        pass.draw_indexed(0..count, 0, 0..1);
                     }
                     DrawCommand::FillCircle { cx, cy, radius, color } => {
-                        let (vb, ib, count) = ColorPipeline::create_circle_vertices(
-                            &self.gpu_ctx.device,
+                        let idx = get_batch(&mut batches, current_scissor);
+                        let batch = &mut batches[idx];
+                        ColorPipeline::append_circle(
+                            &mut batch.vertices, &mut batch.indices,
                             *cx, *cy, *radius,
                             [color.r, color.g, color.b, color.a],
-                            self.width as f32, self.height as f32,
+                            window_width, window_height,
                         );
-                        pass.set_vertex_buffer(0, vb.slice(..));
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                        pass.draw_indexed(0..count, 0, 0..1);
                     }
                     DrawCommand::StrokeCircle { cx, cy, radius, color, width } => {
-                        let (vb, ib, count) = ColorPipeline::create_stroke_circle_vertices(
-                            &self.gpu_ctx.device,
+                        let idx = get_batch(&mut batches, current_scissor);
+                        let batch = &mut batches[idx];
+                        ColorPipeline::append_stroke_circle(
+                            &mut batch.vertices, &mut batch.indices,
                             *cx, *cy, *radius,
                             [color.r, color.g, color.b, color.a],
                             *width,
-                            self.width as f32, self.height as f32,
+                            window_width, window_height,
                         );
-                        pass.set_vertex_buffer(0, vb.slice(..));
-                        pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                        pass.draw_indexed(0..count, 0, 0..1);
                     }
                     _ => {}
+                }
+            }
+
+            // Render all batches - one GPU buffer pair per scissor state
+            if !batches.is_empty() {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("UI Rects Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                pass.set_pipeline(&self.color_pipeline.render_pipeline);
+
+                for batch in &batches {
+                    if batch.vertices.is_empty() {
+                        continue;
+                    }
+
+                    // Set scissor
+                    if let Some((x, y, w, h)) = batch.scissor {
+                        pass.set_scissor_rect(x, y, w, h);
+                    } else {
+                        pass.set_scissor_rect(0, 0, self.width, self.height);
+                    }
+
+                    // Create buffers for this batch (one allocation per scissor state, not per shape)
+                    let vertex_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Batched Shape Vertex Buffer"),
+                        contents: bytemuck::cast_slice(&batch.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+
+                    let index_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Batched Shape Index Buffer"),
+                        contents: bytemuck::cast_slice(&batch.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..batch.indices.len() as u32, 0, 0..1);
                 }
             }
         }

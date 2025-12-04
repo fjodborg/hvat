@@ -116,6 +116,9 @@ pub fn view_annotation_toolbar(tool: AnnotationTool, _text_color: Color) -> Row<
 ///
 /// Uses GPU-based band compositing - band selection changes only update a
 /// uniform buffer, no CPU-side image regeneration needed.
+///
+/// The overlay is passed in pre-built to avoid rebuilding every frame.
+/// It should be rebuilt only when annotations or drawing state changes.
 #[allow(clippy::too_many_arguments)]
 pub fn view_image_viewer<'a>(
     theme: &Theme,
@@ -135,6 +138,8 @@ pub fn view_image_viewer<'a>(
     // Band selection (always shown) - passed to GPU for compositing
     band_selection: &BandSelection,
     num_bands: usize,
+    // Pre-built overlay (cached, rebuilt only when dirty)
+    overlay: Overlay,
 ) -> Column<'a, Message> {
     // Create image adjustments from current settings
     let adjustments = ImageAdjustments {
@@ -143,9 +148,6 @@ pub fn view_image_viewer<'a>(
         gamma,
         hue_shift,
     };
-
-    // Build the annotation overlay
-    let overlay = build_overlay(annotations, drawing_state);
 
     // Convert BandSelection to GPU uniform format
     let band_uniform = BandSelectionUniform::new(

@@ -311,16 +311,8 @@ fn load_current_image(state: &mut ImageLoadState) {
         // Reset band selection to default (0, 1, 2 for RGB)
         *state.band_selection = BandSelection::default_rgb();
 
-        // Generate the composite image (fallback for non-GPU path)
-        if let Some(composite) = hyper.to_rgb_composite(
-            state.band_selection.red,
-            state.band_selection.green,
-            state.band_selection.blue,
-        ) {
-            *state.current_image = composite;
-        }
-
         // Create GPU handle for hyperspectral rendering
+        // Band compositing happens on GPU, no CPU composite needed
         *state.hyperspectral_handle = hyper.to_gpu_handle();
 
         // Store the hyperspectral data
@@ -417,10 +409,18 @@ impl<'a> AnnotationState<'a> {
     }
 
     /// Get mutable annotations for the current image.
+    /// Uses get_mut first to avoid cloning the key on every call.
     pub fn annotations_mut(&mut self) -> &mut AnnotationStore {
-        self.annotations_map
-            .entry(self.image_key.clone())
-            .or_insert_with(AnnotationStore::new)
+        // Fast path: check if entry exists without cloning key
+        if self.annotations_map.contains_key(&self.image_key) {
+            // Safe: we just checked it exists
+            self.annotations_map.get_mut(&self.image_key).unwrap()
+        } else {
+            // Slow path: only clone key when inserting new entry
+            self.annotations_map
+                .entry(self.image_key.clone())
+                .or_insert_with(AnnotationStore::new)
+        }
     }
 }
 

@@ -320,6 +320,10 @@ pub struct AnnotationStore {
     /// Currently selected annotation ID.
     #[serde(skip)]
     selected_id: Option<u64>,
+    /// Dirty flag - set when annotations or selection changes.
+    /// Used to avoid rebuilding overlay every frame.
+    #[serde(skip)]
+    dirty: bool,
 }
 
 impl AnnotationStore {
@@ -329,15 +333,35 @@ impl AnnotationStore {
             categories: HashMap::new(),
             next_id: 1,
             selected_id: None,
+            dirty: true, // Start dirty so first overlay build happens
         };
         // Add a default category
         store.add_category(Category::new(0, "Object"));
         store
     }
 
+    /// Check if the store has been modified since last clear_dirty().
+    #[inline]
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Clear the dirty flag. Call after rebuilding the overlay.
+    #[inline]
+    pub fn clear_dirty(&mut self) {
+        self.dirty = false;
+    }
+
+    /// Mark the store as dirty.
+    #[inline]
+    fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
     /// Add a category.
     pub fn add_category(&mut self, category: Category) {
         self.categories.insert(category.id, category);
+        self.mark_dirty();
     }
 
     /// Get a category by ID.
@@ -355,12 +379,16 @@ impl AnnotationStore {
         let id = self.next_id;
         self.next_id += 1;
         self.annotations.insert(id, Annotation::new(id, category_id, shape));
+        self.mark_dirty();
         id
     }
 
     /// Remove an annotation by ID.
     pub fn remove(&mut self, id: u64) -> Option<Annotation> {
         let removed = self.annotations.remove(&id);
+        if removed.is_some() {
+            self.mark_dirty();
+        }
         if self.selected_id == Some(id) {
             self.selected_id = None;
         }
@@ -394,13 +422,19 @@ impl AnnotationStore {
 
     /// Clear all annotations.
     pub fn clear(&mut self) {
+        if !self.annotations.is_empty() {
+            self.mark_dirty();
+        }
         self.annotations.clear();
         self.selected_id = None;
     }
 
     /// Select an annotation.
     pub fn select(&mut self, id: Option<u64>) {
-        self.selected_id = id;
+        if self.selected_id != id {
+            self.selected_id = id;
+            self.mark_dirty();
+        }
     }
 
     /// Get the selected annotation ID.
