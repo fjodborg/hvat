@@ -174,11 +174,11 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn new() -> Self {
-        // Create a test hyperspectral image (8 bands)
-        log::info!("Creating 4096x4096 test hyperspectral image (8 bands)...");
+        // Create a test hyperspectral image (9 bands)
+        log::info!("Creating 4096x4096 test hyperspectral image (9 bands)...");
         let width = 4096;
         let height = 4096;
-        let hyper_image = generate_test_hyperspectral(width, height, 8);
+        let hyper_image = generate_test_hyperspectral(width, height, 9);
         let band_selection = BandSelection::default_rgb();
 
         // Create GPU handle for hyperspectral rendering (band data uploaded once)
@@ -248,7 +248,10 @@ impl Application for HvatApp {
             Message::ImageView(msg) => {
                 // Handle ResetToOneToOne specially since it needs image dimensions
                 if matches!(msg, crate::message::ImageViewMessage::ResetToOneToOne) {
-                    if let Some((img_w, img_h)) = self.image_cache.get_dimensions(self.current_image_index) {
+                    // Use cached dimensions, or fall back to hyperspectral image dimensions
+                    let dims = self.image_cache.get_dimensions(self.current_image_index)
+                        .or_else(|| Some((self.hyperspectral_image.width, self.hyperspectral_image.height)));
+                    if let Some((img_w, img_h)) = dims {
                         // Calculate zoom for 1:1 pixel ratio
                         // Use actual widget bounds if available, otherwise use defaults
                         use crate::ui_constants::image_viewer as img_const;
@@ -556,7 +559,9 @@ impl Application for HvatApp {
                 self.image_settings_persistence,
                 &self.available_tags,
                 self.current_image_tags(),
-                self.image_cache.get_dimensions(self.current_image_index),
+                // Use cached dimensions, or fall back to hyperspectral image dimensions for test images
+                self.image_cache.get_dimensions(self.current_image_index)
+                    .or_else(|| Some((self.hyperspectral_image.width, self.hyperspectral_image.height))),
             )),
             Tab::Settings => Element::new(view_settings(
                 &self.theme,
@@ -723,6 +728,23 @@ impl HvatApp {
             PersistenceMode::Constant => {
                 // Keep current settings (do nothing)
             }
+        }
+
+        // Check if band selection is valid for the current image
+        // If any band index is out of bounds, reset to default RGB and warn
+        let num_bands = self.hyperspectral_image.num_bands();
+        if self.band_selection.red >= num_bands
+            || self.band_selection.green >= num_bands
+            || self.band_selection.blue >= num_bands
+        {
+            log::warn!(
+                "Band selection ({}, {}, {}) out of range for {}-band image, resetting to default RGB",
+                self.band_selection.red,
+                self.band_selection.green,
+                self.band_selection.blue,
+                num_bands
+            );
+            self.band_selection = BandSelection::default_rgb();
         }
 
         // Apply image settings based on mode

@@ -113,8 +113,9 @@ impl ImageHandle {
 /// band selection changes by just updating a uniform instead of regenerating
 /// the entire composite image.
 ///
-/// Each band is stored as f32 values (0.0-1.0) and will be packed into RGBA
-/// textures on the GPU (4 bands per texture, supporting up to 8 bands).
+/// Each band is stored as f32 values (0.0-1.0) and will be packed into a
+/// texture array on the GPU (4 bands per layer in RGBA channels).
+/// This supports hundreds of bands, limited only by GPU texture array size.
 #[derive(Clone, Debug)]
 pub struct HyperspectralImageHandle {
     /// Unique identifier for this hyperspectral image (used for GPU data caching)

@@ -1,12 +1,14 @@
 // Hyperspectral band compositing shader
 //
-// This shader samples from multiple band textures and composites them
-// into an RGB output based on selected band indices.
+// This shader samples from a 2D texture array and composites selected bands
+// into an RGB output based on band indices.
 //
-// Bands are packed into RGBA textures (4 bands per texture):
-// - band_textures_0: bands 0-3 in R, G, B, A channels
-// - band_textures_1: bands 4-7 in R, G, B, A channels
+// Bands are packed into RGBA texture array layers (4 bands per layer):
+// - Layer 0: bands 0-3 in R, G, B, A channels
+// - Layer 1: bands 4-7 in R, G, B, A channels
+// - Layer N: bands 4N to 4N+3
 //
+// This supports unlimited bands (limited only by GPU texture array size).
 // The band_selection uniform specifies which bands to use for R, G, B output.
 
 struct VertexInput {
@@ -47,14 +49,11 @@ var<uniform> adjustments: ImageAdjustments;
 @group(0) @binding(2)
 var<uniform> band_selection: BandSelection;
 
-// Group 1: Band textures (packed 4 bands per RGBA texture)
+// Group 1: Band texture array (packed 4 bands per RGBA layer)
 @group(1) @binding(0)
-var band_texture_0: texture_2d<f32>;  // Bands 0-3
+var band_texture_array: texture_2d_array<f32>;
 
 @group(1) @binding(1)
-var band_texture_1: texture_2d<f32>;  // Bands 4-7
-
-@group(1) @binding(2)
 var band_sampler: sampler;
 
 @vertex
@@ -65,17 +64,12 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return out;
 }
 
-// Sample a specific band from the packed textures
+// Sample a specific band from the packed texture array
 fn sample_band(tex_coords: vec2<f32>, band_index: u32) -> f32 {
-    let texture_index = band_index / 4u;
+    let layer_index = band_index / 4u;
     let channel_index = band_index % 4u;
 
-    var sample: vec4<f32>;
-    if texture_index == 0u {
-        sample = textureSample(band_texture_0, band_sampler, tex_coords);
-    } else {
-        sample = textureSample(band_texture_1, band_sampler, tex_coords);
-    }
+    let sample = textureSample(band_texture_array, band_sampler, tex_coords, layer_index);
 
     // Extract the correct channel
     if channel_index == 0u {

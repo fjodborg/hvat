@@ -163,10 +163,10 @@ pub mod threshold {
 pub mod zoom {
     /// Zoom increment/decrement factor
     pub const FACTOR: f32 = 1.2;
-    /// Maximum zoom level
-    pub const MAX: f32 = 5.0;
+    /// Maximum zoom level (high enough for 1:1 on large images like 4096x4096)
+    pub const MAX: f32 = 20.0;
     /// Minimum zoom level
-    pub const MIN: f32 = 0.2;
+    pub const MIN: f32 = 0.1;
     /// Pan step size for keyboard/button navigation
     pub const PAN_STEP: f32 = 10.0;
 }

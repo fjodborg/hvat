@@ -9,7 +9,7 @@ pub mod texture;
 
 pub use builder::{BindGroupLayoutBuilder, PipelineBuilder};
 pub use color::ColorPipeline;
-pub use hyperspectral::{BandTexture, HyperspectralGpuData, HyperspectralPipeline, MAX_BANDS};
+pub use hyperspectral::{HyperspectralGpuData, HyperspectralPipeline};
 pub use texture::TexturePipeline;
 
 /// Common trait for render pipelines.

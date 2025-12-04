@@ -1,8 +1,11 @@
 //! Hyperspectral band compositing pipeline.
 //!
 //! This pipeline renders hyperspectral images by compositing selected bands
-//! into an RGB output. Band data is stored in GPU textures (4 bands per RGBA texture)
-//! and the compositing is done entirely on the GPU via fragment shader.
+//! into an RGB output. Band data is stored in a GPU texture array (4 bands per
+//! RGBA layer) and the compositing is done entirely on the GPU via fragment shader.
+//!
+//! This design supports an arbitrary number of bands, limited only by GPU texture
+//! array size (typically 2048 layers = 8192 bands on most hardware).
 
 use wgpu::util::DeviceExt;
 
@@ -13,95 +16,15 @@ use crate::context::GpuContext;
 use crate::uniform::{BandSelectionUniform, ImageAdjustments, TransformUniform};
 use crate::vertex::Vertex;
 
-/// Maximum number of bands supported (2 textures × 4 channels = 8 bands).
-pub const MAX_BANDS: usize = 8;
-
-/// GPU texture holding packed band data (4 bands per RGBA texture).
-pub struct BandTexture {
-    pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
-    pub width: u32,
-    pub height: u32,
-}
-
-impl BandTexture {
-    /// Create a band texture from f32 band data.
-    ///
-    /// Takes up to 4 bands and packs them into RGBA channels.
-    /// Missing bands are filled with zeros.
-    pub fn from_bands(
-        ctx: &GpuContext,
-        bands: &[&[f32]],
-        width: u32,
-        height: u32,
-        label: &str,
-    ) -> Self {
-        let pixel_count = (width * height) as usize;
-
-        // Pack bands into RGBA format (f32 values normalized to 0-255 u8)
-        let mut rgba_data = vec![0u8; pixel_count * 4];
-
-        for (channel_idx, band) in bands.iter().enumerate().take(4) {
-            // Skip bands with incorrect size
-            if band.len() != pixel_count {
-                continue;
-            }
-            for (pixel_idx, &value) in band.iter().enumerate() {
-                let byte_value = (value.clamp(0.0, 1.0) * 255.0) as u8;
-                rgba_data[pixel_idx * 4 + channel_idx] = byte_value;
-            }
-        }
-
-        let size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-
-        let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm, // Linear, not sRGB for band data
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        ctx.queue.write_texture(
-            texture.as_image_copy(),
-            &rgba_data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * width),
-                rows_per_image: Some(height),
-            },
-            size,
-        );
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        Self {
-            texture,
-            view,
-            width,
-            height,
-        }
-    }
-
-    /// Create an empty (black) band texture.
-    pub fn empty(ctx: &GpuContext, width: u32, height: u32, label: &str) -> Self {
-        Self::from_bands(ctx, &[], width, height, label)
-    }
-}
-
-/// Hyperspectral image data stored on GPU.
+/// Hyperspectral image data stored on GPU using a texture array.
+///
+/// Bands are packed into RGBA texture array layers (4 bands per layer).
+/// This allows efficient storage and sampling of hundreds of bands.
 pub struct HyperspectralGpuData {
-    /// Band texture 0 (bands 0-3)
-    pub band_texture_0: BandTexture,
-    /// Band texture 1 (bands 4-7)
-    pub band_texture_1: BandTexture,
+    /// Texture array holding all bands (4 bands per layer in RGBA channels)
+    pub texture_array: wgpu::Texture,
+    /// View into the texture array
+    pub texture_view: wgpu::TextureView,
     /// Sampler for band textures
     pub sampler: wgpu::Sampler,
     /// Bind group for band textures
@@ -112,6 +35,8 @@ pub struct HyperspectralGpuData {
     pub height: u32,
     /// Number of bands
     pub num_bands: usize,
+    /// Number of texture array layers (ceil(num_bands / 4))
+    pub num_layers: u32,
 }
 
 impl HyperspectralGpuData {
@@ -130,26 +55,92 @@ impl HyperspectralGpuData {
         height: u32,
         bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        let num_bands = bands.len().min(MAX_BANDS);
+        let num_bands = bands.len();
+        let num_layers = ((num_bands + 3) / 4) as u32; // ceil(num_bands / 4)
+        // IMPORTANT: Use at least 2 layers to work around wgpu WebGL2 bug where
+        // single-layer texture arrays are incorrectly translated to non-array textures.
+        // See: https://github.com/gfx-rs/wgpu/issues/2161
+        // TODO: Fix this in the future.
+        let num_layers = num_layers.max(2);
 
-        // Split bands into two groups of 4
-        let bands_0: Vec<&[f32]> = bands.iter().take(4).map(|b| b.as_slice()).collect();
-        let bands_1: Vec<&[f32]> = bands.iter().skip(4).take(4).map(|b| b.as_slice()).collect();
+        let pixel_count = (width * height) as usize;
 
-        let band_texture_0 = if !bands_0.is_empty() {
-            BandTexture::from_bands(ctx, &bands_0, width, height, "Band Texture 0 (bands 0-3)")
-        } else {
-            BandTexture::empty(ctx, width, height, "Band Texture 0 (empty)")
+        // Create texture array
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: num_layers,
         };
 
-        let band_texture_1 = if !bands_1.is_empty() {
-            BandTexture::from_bands(ctx, &bands_1, width, height, "Band Texture 1 (bands 4-7)")
-        } else {
-            BandTexture::empty(ctx, width, height, "Band Texture 1 (empty)")
-        };
+        let texture_array = ctx.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Hyperspectral Band Texture Array"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
 
-        // Create sampler
-        let config = TextureConfig::default();
+        // Pack bands into RGBA layers and upload each layer
+        for layer_idx in 0..num_layers {
+            let base_band = (layer_idx * 4) as usize;
+            let mut rgba_data = vec![0u8; pixel_count * 4];
+
+            // Pack up to 4 bands into this layer's RGBA channels
+            for channel_idx in 0..4 {
+                let band_idx = base_band + channel_idx;
+                if band_idx >= num_bands {
+                    break;
+                }
+
+                let band = &bands[band_idx];
+                if band.len() != pixel_count {
+                    continue; // Skip bands with incorrect size
+                }
+
+                for (pixel_idx, &value) in band.iter().enumerate() {
+                    let byte_value = (value.clamp(0.0, 1.0) * 255.0) as u8;
+                    rgba_data[pixel_idx * 4 + channel_idx] = byte_value;
+                }
+            }
+
+            // Write this layer to the texture array
+            ctx.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture_array,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer_idx,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &rgba_data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+
+        // Create view for the entire texture array
+        let texture_view = texture_array.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Hyperspectral Band Texture Array View"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+
+        // Create sampler with linear filtering
+        let config = TextureConfig::linear();
         let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Band Sampler"),
             address_mode_u: config.address_mode_u,
@@ -167,12 +158,8 @@ impl HyperspectralGpuData {
             layout: bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: bindings::BAND_TEXTURE_0_BINDING,
-                    resource: wgpu::BindingResource::TextureView(&band_texture_0.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: bindings::BAND_TEXTURE_1_BINDING,
-                    resource: wgpu::BindingResource::TextureView(&band_texture_1.view),
+                    binding: bindings::BAND_TEXTURE_ARRAY_BINDING,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: bindings::BAND_SAMPLER_BINDING,
@@ -182,13 +169,14 @@ impl HyperspectralGpuData {
         });
 
         Self {
-            band_texture_0,
-            band_texture_1,
+            texture_array,
+            texture_view,
             sampler,
             bind_group,
             width,
             height,
             num_bands,
+            num_layers,
         }
     }
 }
@@ -254,10 +242,10 @@ impl HyperspectralPipeline {
             )
             .build();
 
+        // Use texture 2D array for band data
         let band_texture_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
             .with_label("Band Texture Bind Group Layout")
-            .add_texture_2d(bindings::BAND_TEXTURE_0_BINDING, wgpu::ShaderStages::FRAGMENT)
-            .add_texture_2d(bindings::BAND_TEXTURE_1_BINDING, wgpu::ShaderStages::FRAGMENT)
+            .add_texture_2d_array(bindings::BAND_TEXTURE_ARRAY_BINDING, wgpu::ShaderStages::FRAGMENT)
             .add_sampler(bindings::BAND_SAMPLER_BINDING, wgpu::ShaderStages::FRAGMENT)
             .build();
 

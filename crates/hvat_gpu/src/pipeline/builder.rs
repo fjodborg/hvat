@@ -201,6 +201,21 @@ impl<'a> BindGroupLayoutBuilder<'a> {
         self
     }
 
+    /// Add a 2D texture array entry.
+    pub fn add_texture_2d_array(mut self, binding: u32, visibility: wgpu::ShaderStages) -> Self {
+        self.entries.push(wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: wgpu::BindingType::Texture {
+                multisampled: false,
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            },
+            count: None,
+        });
+        self
+    }
+
     /// Add a filtering sampler entry.
     pub fn add_sampler(mut self, binding: u32, visibility: wgpu::ShaderStages) -> Self {
         self.entries.push(wgpu::BindGroupLayoutEntry {

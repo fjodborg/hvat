@@ -54,14 +54,12 @@ pub mod hyperspectral {
     /// Binding 2 in group 0: Band selection uniform
     pub const UNIFORM_BAND_SELECTION_BINDING: u32 = 2;
 
-    /// Group 1: Band textures
+    /// Group 1: Band texture array
     pub const BAND_TEXTURE_GROUP: u32 = 1;
-    /// Binding 0 in group 1: Band texture 0 (bands 0-3)
-    pub const BAND_TEXTURE_0_BINDING: u32 = 0;
-    /// Binding 1 in group 1: Band texture 1 (bands 4-7)
-    pub const BAND_TEXTURE_1_BINDING: u32 = 1;
-    /// Binding 2 in group 1: Band sampler
-    pub const BAND_SAMPLER_BINDING: u32 = 2;
+    /// Binding 0 in group 1: Band texture 2D array (4 bands per layer in RGBA)
+    pub const BAND_TEXTURE_ARRAY_BINDING: u32 = 0;
+    /// Binding 1 in group 1: Band sampler
+    pub const BAND_SAMPLER_BINDING: u32 = 1;
 }
 
 #[cfg(test)]
