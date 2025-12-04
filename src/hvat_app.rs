@@ -15,7 +15,7 @@ use crate::handlers::{
 };
 use crate::hyperspectral::{generate_test_hyperspectral, BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
-use crate::message::{Message, Tab};
+use crate::message::{Message, PersistenceMode, Tab};
 use crate::theme::Theme;
 use crate::views::{build_overlay, view_counter, view_home, view_image_viewer, view_settings};
 use crate::widget_state::WidgetState;
@@ -86,6 +86,36 @@ pub struct HvatApp {
     frame_count: u32,
     last_fps_time: Instant,
     fps: f32,
+
+    // === Persistence settings ===
+    /// How band selection should persist across image navigation
+    band_persistence: PersistenceMode,
+    /// How image settings (brightness, contrast, etc.) should persist
+    image_settings_persistence: PersistenceMode,
+    /// Stored band selections per image (for PerImage mode)
+    stored_band_selections: HashMap<String, BandSelection>,
+    /// Stored image settings per image (for PerImage mode)
+    stored_image_settings: HashMap<String, ImageSettings>,
+}
+
+/// Stored image manipulation settings for per-image persistence.
+#[derive(Clone, Copy, Debug)]
+pub struct ImageSettings {
+    pub brightness: f32,
+    pub contrast: f32,
+    pub gamma: f32,
+    pub hue_shift: f32,
+}
+
+impl Default for ImageSettings {
+    fn default() -> Self {
+        Self {
+            brightness: 0.0,
+            contrast: 1.0,
+            gamma: 1.0,
+            hue_shift: 0.0,
+        }
+    }
 }
 
 impl Application for HvatApp {
@@ -135,6 +165,10 @@ impl Application for HvatApp {
             frame_count: 0,
             last_fps_time: Instant::now(),
             fps: 0.0,
+            band_persistence: PersistenceMode::default(),
+            image_settings_persistence: PersistenceMode::default(),
+            stored_band_selections: HashMap::new(),
+            stored_image_settings: HashMap::new(),
         }
     }
 
@@ -170,6 +204,28 @@ impl Application for HvatApp {
                 );
             }
             Message::ImageLoad(msg) => {
+                use crate::message::ImageLoadMessage;
+
+                // Check if this is an image navigation message
+                let is_navigation = matches!(
+                    msg,
+                    ImageLoadMessage::NextImage | ImageLoadMessage::PreviousImage
+                );
+                let is_load = matches!(
+                    msg,
+                    ImageLoadMessage::LoadFolder | ImageLoadMessage::FolderLoaded(_)
+                );
+                #[cfg(target_arch = "wasm32")]
+                let is_load = is_load || matches!(msg, ImageLoadMessage::WasmFilesLoaded(_));
+
+                // Before navigation: save current settings for PerImage mode
+                if is_navigation {
+                    self.save_current_settings();
+                }
+
+                // Remember if the target image is new (before we load it and mark it as viewed)
+                let old_index = self.current_image_index;
+
                 let mut state = ImageLoadState {
                     image_cache: &mut self.image_cache,
                     current_image_index: &mut self.current_image_index,
@@ -183,6 +239,13 @@ impl Application for HvatApp {
                     pan_y: &mut self.pan_y,
                 };
                 handle_image_load(msg, &mut state);
+
+                // After navigation: apply persistence logic
+                let image_changed = old_index != self.current_image_index || is_load;
+                if image_changed {
+                    self.apply_settings_for_image();
+                }
+
                 // Rebuild overlay when image changes (annotations are per-image)
                 self.rebuild_overlay_if_dirty();
             }
@@ -192,6 +255,8 @@ impl Application for HvatApp {
                     &mut self.widget_state,
                     &mut self.show_debug_info,
                     &mut self.theme,
+                    &mut self.band_persistence,
+                    &mut self.image_settings_persistence,
                 );
             }
             Message::Annotation(msg) => {
@@ -308,6 +373,8 @@ impl Application for HvatApp {
                 &self.band_selection,
                 self.num_bands(),
                 self.cached_overlay.clone(),
+                self.band_persistence,
+                self.image_settings_persistence,
             )),
             Tab::Settings => Element::new(view_settings(
                 &self.theme,
@@ -400,5 +467,67 @@ impl HvatApp {
     /// Get the number of bands in the hyperspectral image.
     fn num_bands(&self) -> usize {
         self.hyperspectral_image.num_bands()
+    }
+
+    /// Save current settings for the current image (for PerImage mode).
+    fn save_current_settings(&mut self) {
+        let key = self.current_image_key();
+
+        // Save band selection
+        self.stored_band_selections.insert(key.clone(), self.band_selection);
+
+        // Save image settings
+        self.stored_image_settings.insert(key, ImageSettings {
+            brightness: self.brightness,
+            contrast: self.contrast,
+            gamma: self.gamma,
+            hue_shift: self.hue_shift,
+        });
+    }
+
+    /// Apply settings for the new image based on persistence modes.
+    fn apply_settings_for_image(&mut self) {
+        let key = self.current_image_key();
+
+        // Apply band selection based on mode
+        match self.band_persistence {
+            PersistenceMode::Reset => {
+                // Reset to defaults
+                self.band_selection = BandSelection::default_rgb();
+            }
+            PersistenceMode::PerImage => {
+                // Restore stored settings if available, otherwise keep current (for new images)
+                if let Some(stored) = self.stored_band_selections.get(&key) {
+                    self.band_selection = *stored;
+                }
+                // For new images without stored settings, keep current settings as starting point
+            }
+            PersistenceMode::Constant => {
+                // Keep current settings (do nothing)
+            }
+        }
+
+        // Apply image settings based on mode
+        match self.image_settings_persistence {
+            PersistenceMode::Reset => {
+                self.brightness = 0.0;
+                self.contrast = 1.0;
+                self.gamma = 1.0;
+                self.hue_shift = 0.0;
+            }
+            PersistenceMode::PerImage => {
+                // Restore stored settings if available, otherwise keep current (for new images)
+                if let Some(stored) = self.stored_image_settings.get(&key) {
+                    self.brightness = stored.brightness;
+                    self.contrast = stored.contrast;
+                    self.gamma = stored.gamma;
+                    self.hue_shift = stored.hue_shift;
+                }
+                // For new images without stored settings, keep current settings as starting point
+            }
+            PersistenceMode::Constant => {
+                // Keep current settings (do nothing)
+            }
+        }
     }
 }

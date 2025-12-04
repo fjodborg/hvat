@@ -10,6 +10,20 @@
 //! - AnnotationMessage: Annotation tools and operations
 
 use crate::annotation::AnnotationTool;
+
+/// Persistence mode for settings (bands, image adjustments) across image navigation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PersistenceMode {
+    /// Reset to defaults when switching images
+    Reset,
+    /// Store/restore settings per image (each image remembers its own settings)
+    /// For new images without stored settings, uses current settings as starting point
+    PerImage,
+    /// Keep current settings constant across all images
+    #[default]
+    Constant,
+}
+
 use crate::theme::Theme;
 use hvat_ui::widgets::SliderId;
 use hvat_ui::ImageHandle;
@@ -98,6 +112,9 @@ pub enum UIMessage {
     // Settings
     ToggleDebugInfo,
     SetTheme(Theme),
+    // Persistence modes for settings across image navigation
+    SetBandPersistence(PersistenceMode),
+    SetImageSettingsPersistence(PersistenceMode),
 }
 
 /// Messages for hyperspectral band selection.
@@ -270,6 +287,12 @@ impl Message {
     }
     pub fn set_theme(theme: Theme) -> Self {
         Message::UI(UIMessage::SetTheme(theme))
+    }
+    pub fn set_band_persistence(mode: PersistenceMode) -> Self {
+        Message::UI(UIMessage::SetBandPersistence(mode))
+    }
+    pub fn set_image_settings_persistence(mode: PersistenceMode) -> Self {
+        Message::UI(UIMessage::SetImageSettingsPersistence(mode))
     }
 
     // Annotation shortcuts

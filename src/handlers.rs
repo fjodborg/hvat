@@ -8,7 +8,7 @@ use crate::hyperspectral::{BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
 use crate::message::{
     AnnotationMessage, BandMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage,
-    ImageViewMessage, NavigationMessage, Tab, UIMessage,
+    ImageViewMessage, NavigationMessage, PersistenceMode, Tab, UIMessage,
 };
 use crate::theme::Theme;
 use crate::ui_constants::{threshold, zoom as zoom_const};
@@ -300,6 +300,8 @@ pub fn handle_image_load(msg: ImageLoadMessage, state: &mut ImageLoadState) {
 }
 
 /// Load the current image using the image cache.
+/// Note: Does NOT reset band_selection - that's handled by apply_settings_for_image()
+/// in hvat_app.rs based on the persistence mode.
 fn load_current_image(state: &mut ImageLoadState) {
     let index = *state.current_image_index;
 
@@ -307,9 +309,6 @@ fn load_current_image(state: &mut ImageLoadState) {
     if let Some(handle) = state.image_cache.get_or_load(index) {
         // Convert loaded RGBA image to hyperspectral (3 bands: R, G, B)
         let hyper = HyperspectralImage::from_rgba(handle.data(), handle.width(), handle.height());
-
-        // Reset band selection to default (0, 1, 2 for RGB)
-        *state.band_selection = BandSelection::default_rgb();
 
         // Create GPU handle for hyperspectral rendering
         // Band compositing happens on GPU, no CPU composite needed
@@ -342,6 +341,8 @@ pub fn handle_ui(
     widget_state: &mut WidgetState,
     show_debug_info: &mut bool,
     theme: &mut Theme,
+    band_persistence: &mut PersistenceMode,
+    image_settings_persistence: &mut PersistenceMode,
 ) {
     match msg {
         UIMessage::ScrollY(offset) => {
@@ -386,6 +387,14 @@ pub fn handle_ui(
         UIMessage::SetTheme(new_theme) => {
             *theme = new_theme.clone();
             log::debug!("🎨 Theme changed to: {:?}", theme.choice);
+        }
+        UIMessage::SetBandPersistence(mode) => {
+            *band_persistence = mode;
+            log::debug!("🎚️ Band persistence mode: {:?}", mode);
+        }
+        UIMessage::SetImageSettingsPersistence(mode) => {
+            *image_settings_persistence = mode;
+            log::debug!("🎚️ Image settings persistence mode: {:?}", mode);
         }
     }
 }

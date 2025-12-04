@@ -2,7 +2,7 @@
 
 use crate::annotation::{AnnotationStore, AnnotationTool, DrawingState, Shape};
 use crate::hyperspectral::BandSelection;
-use crate::message::Message;
+use crate::message::{Message, PersistenceMode};
 use crate::theme::Theme;
 use crate::ui_constants::{
     annotation as ann_const, button as btn_const, colors, image_viewer as img_const, padding,
@@ -140,6 +140,9 @@ pub fn view_image_viewer<'a>(
     num_bands: usize,
     // Pre-built overlay (cached, rebuilt only when dirty)
     overlay: Overlay,
+    // Persistence modes for settings across image navigation
+    band_persistence: PersistenceMode,
+    image_settings_persistence: PersistenceMode,
 ) -> Column<'a, Message> {
     // Create image adjustments from current settings
     let adjustments = ImageAdjustments {
@@ -341,6 +344,24 @@ pub fn view_image_viewer<'a>(
             band_selection,
             num_bands,
         )))
+        // Persistence mode selectors
+        .push(Element::new(
+            text("Settings Persistence:")
+                .size(text_const::BODY)
+                .color(theme.accent_color()),
+        ))
+        .push(Element::new(view_persistence_selector(
+            "Bands:",
+            text_color,
+            band_persistence,
+            Message::set_band_persistence,
+        )))
+        .push(Element::new(view_persistence_selector(
+            "Image:",
+            text_color,
+            image_settings_persistence,
+            Message::set_image_settings_persistence,
+        )))
         .spacing(spacing::TIGHT + 3.0) // 8.0 = TIGHT(5) + 3
 }
 
@@ -466,4 +487,52 @@ where
                 .on_drag_end(Message::apply_bands),
         ))
         .spacing(spacing::STANDARD)
+}
+
+/// Helper to build a persistence mode selector row.
+/// Shows a label and a row of buttons for each mode (radio-button style).
+fn view_persistence_selector<F>(
+    label: &str,
+    text_color: Color,
+    current_mode: PersistenceMode,
+    on_select: F,
+) -> Row<'static, Message>
+where
+    F: Fn(PersistenceMode) -> Message + Clone + 'static,
+{
+    // Helper to create a mode button
+    let mode_btn = |mode: PersistenceMode, name: &str, on_select: F| {
+        let is_selected = current_mode == mode;
+        // Style differently if selected (by adding selection indicator in text)
+        if is_selected {
+            button(format!("[{}]", name))
+                .width(btn_const::XCOMPACT_WIDTH + 10.0)
+                .on_press(on_select(mode))
+        } else {
+            button(name)
+                .width(btn_const::XCOMPACT_WIDTH)
+                .on_press(on_select(mode))
+        }
+    };
+
+    row()
+        .push(Element::new(
+            text(label).size(text_const::SMALL).color(text_color),
+        ))
+        .push(Element::new(mode_btn(
+            PersistenceMode::Reset,
+            "Reset",
+            on_select.clone(),
+        )))
+        .push(Element::new(mode_btn(
+            PersistenceMode::PerImage,
+            "PerImg",
+            on_select.clone(),
+        )))
+        .push(Element::new(mode_btn(
+            PersistenceMode::Constant,
+            "Keep",
+            on_select,
+        )))
+        .spacing(spacing::TIGHT)
 }
