@@ -211,6 +211,8 @@ impl ExportFormat {
 pub enum AnnotationMessage {
     // Tool selection
     SetTool(AnnotationTool),
+    /// Tool shortcut key pressed (b=box, m=mask, p=point, s=select, ESC=cancel, DEL=delete)
+    ToolShortcut(char),
     // Category management
     SetCategory(u32),
     /// Select category by hotkey number (1-9), maps to sorted category order
@@ -223,9 +225,15 @@ pub enum AnnotationMessage {
     /// Force finish polygon (Space key) - closes polygon regardless of mouse state
     ForceFinishPolygon,
     CancelDrawing,
-    // Selection
+    // Selection and editing
     SelectAnnotation(Option<u64>),
     DeleteSelected,
+    /// Start dragging selected annotation or handle
+    StartDrag(f32, f32),
+    /// Continue dragging (move)
+    ContinueDrag(f32, f32),
+    /// Finish dragging
+    FinishDrag,
     // Import/Export
     /// Open export dialog with format selection
     OpenExportDialog,
@@ -473,6 +481,9 @@ impl Message {
     // Annotation shortcuts
     pub fn set_annotation_tool(tool: AnnotationTool) -> Self {
         Message::Annotation(AnnotationMessage::SetTool(tool))
+    }
+    pub fn tool_shortcut(key: char) -> Self {
+        Message::Annotation(AnnotationMessage::ToolShortcut(key))
     }
     pub fn set_annotation_category(id: u32) -> Self {
         Message::Annotation(AnnotationMessage::SetCategory(id))

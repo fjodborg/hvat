@@ -18,6 +18,7 @@ ndarray = "0.15"
 image = "0.24"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+quick-xml = { version = "0.31", features = ["serialize"] }
 thiserror = "1.0"
 log = "0.4"
 web-time = "1.1"
@@ -31,10 +32,13 @@ web-sys = { version = "0.3", features = [
     "Window",
     "Document",
     "HtmlInputElement",
+    "HtmlAnchorElement",
     "File",
     "FileList",
     "FileReader",
     "Blob",
+    "BlobPropertyBag",
+    "Url",
     "Event",
     "EventTarget",
 ] }

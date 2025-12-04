@@ -53,6 +53,23 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
 
         let selected = annotations.selected() == Some(ann.id);
         overlay.push(OverlayItem::new(shape, cat_color).selected(selected));
+
+        // Add drag handles for selected annotation (when in Select mode)
+        if selected && drawing_state.tool == AnnotationTool::Select {
+            let handle_color = Color::WHITE;
+            let handle_radius = 4.0; // Small handle circles
+
+            for (_handle_type, pos) in ann.shape.get_handles() {
+                overlay.push(OverlayItem::new(
+                    OverlayShape::Point {
+                        x: pos.x,
+                        y: pos.y,
+                        radius: handle_radius,
+                    },
+                    handle_color,
+                ));
+            }
+        }
     }
 
     // Add preview for in-progress drawing
@@ -87,6 +104,7 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
 }
 
 /// Build the annotation toolbar (compact version for sidebar).
+/// Tool shortcuts: s=Select, b=Box, m=Mask (polygon), p=Point
 fn view_annotation_toolbar_compact(
     tool: AnnotationTool,
     _text_color: Color,
@@ -94,29 +112,34 @@ fn view_annotation_toolbar_compact(
     column()
         .push(Element::new(
             row()
-                .push(tool_button("Sel", AnnotationTool::Select, tool))
-                .push(tool_button("Box", AnnotationTool::BoundingBox, tool))
-                .push(tool_button("Poly", AnnotationTool::Polygon, tool))
-                .push(tool_button("Pt", AnnotationTool::Point, tool))
+                .push(tool_button("Sel(s)", AnnotationTool::Select, tool))
+                .push(tool_button("Box(b)", AnnotationTool::BoundingBox, tool))
+                .push(tool_button("Mask(m)", AnnotationTool::Polygon, tool))
+                .push(tool_button("Pt(p)", AnnotationTool::Point, tool))
                 .spacing(spacing::TIGHT)
                 .wrap(), // Wrap to next line if not enough space
         ))
         .push(Element::new(
             row()
                 .push(Element::new(
-                    button("Del")
+                    button("Del(⌫)")
                         .on_press(Message::delete_selected_annotation())
-                        .width(50.0),
+                        .width(60.0),
+                ))
+                .push(Element::new(
+                    button("Esc")
+                        .on_press(Message::tool_shortcut('\x1b'))
+                        .width(45.0),
                 ))
                 .push(Element::new(
                     button("Exp")
                         .on_press(Message::export_annotations())
-                        .width(50.0),
+                        .width(45.0),
                 ))
                 .push(Element::new(
                     button("Clr")
                         .on_press(Message::clear_annotations())
-                        .width(50.0),
+                        .width(45.0),
                 ))
                 .spacing(spacing::TIGHT)
                 .wrap(), // Wrap to next line if not enough space
@@ -385,7 +408,7 @@ pub fn view_image_viewer<'a>(
         .pan((pan_x, pan_y))
         .zoom(zoom)
         .dragging(widget_state.image.is_dragging)
-        .drawing(drawing_state.is_drawing)
+        .drawing(drawing_state.is_drawing || drawing_state.editing.is_dragging)
         .adjustments(adjustments)
         .overlay(overlay)
         .width(Length::Fill)
@@ -407,6 +430,7 @@ pub fn view_image_viewer<'a>(
             // Ctrl+1-9 toggles tags
             Message::toggle_tag_by_hotkey(num)
         })
+        .on_tool_key(Message::tool_shortcut)
         // Disable keyboard shortcuts when any text input is focused
         .keyboard_disabled(widget_state.category_input.is_focused || widget_state.tag_input.is_focused);
 

@@ -51,6 +51,8 @@ pub struct HyperspectralImage<Message> {
     on_number_key: Option<Box<dyn Fn(u8) -> Message>>,
     /// Callback when Ctrl+number key pressed (tag toggle)
     on_ctrl_number_key: Option<Box<dyn Fn(u8) -> Message>>,
+    /// Callback when tool shortcut key pressed (b, m, p, s, Escape, Delete)
+    on_tool_key: Option<Box<dyn Fn(char) -> Message>>,
 }
 
 impl<Message> HyperspectralImage<Message> {
@@ -78,6 +80,7 @@ impl<Message> HyperspectralImage<Message> {
             on_space: None,
             on_number_key: None,
             on_ctrl_number_key: None,
+            on_tool_key: None,
         }
     }
 
@@ -222,6 +225,15 @@ impl<Message> HyperspectralImage<Message> {
         F: Fn(u8) -> Message + 'static,
     {
         self.on_ctrl_number_key = Some(Box::new(f));
+        self
+    }
+
+    /// Set the callback when tool shortcut key pressed (b, m, p, s, Escape, Delete).
+    pub fn on_tool_key<F>(mut self, f: F) -> Self
+    where
+        F: Fn(char) -> Message + 'static,
+    {
+        self.on_tool_key = Some(Box::new(f));
         self
     }
 
@@ -453,6 +465,37 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
                 if let Some(ref on_number_key) = self.on_number_key {
                     let num = (*c as u8) - b'0';
                     return Some(on_number_key(num));
+                }
+                None
+            }
+            // Tool shortcut keys: b=box, m=mask, p=point, s=select
+            Event::KeyPressed {
+                key: Key::Char(c),
+                modifiers,
+            } if (*c == 'b' || *c == 'm' || *c == 'p' || *c == 's')
+                && !modifiers.ctrl
+                && !self.keyboard_disabled =>
+            {
+                if let Some(ref on_tool_key) = self.on_tool_key {
+                    return Some(on_tool_key(*c));
+                }
+                None
+            }
+            // Escape key - cancel/deselect
+            Event::KeyPressed {
+                key: Key::Escape, ..
+            } if !self.keyboard_disabled => {
+                if let Some(ref on_tool_key) = self.on_tool_key {
+                    return Some(on_tool_key('\x1b')); // ESC character
+                }
+                None
+            }
+            // Delete key - delete selected annotation
+            Event::KeyPressed {
+                key: Key::Delete, ..
+            } if !self.keyboard_disabled => {
+                if let Some(ref on_tool_key) = self.on_tool_key {
+                    return Some(on_tool_key('\x7f')); // DEL character
                 }
                 None
             }

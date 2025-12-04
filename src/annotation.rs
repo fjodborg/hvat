@@ -210,6 +210,152 @@ impl Shape {
             Shape::Polygon(poly) => poly.contains(point),
         }
     }
+
+    /// Hit test for drag handles.
+    /// Returns the handle type if near a handle, None otherwise.
+    pub fn hit_test_handle(&self, point: &Point, hit_radius: f32) -> Option<DragHandle> {
+        match self {
+            Shape::Point(p) => {
+                if p.distance_to(point) < hit_radius {
+                    Some(DragHandle::Point)
+                } else {
+                    None
+                }
+            }
+            Shape::BoundingBox(b) => {
+                // Check corners first (TL, TR, BR, BL)
+                let corners = [
+                    Point::new(b.x, b.y),                         // TL = 0
+                    Point::new(b.x + b.width, b.y),               // TR = 1
+                    Point::new(b.x + b.width, b.y + b.height),    // BR = 2
+                    Point::new(b.x, b.y + b.height),              // BL = 3
+                ];
+                for (i, corner) in corners.iter().enumerate() {
+                    if corner.distance_to(point) < hit_radius {
+                        return Some(DragHandle::BoxCorner(i as u8));
+                    }
+                }
+                // Check if inside the box (body drag)
+                if b.contains(point) {
+                    return Some(DragHandle::Body);
+                }
+                None
+            }
+            Shape::Polygon(poly) => {
+                // Check vertices first
+                for (i, vertex) in poly.vertices.iter().enumerate() {
+                    if vertex.distance_to(point) < hit_radius {
+                        return Some(DragHandle::PolygonVertex(i));
+                    }
+                }
+                // Check if inside polygon (body drag)
+                if poly.contains(point) {
+                    return Some(DragHandle::Body);
+                }
+                None
+            }
+        }
+    }
+
+    /// Apply a drag delta to the shape based on the handle being dragged.
+    /// Returns the modified shape.
+    pub fn apply_drag(&self, handle: DragHandle, delta: Point) -> Shape {
+        match (self, handle) {
+            // Move entire shape
+            (Shape::Point(p), DragHandle::Body | DragHandle::Point) => {
+                Shape::Point(Point::new(p.x + delta.x, p.y + delta.y))
+            }
+            (Shape::BoundingBox(b), DragHandle::Body) => {
+                Shape::BoundingBox(BoundingBox::new(
+                    b.x + delta.x,
+                    b.y + delta.y,
+                    b.width,
+                    b.height,
+                ))
+            }
+            (Shape::Polygon(poly), DragHandle::Body) => {
+                let mut new_poly = Polygon::new();
+                for v in &poly.vertices {
+                    new_poly.push(Point::new(v.x + delta.x, v.y + delta.y));
+                }
+                if poly.closed {
+                    new_poly.close();
+                }
+                Shape::Polygon(new_poly)
+            }
+            // Resize bounding box corners
+            (Shape::BoundingBox(b), DragHandle::BoxCorner(corner)) => {
+                let (new_x, new_y, new_w, new_h) = match corner {
+                    0 => { // TL: move x,y, adjust width/height
+                        let new_x = b.x + delta.x;
+                        let new_y = b.y + delta.y;
+                        let new_w = (b.width - delta.x).max(1.0);
+                        let new_h = (b.height - delta.y).max(1.0);
+                        (new_x.min(b.x + b.width - 1.0), new_y.min(b.y + b.height - 1.0), new_w, new_h)
+                    }
+                    1 => { // TR: adjust width, move y, adjust height
+                        let new_w = (b.width + delta.x).max(1.0);
+                        let new_y = b.y + delta.y;
+                        let new_h = (b.height - delta.y).max(1.0);
+                        (b.x, new_y.min(b.y + b.height - 1.0), new_w, new_h)
+                    }
+                    2 => { // BR: adjust width and height
+                        let new_w = (b.width + delta.x).max(1.0);
+                        let new_h = (b.height + delta.y).max(1.0);
+                        (b.x, b.y, new_w, new_h)
+                    }
+                    3 => { // BL: move x, adjust width and height
+                        let new_x = b.x + delta.x;
+                        let new_w = (b.width - delta.x).max(1.0);
+                        let new_h = (b.height + delta.y).max(1.0);
+                        (new_x.min(b.x + b.width - 1.0), b.y, new_w, new_h)
+                    }
+                    _ => (b.x, b.y, b.width, b.height),
+                };
+                Shape::BoundingBox(BoundingBox::new(new_x, new_y, new_w, new_h))
+            }
+            // Move polygon vertex
+            (Shape::Polygon(poly), DragHandle::PolygonVertex(idx)) => {
+                let mut new_poly = Polygon::new();
+                for (i, v) in poly.vertices.iter().enumerate() {
+                    if i == idx {
+                        new_poly.push(Point::new(v.x + delta.x, v.y + delta.y));
+                    } else {
+                        new_poly.push(*v);
+                    }
+                }
+                if poly.closed {
+                    new_poly.close();
+                }
+                Shape::Polygon(new_poly)
+            }
+            // Default: return unchanged
+            _ => self.clone(),
+        }
+    }
+
+    /// Get the positions of all drag handles for this shape.
+    /// Returns a vector of (handle_type, position) pairs.
+    pub fn get_handles(&self) -> Vec<(DragHandle, Point)> {
+        match self {
+            Shape::Point(p) => vec![(DragHandle::Point, *p)],
+            Shape::BoundingBox(b) => {
+                vec![
+                    (DragHandle::BoxCorner(0), Point::new(b.x, b.y)),
+                    (DragHandle::BoxCorner(1), Point::new(b.x + b.width, b.y)),
+                    (DragHandle::BoxCorner(2), Point::new(b.x + b.width, b.y + b.height)),
+                    (DragHandle::BoxCorner(3), Point::new(b.x, b.y + b.height)),
+                ]
+            }
+            Shape::Polygon(poly) => {
+                poly.vertices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| (DragHandle::PolygonVertex(i), *v))
+                    .collect()
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -454,6 +600,91 @@ impl AnnotationStore {
         None
     }
 
+    /// Find all annotations at a given point (for cycling through overlapping annotations).
+    /// Returns annotation IDs sorted by ID for consistent ordering.
+    pub fn hit_test_all(&self, point: &Point) -> Vec<u64> {
+        let mut hits: Vec<u64> = self.annotations.values()
+            .filter(|ann| ann.shape.contains(point))
+            .map(|ann| ann.id)
+            .collect();
+        hits.sort();
+        hits
+    }
+
+    /// Find the next annotation to select when cycling through overlapping annotations.
+    /// If current_id is Some, returns the next annotation after it in the hit list.
+    /// If current_id is None or not in the list, returns the first annotation.
+    pub fn cycle_selection(&self, point: &Point, current_id: Option<u64>) -> Option<u64> {
+        let hits = self.hit_test_all(point);
+        if hits.is_empty() {
+            return None;
+        }
+
+        match current_id {
+            Some(id) => {
+                // Find current position and return next (wrapping around)
+                if let Some(pos) = hits.iter().position(|&h| h == id) {
+                    let next_pos = (pos + 1) % hits.len();
+                    Some(hits[next_pos])
+                } else {
+                    // Current not in list, return first
+                    Some(hits[0])
+                }
+            }
+            None => Some(hits[0]),
+        }
+    }
+
+    /// Hit test for drag handles on the selected annotation.
+    /// Returns the handle type if a handle is hit, None otherwise.
+    /// `hit_radius` is the distance in image coordinates to consider a hit.
+    pub fn hit_test_handle(&self, point: &Point, hit_radius: f32) -> Option<DragHandle> {
+        let ann_id = self.selected_id?;
+        let ann = self.annotations.get(&ann_id)?;
+        ann.shape.hit_test_handle(point, hit_radius)
+    }
+
+    /// Hit test for drag handles on ALL annotations (not just selected).
+    /// Returns (annotation_id, handle_type) if a handle is hit.
+    /// Checks handles before body, so corners are prioritized.
+    /// `hit_radius` is the distance in image coordinates to consider a hit.
+    pub fn hit_test_any_handle(&self, point: &Point, hit_radius: f32) -> Option<(u64, DragHandle)> {
+        // First pass: check handles (corners/vertices) - these should have priority
+        for ann in self.annotations.values() {
+            if let Some(handle) = ann.shape.hit_test_handle(point, hit_radius) {
+                // Only return non-Body handles in this pass (corners, vertices, points)
+                if !matches!(handle, DragHandle::Body) {
+                    return Some((ann.id, handle));
+                }
+            }
+        }
+        // Second pass: check bodies
+        for ann in self.annotations.values() {
+            if ann.shape.contains(point) {
+                return Some((ann.id, DragHandle::Body));
+            }
+        }
+        None
+    }
+
+    /// Update the shape of an annotation.
+    pub fn update_shape(&mut self, id: u64, shape: Shape) {
+        if let Some(ann) = self.annotations.get_mut(&id) {
+            ann.shape = shape;
+            self.mark_dirty();
+        }
+    }
+
+    /// Update the category of an annotation.
+    pub fn set_category(&mut self, id: u64, category_id: u32) {
+        if let Some(ann) = self.annotations.get_mut(&id) {
+            if ann.category_id != category_id {
+                ann.category_id = category_id;
+                self.mark_dirty();
+            }
+        }
+    }
+
     // ========================================================================
     // Import/Export
     // ========================================================================
@@ -557,6 +788,85 @@ pub enum AnnotationTool {
     Point,
 }
 
+/// Which part of an annotation is being dragged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragHandle {
+    /// Dragging the whole annotation (move)
+    Body,
+    /// Dragging a corner of a bounding box (0=TL, 1=TR, 2=BR, 3=BL)
+    BoxCorner(u8),
+    /// Dragging an edge of a bounding box (0=top, 1=right, 2=bottom, 3=left)
+    BoxEdge(u8),
+    /// Dragging a vertex of a polygon
+    PolygonVertex(usize),
+    /// Dragging a point annotation
+    Point,
+}
+
+/// State for editing an existing annotation.
+#[derive(Debug, Clone, Default)]
+pub struct EditingState {
+    /// Whether we're currently dragging (mouse is down)
+    pub is_dragging: bool,
+    /// Whether the mouse has actually moved since drag started
+    pub has_moved: bool,
+    /// Which annotation is being edited
+    pub annotation_id: Option<u64>,
+    /// Which handle/part is being dragged
+    pub handle: Option<DragHandle>,
+    /// Starting point of the drag in image coordinates
+    pub drag_start: Option<Point>,
+    /// Original shape before editing (for undo/preview)
+    pub original_shape: Option<Shape>,
+}
+
+impl EditingState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Start dragging an annotation
+    pub fn start_drag(&mut self, ann_id: u64, handle: DragHandle, point: Point, original: Shape) {
+        self.is_dragging = true;
+        self.has_moved = false;
+        self.annotation_id = Some(ann_id);
+        self.handle = Some(handle);
+        self.drag_start = Some(point);
+        self.original_shape = Some(original);
+    }
+
+    /// Mark that the drag has actually moved
+    pub fn mark_moved(&mut self) {
+        self.has_moved = true;
+    }
+
+    /// Check if this was just a click (no movement)
+    pub fn was_click(&self) -> bool {
+        !self.has_moved
+    }
+
+    /// Finish dragging
+    pub fn finish_drag(&mut self) {
+        self.is_dragging = false;
+        self.has_moved = false;
+        self.annotation_id = None;
+        self.handle = None;
+        self.drag_start = None;
+        self.original_shape = None;
+    }
+
+    /// Cancel dragging (restore original)
+    pub fn cancel_drag(&mut self) -> Option<(u64, Shape)> {
+        if let (Some(id), Some(shape)) = (self.annotation_id, self.original_shape.take()) {
+            self.finish_drag();
+            Some((id, shape))
+        } else {
+            self.finish_drag();
+            None
+        }
+    }
+}
+
 /// State for the current drawing operation.
 #[derive(Debug, Clone, Default)]
 pub struct DrawingState {
@@ -568,6 +878,8 @@ pub struct DrawingState {
     pub points: Vec<Point>,
     /// Whether we're currently drawing.
     pub is_drawing: bool,
+    /// Editing state for modifying existing annotations
+    pub editing: EditingState,
 }
 
 impl DrawingState {
