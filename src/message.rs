@@ -101,14 +101,18 @@ pub enum ImageLoadMessage {
 /// Messages for UI state (scrolling, debug, theme).
 #[derive(Debug, Clone)]
 pub enum UIMessage {
-    // Vertical scrolling
+    // Main content vertical scrolling
     ScrollY(f32),
     ScrollbarDragStartY,
     ScrollbarDragEndY,
-    // Horizontal scrolling
+    // Main content horizontal scrolling
     ScrollX(f32),
     ScrollbarDragStartX,
     ScrollbarDragEndX,
+    // Sidebar scrolling (independent)
+    SidebarScrollY(f32),
+    SidebarScrollbarDragStartY,
+    SidebarScrollbarDragEndY,
     // Settings
     ToggleDebugInfo,
     SetTheme(Theme),
@@ -289,6 +293,16 @@ impl Message {
     }
     pub fn scrollbar_drag_end_x() -> Self {
         Message::UI(UIMessage::ScrollbarDragEndX)
+    }
+    // UI shortcuts - sidebar scrolling
+    pub fn sidebar_scroll_y(offset: f32) -> Self {
+        Message::UI(UIMessage::SidebarScrollY(offset))
+    }
+    pub fn sidebar_scrollbar_drag_start_y() -> Self {
+        Message::UI(UIMessage::SidebarScrollbarDragStartY)
+    }
+    pub fn sidebar_scrollbar_drag_end_y() -> Self {
+        Message::UI(UIMessage::SidebarScrollbarDragEndY)
     }
     pub fn toggle_debug_info() -> Self {
         Message::UI(UIMessage::ToggleDebugInfo)

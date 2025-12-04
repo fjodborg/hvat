@@ -101,6 +101,42 @@ pub mod image_viewer {
     pub const BORDER_WIDTH: f32 = 2.0;
 }
 
+/// Sidebar dimension constants.
+pub mod sidebar {
+    /// Default sidebar width
+    pub const WIDTH: f32 = 220.0;
+    /// Spacing between sidebar and main content
+    pub const GAP: f32 = 15.0;
+}
+
+/// Title bar constants for titled containers.
+pub mod title_bar {
+    use super::Color;
+
+    /// Default title font size
+    pub const FONT_SIZE: f32 = 11.0;
+    /// Default horizontal padding
+    pub const PADDING_H: f32 = 8.0;
+    /// Default vertical padding
+    pub const PADDING_V: f32 = 3.0;
+
+    /// Default title bar background color
+    pub const BG_COLOR: Color = Color {
+        r: 0.15,
+        g: 0.18,
+        b: 0.22,
+        a: 0.95,
+    };
+
+    /// Default title text color
+    pub const TEXT_COLOR: Color = Color {
+        r: 0.8,
+        g: 0.85,
+        b: 0.9,
+        a: 1.0,
+    };
+}
+
 /// Interaction threshold constants.
 pub mod threshold {
     /// Minimum pan delta to trigger update (pixels)

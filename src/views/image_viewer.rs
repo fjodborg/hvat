@@ -5,14 +5,14 @@ use crate::hyperspectral::BandSelection;
 use crate::message::{Message, PersistenceMode};
 use crate::theme::Theme;
 use crate::ui_constants::{
-    annotation as ann_const, button as btn_const, colors, image_viewer as img_const, padding,
-    slider as slider_const, spacing, text as text_const,
+    annotation as ann_const, colors, image_viewer as img_const, padding,
+    sidebar as sidebar_const, spacing, text as text_const, title_bar as title_const,
 };
 use crate::views::helpers::tool_button;
 use crate::widget_state::WidgetState;
 use hvat_ui::widgets::{
     button, collapsible, column, container, dropdown, hyperspectral_image, row, slider, text,
-    Column, Element, Row, SliderId,
+    titled_container, Column, Element, Row, SliderId,
 };
 use hvat_ui::{
     BandSelectionUniform, Color, HyperspectralImageHandle, ImageAdjustments, Length, Overlay,
@@ -84,41 +84,47 @@ pub fn build_overlay(annotations: &AnnotationStore, drawing_state: &DrawingState
     overlay
 }
 
-/// Build the annotation toolbar.
-pub fn view_annotation_toolbar(tool: AnnotationTool, _text_color: Color) -> Row<'static, Message> {
-    row()
-        .push(tool_button("Select", AnnotationTool::Select, tool))
-        .push(tool_button("BBox", AnnotationTool::BoundingBox, tool))
-        .push(tool_button("Polygon", AnnotationTool::Polygon, tool))
-        .push(tool_button("Point", AnnotationTool::Point, tool))
+/// Build the annotation toolbar (compact version for sidebar).
+fn view_annotation_toolbar_compact(
+    tool: AnnotationTool,
+    _text_color: Color,
+) -> Column<'static, Message> {
+    column()
         .push(Element::new(
-            button("Delete")
-                .on_press(Message::delete_selected_annotation())
-                .width(btn_const::COMPACT_WIDTH),
+            row()
+                .push(tool_button("Sel", AnnotationTool::Select, tool))
+                .push(tool_button("Box", AnnotationTool::BoundingBox, tool))
+                .push(tool_button("Poly", AnnotationTool::Polygon, tool))
+                .push(tool_button("Pt", AnnotationTool::Point, tool))
+                .spacing(spacing::TIGHT),
         ))
         .push(Element::new(
-            button("Export")
-                .on_press(Message::export_annotations())
-                .width(btn_const::COMPACT_WIDTH),
-        ))
-        .push(Element::new(
-            button("Clear")
-                .on_press(Message::clear_annotations())
-                .width(btn_const::XCOMPACT_WIDTH),
+            row()
+                .push(Element::new(
+                    button("Del")
+                        .on_press(Message::delete_selected_annotation())
+                        .width(50.0),
+                ))
+                .push(Element::new(
+                    button("Exp")
+                        .on_press(Message::export_annotations())
+                        .width(50.0),
+                ))
+                .push(Element::new(
+                    button("Clr")
+                        .on_press(Message::clear_annotations())
+                        .width(50.0),
+                ))
+                .spacing(spacing::TIGHT),
         ))
         .spacing(spacing::TIGHT)
 }
 
 /// Build the image viewer view.
 ///
-/// Takes individual parameters rather than a struct to avoid lifetime issues
-/// when the returned Element outlives a local struct.
-///
-/// Uses GPU-based band compositing - band selection changes only update a
-/// uniform buffer, no CPU-side image regeneration needed.
-///
-/// The overlay is passed in pre-built to avoid rebuilding every frame.
-/// It should be rebuilt only when annotations or drawing state changes.
+/// Layout: Main row with image panel (left) and sidebar (right).
+/// - Image panel: titled container with the hyperspectral image
+/// - Sidebar: all settings (file controls, zoom, adjustments, bands, annotations)
 #[allow(clippy::too_many_arguments)]
 pub fn view_image_viewer<'a>(
     theme: &Theme,
@@ -135,15 +141,12 @@ pub fn view_image_viewer<'a>(
     drawing_state: &'a DrawingState,
     annotations: &'a AnnotationStore,
     status_message: Option<&'a str>,
-    // Band selection (always shown) - passed to GPU for compositing
     band_selection: &BandSelection,
     num_bands: usize,
-    // Pre-built overlay (cached, rebuilt only when dirty)
     overlay: Overlay,
-    // Persistence modes for settings across image navigation
     band_persistence: PersistenceMode,
     image_settings_persistence: PersistenceMode,
-) -> Column<'a, Message> {
+) -> Row<'a, Message> {
     // Create image adjustments from current settings
     let adjustments = ImageAdjustments {
         brightness,
@@ -161,7 +164,6 @@ pub fn view_image_viewer<'a>(
     );
 
     // Create the GPU-accelerated hyperspectral image widget
-    // Band compositing happens on the GPU - instant band selection changes!
     let image_widget = hyperspectral_image(hyperspectral_handle.clone(), band_uniform)
         .pan((pan_x, pan_y))
         .zoom(zoom)
@@ -175,87 +177,79 @@ pub fn view_image_viewer<'a>(
         .on_drag_move(Message::image_drag_move)
         .on_drag_end(Message::image_drag_end)
         .on_zoom(Message::image_zoom_at_point)
-        // Annotation callbacks
         .on_click(|(x, y)| Message::start_drawing(x, y))
         .on_draw_move(|(x, y)| Message::continue_drawing(x, y))
         .on_draw_end(Message::finish_drawing)
         .on_space(Message::force_finish_polygon);
 
+    // === LEFT PANEL: Image with titled container ===
+    let image_panel = titled_container("Image", Element::new(image_widget))
+        .padding(padding::MINIMAL)
+        .border(colors::BORDER)
+        .border_width(img_const::BORDER_WIDTH)
+        .title_bg_color(title_const::BG_COLOR)
+        .title_text_color(title_const::TEXT_COLOR);
+
     // Status text
     let status_text = status_message.unwrap_or("No images loaded");
 
-    column()
-        .push(Element::new(
-            text("Image Viewer").size(text_const::TITLE).color(text_color),
-        ))
-        // File loading controls
+    // === RIGHT PANEL: Sidebar with all controls ===
+    let sidebar = column()
+        // File controls
         .push(Element::new(
             row()
                 .push(Element::new(
-                    button("Load Folder")
+                    button("Load")
                         .on_press(Message::load_folder())
-                        .width(btn_const::STANDARD_WIDTH),
+                        .width(60.0),
                 ))
                 .push(Element::new(
-                    button("< Prev")
+                    button("<")
                         .on_press(Message::previous_image())
-                        .width(btn_const::TOOL_WIDTH),
+                        .width(35.0),
                 ))
                 .push(Element::new(
-                    button("Next >")
+                    button(">")
                         .on_press(Message::next_image())
-                        .width(btn_const::TOOL_WIDTH),
+                        .width(35.0),
                 ))
-                .push(Element::new(
-                    text(status_text).size(text_const::SMALL).color(text_color),
-                ))
-                .spacing(spacing::STANDARD),
+                .spacing(spacing::TIGHT),
         ))
         .push(Element::new(
-            text(format!(
-                "Zoom: {:.2}x | Pan: ({:.0}, {:.0})",
-                zoom, pan_x, pan_y
-            ))
-            .size(text_const::BODY)
-            .color(text_color),
-        ))
-        // Image display area with border
-        .push(Element::new(
-            container(Element::new(image_widget))
-                .padding(padding::MINIMAL)
-                .border(colors::BORDER)
-                .border_width(img_const::BORDER_WIDTH),
-        ))
-        .push(Element::new(
-            text("Middle-click drag to pan, scroll to zoom")
+            text(status_text)
                 .size(text_const::SMALL)
-                .color(colors::MUTED_TEXT),
+                .color(text_color),
         ))
-        // Zoom/pan button controls
+        // View controls
         .push(Element::new(
             row()
                 .push(Element::new(
-                    button("Zoom In")
+                    text(format!("Zoom: {:.1}x", zoom))
+                        .size(text_const::SMALL)
+                        .color(text_color),
+                ))
+                .push(Element::new(
+                    button("+")
                         .on_press(Message::zoom_in())
-                        .width(btn_const::ZOOM_WIDTH),
+                        .width(30.0),
                 ))
                 .push(Element::new(
-                    button("Zoom Out")
+                    button("-")
                         .on_press(Message::zoom_out())
-                        .width(btn_const::ZOOM_WIDTH),
+                        .width(30.0),
                 ))
                 .push(Element::new(
-                    button("Reset View")
+                    button("Reset")
                         .on_press(Message::reset_view())
-                        .width(btn_const::ZOOM_WIDTH),
+                        .width(55.0),
                 ))
-                .spacing(spacing::STANDARD),
+                .spacing(spacing::TIGHT),
         ))
-        // Image Settings - collapsible (closed by default)
+        // Image Settings section (collapsible)
         .push(Element::new(
             collapsible(
-                "Image Settings",
-                Element::new(view_image_settings_content(
+                "Adjustments",
+                Element::new(view_image_settings_sidebar(
                     text_color,
                     brightness,
                     contrast,
@@ -269,36 +263,11 @@ pub fn view_image_viewer<'a>(
             .text_color(text_color)
             .header_color(theme.accent_color().with_alpha(0.3)),
         ))
-        // Annotation toolbar
-        .push(Element::new(
-            text("Annotation Tools:")
-                .size(text_const::BODY)
-                .color(theme.accent_color()),
-        ))
-        .push(Element::new(view_annotation_toolbar(
-            drawing_state.tool,
-            text_color,
-        )))
-        // Annotation info
-        .push(Element::new(
-            text(format!(
-                "Annotations: {} | Tool: {:?} | {}",
-                annotations.len(),
-                drawing_state.tool,
-                if drawing_state.is_drawing {
-                    "Drawing..."
-                } else {
-                    "Ready"
-                }
-            ))
-            .size(text_const::SMALL)
-            .color(text_color),
-        ))
-        // Band Selection - collapsible (open by default)
+        // Band Selection section (collapsible)
         .push(Element::new(
             collapsible(
-                "Band Selection (RGB Mapping)",
-                Element::new(view_band_selector(
+                "Bands",
+                Element::new(view_band_selector_sidebar(
                     text_color,
                     widget_state,
                     band_selection,
@@ -310,29 +279,61 @@ pub fn view_image_viewer<'a>(
             .text_color(text_color)
             .header_color(theme.accent_color().with_alpha(0.3)),
         ))
-        // Persistence mode selectors
+        // Annotation tools
+        .push(Element::new(view_annotation_toolbar_compact(
+            drawing_state.tool,
+            text_color,
+        )))
         .push(Element::new(
-            text("Settings Persistence:")
-                .size(text_const::BODY)
-                .color(theme.accent_color()),
+            text(format!(
+                "{} annotations | {}",
+                annotations.len(),
+                if drawing_state.is_drawing {
+                    "Drawing..."
+                } else {
+                    "Ready"
+                }
+            ))
+            .size(text_const::SMALL)
+            .color(colors::MUTED_TEXT),
         ))
-        .push(Element::new(view_band_persistence_selector(
+        // Persistence settings
+        .push(Element::new(view_persistence_row(
             "Bands:",
             text_color,
             band_persistence,
             widget_state.dropdown.band_persistence_open,
+            true,
         )))
-        .push(Element::new(view_image_settings_persistence_selector(
+        .push(Element::new(view_persistence_row(
             "Image:",
             text_color,
             image_settings_persistence,
             widget_state.dropdown.image_settings_persistence_open,
+            false,
         )))
-        .spacing(spacing::TIGHT + 3.0) // 8.0 = TIGHT(5) + 3
+        .spacing(spacing::TIGHT);
+
+    // Main layout: image panel + sidebar
+    row()
+        .push(Element::new(
+            column()
+                .push(Element::new(image_panel))
+                .push(Element::new(
+                    text("Middle-click drag to pan, scroll to zoom")
+                        .size(text_const::SMALL)
+                        .color(colors::MUTED_TEXT),
+                ))
+                .spacing(spacing::TIGHT),
+        ))
+        .push(Element::new(
+            container(Element::new(sidebar)).padding(0.0),
+        ))
+        .spacing(sidebar_const::GAP)
 }
 
-/// Build the image settings content (for inside collapsible).
-fn view_image_settings_content(
+/// Build sidebar version of image settings (compact sliders).
+fn view_image_settings_sidebar(
     text_color: Color,
     brightness: f32,
     contrast: f32,
@@ -341,9 +342,8 @@ fn view_image_settings_content(
     widget_state: &WidgetState,
 ) -> Column<'static, Message> {
     column()
-        // Brightness slider
-        .push(Element::new(view_slider_row(
-            &format!("Brightness: {:.2}", brightness),
+        .push(Element::new(view_compact_slider(
+            "Brightness",
             text_color,
             -1.0,
             1.0,
@@ -352,9 +352,8 @@ fn view_image_settings_content(
             widget_state.slider.is_dragging(SliderId::Brightness),
             Message::set_brightness,
         )))
-        // Contrast slider
-        .push(Element::new(view_slider_row(
-            &format!("Contrast:   {:.2}", contrast),
+        .push(Element::new(view_compact_slider(
+            "Contrast",
             text_color,
             0.1,
             3.0,
@@ -363,9 +362,8 @@ fn view_image_settings_content(
             widget_state.slider.is_dragging(SliderId::Contrast),
             Message::set_contrast,
         )))
-        // Gamma slider
-        .push(Element::new(view_slider_row(
-            &format!("Gamma:      {:.2}", gamma),
+        .push(Element::new(view_compact_slider(
+            "Gamma",
             text_color,
             0.1,
             3.0,
@@ -374,9 +372,8 @@ fn view_image_settings_content(
             widget_state.slider.is_dragging(SliderId::Gamma),
             Message::set_gamma,
         )))
-        // Hue shift slider
-        .push(Element::new(view_slider_row(
-            &format!("Hue Shift:  {:.0}", hue_shift),
+        .push(Element::new(view_compact_slider(
+            "Hue",
             text_color,
             -180.0,
             180.0,
@@ -385,17 +382,16 @@ fn view_image_settings_content(
             widget_state.slider.is_dragging(SliderId::HueShift),
             Message::set_hue_shift,
         )))
-        // Reset button
         .push(Element::new(
-            button("Reset Image Settings")
+            button("Reset")
                 .on_press(Message::reset_image_settings())
-                .width(btn_const::WIDE_WIDTH),
+                .width(sidebar_const::WIDTH - 20.0),
         ))
         .spacing(spacing::TIGHT)
 }
 
-/// Helper to build an image settings slider row.
-fn view_slider_row<F>(
+/// Compact slider with label above.
+fn view_compact_slider<F>(
     label: &str,
     text_color: Color,
     min: f32,
@@ -404,90 +400,87 @@ fn view_slider_row<F>(
     slider_id: SliderId,
     is_dragging: bool,
     on_change: F,
-) -> Row<'static, Message>
+) -> Column<'static, Message>
 where
     F: Fn(f32) -> Message + 'static,
 {
-    row()
+    let value_str = if max > 100.0 {
+        format!("{}: {:.0}", label, value)
+    } else {
+        format!("{}: {:.2}", label, value)
+    };
+
+    column()
         .push(Element::new(
-            text(label).size(text_const::SMALL).color(text_color),
+            text(value_str).size(text_const::SMALL).color(text_color),
         ))
         .push(Element::new(
             slider(min, max, value)
                 .id(slider_id)
                 .dragging(is_dragging)
-                .width(slider_const::standard_length())
+                .width(Length::Units(sidebar_const::WIDTH - 20.0))
                 .on_drag_start(Message::slider_drag_start)
                 .on_change(on_change)
                 .on_drag_end(Message::slider_drag_end),
         ))
-        .spacing(spacing::STANDARD)
+        .spacing(2.0)
 }
 
-/// Build the band selector UI.
-/// Always visible - allows mapping any band to R/G/B channels.
-fn view_band_selector(
-    text_color: Color,
+/// Build sidebar version of band selector.
+fn view_band_selector_sidebar(
+    _text_color: Color,
     widget_state: &WidgetState,
     band_selection: &BandSelection,
     num_bands: usize,
 ) -> Column<'static, Message> {
     let max_band = num_bands.saturating_sub(1) as f32;
 
-    // Band sliders - always active
-    // Note: on_drag_end triggers apply_bands() to regenerate the composite
-    let red_slider = view_band_slider_row(
-        &format!("R <- Band {}", band_selection.red),
-        colors::CHANNEL_RED,
-        max_band,
-        band_selection.red as f32,
-        SliderId::BandRed,
-        widget_state.slider.is_dragging(SliderId::BandRed),
-        |_id, value| Message::start_red_band(value as usize),
-        |v| Message::set_red_band(v as usize),
-    );
-
-    let green_slider = view_band_slider_row(
-        &format!("G <- Band {}", band_selection.green),
-        colors::CHANNEL_GREEN,
-        max_band,
-        band_selection.green as f32,
-        SliderId::BandGreen,
-        widget_state.slider.is_dragging(SliderId::BandGreen),
-        |_id, value| Message::start_green_band(value as usize),
-        |v| Message::set_green_band(v as usize),
-    );
-
-    let blue_slider = view_band_slider_row(
-        &format!("B <- Band {}", band_selection.blue),
-        colors::CHANNEL_BLUE,
-        max_band,
-        band_selection.blue as f32,
-        SliderId::BandBlue,
-        widget_state.slider.is_dragging(SliderId::BandBlue),
-        |_id, value| Message::start_blue_band(value as usize),
-        |v| Message::set_blue_band(v as usize),
-    );
-
-    let reset_btn = button("Reset (0,1,2)")
-        .on_press(Message::reset_bands())
-        .width(btn_const::BAND_RESET_WIDTH);
-
     column()
         .push(Element::new(
-            text(format!("{} channels available", num_bands))
+            text(format!("{} bands", num_bands))
                 .size(text_const::SMALL)
-                .color(text_color),
+                .color(colors::MUTED_TEXT),
         ))
-        .push(Element::new(red_slider))
-        .push(Element::new(green_slider))
-        .push(Element::new(blue_slider))
-        .push(Element::new(reset_btn))
+        .push(Element::new(view_band_slider_compact(
+            "R",
+            colors::CHANNEL_RED,
+            max_band,
+            band_selection.red as f32,
+            SliderId::BandRed,
+            widget_state.slider.is_dragging(SliderId::BandRed),
+            |_id, value| Message::start_red_band(value as usize),
+            |v| Message::set_red_band(v as usize),
+        )))
+        .push(Element::new(view_band_slider_compact(
+            "G",
+            colors::CHANNEL_GREEN,
+            max_band,
+            band_selection.green as f32,
+            SliderId::BandGreen,
+            widget_state.slider.is_dragging(SliderId::BandGreen),
+            |_id, value| Message::start_green_band(value as usize),
+            |v| Message::set_green_band(v as usize),
+        )))
+        .push(Element::new(view_band_slider_compact(
+            "B",
+            colors::CHANNEL_BLUE,
+            max_band,
+            band_selection.blue as f32,
+            SliderId::BandBlue,
+            widget_state.slider.is_dragging(SliderId::BandBlue),
+            |_id, value| Message::start_blue_band(value as usize),
+            |v| Message::set_blue_band(v as usize),
+        )))
+        .push(Element::new(
+            button("Reset (0,1,2)")
+                .on_press(Message::reset_bands())
+                .width(sidebar_const::WIDTH - 20.0),
+        ))
         .spacing(spacing::TIGHT)
 }
 
-/// Helper to build a band slider row.
-fn view_band_slider_row<S, C>(
+/// Compact band slider with colored label.
+fn view_band_slider_compact<S, C>(
     label: &str,
     label_color: Color,
     max_band: f32,
@@ -503,70 +496,30 @@ where
 {
     row()
         .push(Element::new(
-            text(label).size(text_const::SMALL).color(label_color),
+            text(format!("{}: {}", label, value as usize))
+                .size(text_const::SMALL)
+                .color(label_color),
         ))
         .push(Element::new(
             slider(0.0, max_band, value)
                 .id(slider_id)
                 .step(1.0)
                 .dragging(is_dragging)
-                .width(slider_const::compact_length())
+                .width(Length::Units(sidebar_const::WIDTH - 70.0))
                 .on_drag_start(on_drag_start)
                 .on_change(on_change)
                 .on_drag_end(Message::apply_bands),
         ))
-        .spacing(spacing::STANDARD)
-}
-
-/// Helper to build a persistence mode selector row with dropdown.
-/// Shows a label and dropdown for selecting the mode.
-fn view_band_persistence_selector(
-    label: &str,
-    text_color: Color,
-    current_mode: PersistenceMode,
-    is_open: bool,
-) -> Row<'static, Message> {
-    let options = vec![
-        "Reset".to_string(),
-        "Per Image".to_string(),
-        "Keep".to_string(),
-    ];
-    let selected_index = match current_mode {
-        PersistenceMode::Reset => 0,
-        PersistenceMode::PerImage => 1,
-        PersistenceMode::Constant => 2,
-    };
-
-    row()
-        .push(Element::new(
-            text(label).size(text_const::SMALL).color(text_color),
-        ))
-        .push(Element::new(
-            dropdown(options, selected_index)
-                .width(90.0)
-                .open(is_open)
-                .on_open(|| Message::open_band_persistence_dropdown())
-                .on_close(|| Message::close_band_persistence_dropdown())
-                .on_select(|idx| {
-                    let mode = match idx {
-                        0 => PersistenceMode::Reset,
-                        1 => PersistenceMode::PerImage,
-                        _ => PersistenceMode::Constant,
-                    };
-                    Message::set_band_persistence(mode)
-                })
-                .text_color(text_color)
-                .overlay(true), // Render above other content
-        ))
         .spacing(spacing::TIGHT)
 }
 
-/// Helper to build an image settings persistence mode selector row with dropdown.
-fn view_image_settings_persistence_selector(
+/// Persistence mode row with dropdown.
+fn view_persistence_row(
     label: &str,
     text_color: Color,
     current_mode: PersistenceMode,
     is_open: bool,
+    is_band: bool,
 ) -> Row<'static, Message> {
     let options = vec![
         "Reset".to_string(),
@@ -579,26 +532,51 @@ fn view_image_settings_persistence_selector(
         PersistenceMode::Constant => 2,
     };
 
+    let on_open: Box<dyn Fn() -> Message> = if is_band {
+        Box::new(|| Message::open_band_persistence_dropdown())
+    } else {
+        Box::new(|| Message::open_image_settings_persistence_dropdown())
+    };
+
+    let on_close: Box<dyn Fn() -> Message> = if is_band {
+        Box::new(|| Message::close_band_persistence_dropdown())
+    } else {
+        Box::new(|| Message::close_image_settings_persistence_dropdown())
+    };
+
+    let on_select: Box<dyn Fn(usize) -> Message> = if is_band {
+        Box::new(|idx| {
+            let mode = match idx {
+                0 => PersistenceMode::Reset,
+                1 => PersistenceMode::PerImage,
+                _ => PersistenceMode::Constant,
+            };
+            Message::set_band_persistence(mode)
+        })
+    } else {
+        Box::new(|idx| {
+            let mode = match idx {
+                0 => PersistenceMode::Reset,
+                1 => PersistenceMode::PerImage,
+                _ => PersistenceMode::Constant,
+            };
+            Message::set_image_settings_persistence(mode)
+        })
+    };
+
     row()
         .push(Element::new(
             text(label).size(text_const::SMALL).color(text_color),
         ))
         .push(Element::new(
             dropdown(options, selected_index)
-                .width(90.0)
+                .width(80.0)
                 .open(is_open)
-                .on_open(|| Message::open_image_settings_persistence_dropdown())
-                .on_close(|| Message::close_image_settings_persistence_dropdown())
-                .on_select(|idx| {
-                    let mode = match idx {
-                        0 => PersistenceMode::Reset,
-                        1 => PersistenceMode::PerImage,
-                        _ => PersistenceMode::Constant,
-                    };
-                    Message::set_image_settings_persistence(mode)
-                })
+                .on_open(on_open)
+                .on_close(on_close)
+                .on_select(on_select)
                 .text_color(text_color)
-                .overlay(true), // Render above other content
+                .overlay(true),
         ))
         .spacing(spacing::TIGHT)
 }

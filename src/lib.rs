@@ -51,10 +51,7 @@ pub use theme::{Theme, ThemeChoice};
 
 // View building functions
 mod views;
-pub use views::{
-    build_overlay, view_annotation_toolbar, view_counter, view_home, view_image_viewer,
-    view_settings,
-};
+pub use views::{build_overlay, view_counter, view_home, view_image_viewer, view_settings};
 
 // Message handlers
 mod handlers;

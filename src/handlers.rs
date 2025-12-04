@@ -377,6 +377,21 @@ pub fn handle_ui(
             widget_state.scroll.end_drag_x();
             log::debug!("📜 Scrollbar X drag ended");
         }
+        UIMessage::SidebarScrollY(offset) => {
+            let current = widget_state.sidebar_scroll.offset_y;
+            if (current - offset).abs() > threshold::SCROLL_CHANGE {
+                widget_state.sidebar_scroll.set_offset_y(offset);
+                log::debug!("📜 Sidebar scroll Y offset: {:.1}", offset);
+            }
+        }
+        UIMessage::SidebarScrollbarDragStartY => {
+            widget_state.sidebar_scroll.start_drag_y();
+            log::debug!("📜 Sidebar scrollbar Y drag started");
+        }
+        UIMessage::SidebarScrollbarDragEndY => {
+            widget_state.sidebar_scroll.end_drag_y();
+            log::debug!("📜 Sidebar scrollbar Y drag ended");
+        }
         UIMessage::ToggleDebugInfo => {
             *show_debug_info = !*show_debug_info;
             log::debug!(

@@ -212,6 +212,8 @@ pub struct WidgetState {
     pub slider: SliderState,
     /// Main content scroll state
     pub scroll: ScrollState,
+    /// Sidebar scroll state (independent from main content)
+    pub sidebar_scroll: ScrollState,
     /// Dropdown states
     pub dropdown: DropdownState,
     /// Collapsible container states
