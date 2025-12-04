@@ -332,6 +332,16 @@ impl Renderer {
         (self.width, self.height)
     }
 
+    /// Get the viewport width.
+    pub fn viewport_width(&self) -> f32 {
+        self.width as f32
+    }
+
+    /// Get the viewport height.
+    pub fn viewport_height(&self) -> f32 {
+        self.height as f32
+    }
+
     /// Get a reference to the GPU context.
     pub fn gpu_context(&self) -> &GpuContext {
         &self.gpu_ctx

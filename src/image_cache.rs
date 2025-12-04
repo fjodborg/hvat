@@ -94,6 +94,14 @@ impl ImageCache {
         self.sources.get(index).map(|(name, _)| name.clone())
     }
 
+    /// Get the dimensions of a cached image.
+    /// Returns (width, height) if the image is in cache, None otherwise.
+    pub fn get_dimensions(&self, index: usize) -> Option<(u32, u32)> {
+        self.decoded_cache
+            .get(&index)
+            .map(|handle| (handle.width(), handle.height()))
+    }
+
     /// Load images from sources (native: folder path, WASM: file bytes).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load_from_folder(&mut self, folder: &std::path::Path) -> Result<usize, String> {

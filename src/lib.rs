@@ -34,6 +34,13 @@ pub use hyperspectral::{
 // UI constants for consistent styling
 pub mod ui_constants;
 
+// Annotation import/export formats
+pub mod formats;
+
+// Project file management
+mod project;
+pub use project::{Project, ProjectError, ProjectSettings, PROJECT_VERSION};
+
 // ============================================================================
 // Application Modules (modularized from hvat_app.rs)
 // ============================================================================
@@ -41,8 +48,9 @@ pub mod ui_constants;
 // Message types and constructors
 mod message;
 pub use message::{
-    AnnotationMessage, BandMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage,
-    ImageViewMessage, Message, NavigationMessage, Tab, UIMessage,
+    AnnotationMessage, BandMessage, CounterMessage, ExportFormat, ImageLoadMessage,
+    ImageSettingsMessage, ImageViewMessage, Message, NavigationMessage, PersistenceMode,
+    ProjectMessage, Tab, UIMessage,
 };
 
 // Theme system
@@ -51,13 +59,14 @@ pub use theme::{Theme, ThemeChoice};
 
 // View building functions
 mod views;
-pub use views::{build_overlay, view_counter, view_home, view_image_viewer, view_settings};
+pub use views::{build_overlay, view_counter, view_export_modal_content, view_home, view_image_viewer, view_settings};
 
 // Message handlers
 mod handlers;
 pub use handlers::{
     handle_annotation, handle_band, handle_counter, handle_image_load, handle_image_settings,
-    handle_image_view, handle_navigation, handle_ui, AnnotationState, ImageLoadState,
+    handle_image_view, handle_navigation, handle_project, handle_ui, AnnotationState,
+    ImageLoadState, ProjectState,
 };
 
 // WASM file loading utilities

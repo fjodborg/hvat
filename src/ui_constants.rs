@@ -17,6 +17,8 @@ pub mod text {
     pub const SECTION_HEADER: f32 = 16.0;
     /// Body text and labels
     pub const BODY: f32 = 14.0;
+    /// Normal text (alias for body)
+    pub const NORMAL: f32 = 14.0;
     /// Small text, status messages, help text
     pub const SMALL: f32 = 12.0;
     /// Extra large for emphasis (e.g., counter display)
@@ -29,6 +31,8 @@ pub mod spacing {
     pub const TIGHT: f32 = 5.0;
     /// Standard spacing between related elements
     pub const STANDARD: f32 = 10.0;
+    /// Normal spacing (alias for standard)
+    pub const NORMAL: f32 = 10.0;
     /// Medium spacing for visual grouping
     pub const MEDIUM: f32 = 15.0;
     /// Large spacing between major sections
@@ -182,6 +186,14 @@ pub mod annotation {
 /// Common UI colors (beyond theme colors).
 pub mod colors {
     use super::Color;
+
+    /// Accent color for highlights and headers
+    pub const ACCENT: Color = Color {
+        r: 0.3,
+        g: 0.6,
+        b: 0.9,
+        a: 1.0,
+    };
 
     /// Default gray for annotations without category
     pub const DEFAULT_GRAY: Color = Color {

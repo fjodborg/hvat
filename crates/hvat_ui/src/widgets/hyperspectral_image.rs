@@ -199,22 +199,31 @@ impl<Message> HyperspectralImage<Message> {
     }
 
     /// Convert screen coordinates to image coordinates.
+    /// Returns coordinates with origin at top-left corner of image (standard image coords).
     fn screen_to_image(&self, screen_x: f32, screen_y: f32, bounds: &Rectangle) -> (f32, f32) {
         let center_x = bounds.x + bounds.width / 2.0;
         let center_y = bounds.y + bounds.height / 2.0;
         let rel_x = screen_x - center_x;
         let rel_y = screen_y - center_y;
-        let img_x = (rel_x - self.pan.0) / self.zoom;
-        let img_y = (rel_y - self.pan.1) / self.zoom;
+        // These are center-relative coordinates (0,0 = image center)
+        let center_rel_x = (rel_x - self.pan.0) / self.zoom;
+        let center_rel_y = (rel_y - self.pan.1) / self.zoom;
+        // Convert to top-left origin coordinates by adding half the image dimensions
+        let img_x = center_rel_x + self.handle.width() as f32 / 2.0;
+        let img_y = center_rel_y + self.handle.height() as f32 / 2.0;
         (img_x, img_y)
     }
 
     /// Convert image coordinates to screen coordinates.
+    /// Expects coordinates with origin at top-left corner of image (standard image coords).
     fn image_to_screen(&self, img_x: f32, img_y: f32, bounds: &Rectangle) -> (f32, f32) {
         let center_x = bounds.x + bounds.width / 2.0;
         let center_y = bounds.y + bounds.height / 2.0;
-        let screen_x = center_x + img_x * self.zoom + self.pan.0;
-        let screen_y = center_y + img_y * self.zoom + self.pan.1;
+        // Convert from top-left origin to center-relative coordinates
+        let center_rel_x = img_x - self.handle.width() as f32 / 2.0;
+        let center_rel_y = img_y - self.handle.height() as f32 / 2.0;
+        let screen_x = center_x + center_rel_x * self.zoom + self.pan.0;
+        let screen_y = center_y + center_rel_y * self.zoom + self.pan.1;
         (screen_x, screen_y)
     }
 

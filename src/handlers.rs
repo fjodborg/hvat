@@ -7,8 +7,8 @@ use crate::annotation::{AnnotationStore, AnnotationTool, Category, DrawingState,
 use crate::hyperspectral::{BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
 use crate::message::{
-    AnnotationMessage, BandMessage, CounterMessage, ImageLoadMessage, ImageSettingsMessage,
-    ImageViewMessage, NavigationMessage, PersistenceMode, Tab, UIMessage,
+    AnnotationMessage, BandMessage, CounterMessage, ExportFormat, ImageLoadMessage,
+    ImageSettingsMessage, ImageViewMessage, NavigationMessage, PersistenceMode, Tab, UIMessage,
 };
 use crate::theme::Theme;
 use crate::ui_constants::{threshold, zoom as zoom_const};
@@ -449,6 +449,10 @@ pub struct AnnotationState<'a> {
     pub image_key: String,
     pub zoom: f32,
     pub status_message: &'a mut Option<String>,
+    pub export_dialog_open: &'a mut bool,
+    pub export_format: &'a mut ExportFormat,
+    pub widget_state: &'a mut WidgetState,
+    pub image_cache: &'a ImageCache,
 }
 
 impl<'a> AnnotationState<'a> {
@@ -634,28 +638,32 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 log::info!("🗑️ Deleted annotation {}", id);
             }
         }
+        AnnotationMessage::OpenExportDialog => {
+            *state.export_dialog_open = true;
+            log::debug!("📤 Export dialog opened");
+        }
+        AnnotationMessage::CloseExportDialog => {
+            *state.export_dialog_open = false;
+            state.widget_state.dropdown.close_export_format();
+            log::debug!("📤 Export dialog closed");
+        }
+        AnnotationMessage::SetExportFormat(format) => {
+            *state.export_format = format;
+            log::debug!("📤 Export format set to: {}", format.name());
+        }
+        AnnotationMessage::ToggleExportFormatDropdown => {
+            state.widget_state.dropdown.toggle_export_format();
+            log::debug!("📤 Export format dropdown toggled");
+        }
+        AnnotationMessage::PerformExport => {
+            log::info!("📤 PerformExport message received, calling perform_export");
+            perform_export(state);
+            *state.export_dialog_open = false;
+        }
         AnnotationMessage::ExportJson => {
-            match state.annotations().to_json() {
-                Ok(json) => {
-                    log::info!(
-                        "📤 Exported {} annotations to JSON",
-                        state.annotations().len()
-                    );
-                    // In a real app, we'd save to file or clipboard
-                    // For now, just log a preview
-                    if json.len() > 200 {
-                        log::debug!("JSON preview: {}...", &json[..200]);
-                    } else {
-                        log::debug!("JSON: {}", json);
-                    }
-                    *state.status_message =
-                        Some(format!("Exported {} annotations", state.annotations().len()));
-                }
-                Err(e) => {
-                    log::error!("Failed to export JSON: {}", e);
-                    *state.status_message = Some(format!("Export failed: {}", e));
-                }
-            }
+            // Legacy: now opens export dialog instead
+            *state.export_dialog_open = true;
+            log::debug!("📤 Export dialog opened (via legacy ExportJson)");
         }
         AnnotationMessage::ImportJson => {
             // TODO: Implement file picker for importing
@@ -668,6 +676,166 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             log::info!("🗑️ Cleared {} annotations", count);
             *state.status_message = Some(format!("Cleared {} annotations", count));
         }
+    }
+}
+
+/// Perform the actual export with the selected format.
+fn perform_export(state: &mut AnnotationState) {
+    use crate::formats::{format_by_name, ImageInfo};
+
+    log::info!("📤 perform_export called with format: {:?}", state.export_format);
+
+    let format_name = match state.export_format {
+        ExportFormat::Coco => "COCO",
+        ExportFormat::Yolo => "YOLO",
+        ExportFormat::YoloSegmentation => "YOLO Segmentation",
+        ExportFormat::Datumaro => "Datumaro",
+        ExportFormat::PascalVoc => "Pascal VOC",
+    };
+
+    let Some(format) = format_by_name(format_name) else {
+        log::error!("Unknown export format: {}", format_name);
+        *state.status_message = Some(format!("Unknown format: {}", format_name));
+        return;
+    };
+
+    // Collect all images and their annotations
+    let mut stores: Vec<(ImageInfo, &AnnotationStore)> = Vec::new();
+
+    for i in 0..state.image_cache.len() {
+        if let Some(name) = state.image_cache.get_name(i) {
+            // Get image dimensions from cache
+            let (width, height) = state
+                .image_cache
+                .get_dimensions(i)
+                .unwrap_or((1920, 1080)); // Default if not available
+
+            let image_info = ImageInfo::new(&name, width, height);
+
+            // Get annotations for this image (empty store if none)
+            static EMPTY: std::sync::OnceLock<AnnotationStore> = std::sync::OnceLock::new();
+            let annotations = state
+                .annotations_map
+                .get(&name)
+                .unwrap_or_else(|| EMPTY.get_or_init(AnnotationStore::new));
+
+            stores.push((image_info, annotations));
+        }
+    }
+
+    log::info!("📤 Collected {} image stores for export", stores.len());
+
+    if stores.is_empty() {
+        log::warn!("📤 No images to export - image_cache.len() = {}", state.image_cache.len());
+        *state.status_message = Some("No images to export".to_string());
+        return;
+    }
+
+    // Perform export
+    match format.export_dataset(&stores) {
+        Ok(result) => {
+            if result.is_empty() {
+                *state.status_message = Some("Export produced no files".to_string());
+                return;
+            }
+
+            // Log warnings if any
+            for warning in &result.warnings {
+                log::warn!("Export warning: {}", warning);
+            }
+
+            // Save files
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                save_export_files_native(&result, format_name, state.status_message);
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                save_export_files_wasm(&result, format_name, state.status_message);
+            }
+        }
+        Err(e) => {
+            log::error!("Export failed: {}", e);
+            *state.status_message = Some(format!("Export failed: {}", e));
+        }
+    }
+}
+
+/// Save export files on native platform using file dialog.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_export_files_native(
+    result: &crate::formats::ExportResult,
+    format_name: &str,
+    status_message: &mut Option<String>,
+) {
+    use std::fs;
+
+    // If single file, use save dialog
+    if result.files.len() == 1 {
+        let (filename, content) = result.files.iter().next().unwrap();
+        let extension = filename.rsplit('.').next().unwrap_or("json");
+
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter(format_name, &[extension])
+            .set_file_name(filename)
+            .save_file()
+        {
+            match fs::write(&path, content) {
+                Ok(()) => {
+                    log::info!("📤 Exported to: {:?}", path);
+                    *status_message = Some(format!("Exported to {}", path.display()));
+                }
+                Err(e) => {
+                    log::error!("Failed to write file: {}", e);
+                    *status_message = Some(format!("Failed to save: {}", e));
+                }
+            }
+        }
+    } else {
+        // Multiple files - ask for directory
+        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+            let mut saved = 0;
+            for (filename, content) in &result.files {
+                let path = dir.join(filename);
+                match fs::write(&path, content) {
+                    Ok(()) => {
+                        saved += 1;
+                        log::debug!("📤 Saved: {:?}", path);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to write {}: {}", filename, e);
+                    }
+                }
+            }
+            log::info!("📤 Exported {} files to: {:?}", saved, dir);
+            *status_message = Some(format!("Exported {} files to {}", saved, dir.display()));
+        }
+    }
+}
+
+/// Save export files on WASM platform using download.
+#[cfg(target_arch = "wasm32")]
+fn save_export_files_wasm(
+    result: &crate::formats::ExportResult,
+    format_name: &str,
+    status_message: &mut Option<String>,
+) {
+    // For WASM, download files
+    if result.files.len() == 1 {
+        let (filename, content) = result.files.iter().next().unwrap();
+        download_json(content, filename);
+        *status_message = Some(format!("Downloaded {}", filename));
+    } else {
+        // Multiple files - create a zip or download each
+        // For simplicity, download the main file (usually the annotation file)
+        // In a full implementation, we'd create a zip
+        for (filename, content) in &result.files {
+            if filename.ends_with(".json") || filename.ends_with(".txt") && filename == "classes.txt"
+            {
+                download_json(content, filename);
+            }
+        }
+        *status_message = Some(format!("Downloaded {} files", result.files.len()));
     }
 }
 
@@ -764,4 +932,319 @@ pub fn handle_band(
             true // Regenerate on reset
         }
     }
+}
+
+// ============================================================================
+// Project State for handler
+// ============================================================================
+
+use crate::hvat_app::ImageSettings;
+use crate::message::ProjectMessage;
+use crate::project::{
+    BandSelectionData, ImageSettingsData, PerImageSettings, PersistenceModeData, Project,
+    ProjectSettings,
+};
+
+/// State needed for project operations.
+pub struct ProjectState<'a> {
+    pub annotations_map: &'a HashMap<String, AnnotationStore>,
+    pub image_cache: &'a ImageCache,
+    pub band_selection: BandSelection,
+    pub image_settings: ImageSettings,
+    pub band_persistence: PersistenceMode,
+    pub image_settings_persistence: PersistenceMode,
+    pub stored_band_selections: &'a HashMap<String, BandSelection>,
+    pub stored_image_settings: &'a HashMap<String, ImageSettings>,
+    pub status_message: &'a mut Option<String>,
+}
+
+/// Handle project messages.
+///
+/// Returns an optional Project that was loaded (caller should apply it to app state).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn handle_project(msg: ProjectMessage, state: &mut ProjectState) -> Option<Project> {
+    match msg {
+        ProjectMessage::SaveProject => {
+            // Build project from current state
+            let project = build_project_from_state(state);
+
+            // Open file dialog for saving
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("HVAT Project", &["hvat"])
+                .set_file_name("project.hvat")
+                .save_file()
+            {
+                match project.save_to_file(&path) {
+                    Ok(()) => {
+                        log::info!("📁 Project saved to: {:?}", path);
+                        *state.status_message = Some(format!(
+                            "Project saved: {} images, {} annotations",
+                            project.image_count(),
+                            project.total_annotation_count()
+                        ));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to save project: {}", e);
+                        *state.status_message = Some(format!("Failed to save: {}", e));
+                    }
+                }
+            }
+            None
+        }
+        ProjectMessage::LoadProject => {
+            // Open file dialog for loading
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("HVAT Project", &["hvat"])
+                .pick_file()
+            {
+                match Project::load_from_file(&path) {
+                    Ok(project) => {
+                        log::info!(
+                            "📁 Project loaded from: {:?} ({} images, {} annotations)",
+                            path,
+                            project.image_count(),
+                            project.total_annotation_count()
+                        );
+                        *state.status_message = Some(format!(
+                            "Project loaded: {} images, {} annotations",
+                            project.image_count(),
+                            project.total_annotation_count()
+                        ));
+                        return Some(project);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load project: {}", e);
+                        *state.status_message = Some(format!("Failed to load: {}", e));
+                    }
+                }
+            }
+            None
+        }
+        ProjectMessage::ProjectSaved(result) => {
+            match result {
+                Ok(path) => {
+                    log::info!("📁 Project saved to: {:?}", path);
+                    *state.status_message = Some("Project saved successfully".to_string());
+                }
+                Err(e) => {
+                    log::error!("Failed to save project: {}", e);
+                    *state.status_message = Some(format!("Failed to save: {}", e));
+                }
+            }
+            None
+        }
+        ProjectMessage::ProjectLoaded(result) => {
+            match result {
+                Ok((path, project)) => {
+                    log::info!("📁 Project loaded from: {:?}", path);
+                    *state.status_message = Some(format!(
+                        "Project loaded: {} images, {} annotations",
+                        project.image_count(),
+                        project.total_annotation_count()
+                    ));
+                    return Some(project);
+                }
+                Err(e) => {
+                    log::error!("Failed to load project: {}", e);
+                    *state.status_message = Some(format!("Failed to load: {}", e));
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Handle project messages for WASM.
+#[cfg(target_arch = "wasm32")]
+pub fn handle_project(msg: ProjectMessage, state: &mut ProjectState) -> Option<Project> {
+    match msg {
+        ProjectMessage::SaveProject | ProjectMessage::DownloadProject => {
+            // Build project and trigger download
+            let project = build_project_from_state(state);
+            match project.to_json() {
+                Ok(json) => {
+                    // Trigger file download via JavaScript
+                    download_json(&json, "project.hvat");
+                    log::info!("📁 Project download triggered");
+                    *state.status_message = Some(format!(
+                        "Project downloaded: {} images, {} annotations",
+                        project.image_count(),
+                        project.total_annotation_count()
+                    ));
+                }
+                Err(e) => {
+                    log::error!("Failed to serialize project: {}", e);
+                    *state.status_message = Some(format!("Failed to save: {}", e));
+                }
+            }
+            None
+        }
+        ProjectMessage::LoadProject => {
+            // Trigger file upload dialog via JavaScript
+            trigger_project_upload();
+            log::info!("📁 Project upload dialog opened");
+            None
+        }
+        ProjectMessage::ProjectUploaded(filename, json_content) => {
+            match Project::from_json(&json_content) {
+                Ok(project) => {
+                    log::info!(
+                        "📁 Project loaded from: {} ({} images, {} annotations)",
+                        filename,
+                        project.image_count(),
+                        project.total_annotation_count()
+                    );
+                    *state.status_message = Some(format!(
+                        "Project loaded: {} images, {} annotations",
+                        project.image_count(),
+                        project.total_annotation_count()
+                    ));
+                    return Some(project);
+                }
+                Err(e) => {
+                    log::error!("Failed to parse project file: {}", e);
+                    *state.status_message = Some(format!("Failed to load: {}", e));
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Build a Project struct from the current application state.
+fn build_project_from_state(state: &ProjectState) -> Project {
+    let mut project = Project::new();
+
+    // Add images from cache
+    for i in 0..state.image_cache.len() {
+        if let Some(name) = state.image_cache.get_name(i) {
+            project.add_image(name);
+        }
+    }
+
+    // Add annotations
+    for (image_name, store) in state.annotations_map {
+        project.set_annotations(image_name.clone(), store.clone());
+    }
+
+    // Set global settings
+    project.settings = ProjectSettings {
+        band_selection: state.band_selection.into(),
+        image_settings: state.image_settings.into(),
+        band_persistence: state.band_persistence.into(),
+        image_settings_persistence: state.image_settings_persistence.into(),
+    };
+
+    // Add per-image settings
+    for (image_name, band_sel) in state.stored_band_selections {
+        project.set_per_image_band_selection(image_name.clone(), *band_sel);
+    }
+    for (image_name, img_settings) in state.stored_image_settings {
+        project.set_per_image_settings(image_name.clone(), *img_settings);
+    }
+
+    project
+}
+
+/// WASM helper: Trigger file download via JavaScript.
+#[cfg(target_arch = "wasm32")]
+fn download_json(json: &str, filename: &str) {
+    use wasm_bindgen::JsCast;
+    use web_sys::{window, Blob, BlobPropertyBag, HtmlAnchorElement, Url};
+
+    let window = window().expect("no window");
+    let document = window.document().expect("no document");
+
+    // Create blob from JSON using str sequence
+    let array = js_sys::Array::new();
+    array.push(&wasm_bindgen::JsValue::from_str(json));
+
+    let mut options = BlobPropertyBag::new();
+    options.type_("application/json");
+
+    let blob = Blob::new_with_str_sequence(&array).expect("create blob");
+    let url = Url::create_object_url_with_blob(&blob).expect("create url");
+
+    // Create download link
+    let a: HtmlAnchorElement = document
+        .create_element("a")
+        .expect("create element")
+        .dyn_into()
+        .expect("cast to anchor");
+    a.set_href(&url);
+    a.set_download(filename);
+    a.click();
+
+    // Clean up
+    let _ = Url::revoke_object_url(&url);
+}
+
+/// WASM helper: Trigger project file upload dialog.
+#[cfg(target_arch = "wasm32")]
+fn trigger_project_upload() {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+    use web_sys::{window, HtmlInputElement};
+
+    let window = window().expect("no window");
+    let document = window.document().expect("no document");
+
+    // Create file input
+    let input: HtmlInputElement = document
+        .create_element("input")
+        .expect("create element")
+        .dyn_into()
+        .expect("cast to input");
+    input.set_type("file");
+    input.set_accept(".hvat,application/json");
+
+    // Set up change handler
+    let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+        let input: HtmlInputElement = event.target().unwrap().dyn_into().unwrap();
+        if let Some(files) = input.files() {
+            if let Some(file) = files.get(0) {
+                let filename = file.name();
+                let reader = web_sys::FileReader::new().expect("create reader");
+
+                let filename_clone = filename.clone();
+                let reader_clone = reader.clone();
+                let onload = Closure::wrap(Box::new(move |_: web_sys::Event| {
+                    if let Ok(result) = reader_clone.result() {
+                        if let Some(text) = result.as_string() {
+                            // Store in pending for next update cycle
+                            store_pending_project(filename_clone.clone(), text);
+                        }
+                    }
+                }) as Box<dyn FnMut(_)>);
+
+                reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                onload.forget();
+
+                let _ = reader.read_as_text(&file);
+            }
+        }
+    }) as Box<dyn FnMut(_)>);
+
+    input.set_onchange(Some(closure.as_ref().unchecked_ref()));
+    closure.forget();
+
+    input.click();
+}
+
+/// WASM: Store pending project for next update cycle.
+#[cfg(target_arch = "wasm32")]
+fn store_pending_project(filename: String, content: String) {
+    use std::sync::Mutex;
+    static PENDING_PROJECT: Mutex<Option<(String, String)>> = Mutex::new(None);
+    if let Ok(mut guard) = PENDING_PROJECT.lock() {
+        *guard = Some((filename, content));
+    }
+}
+
+/// WASM: Take pending project if any.
+#[cfg(target_arch = "wasm32")]
+pub fn take_pending_project() -> Option<(String, String)> {
+    use std::sync::Mutex;
+    static PENDING_PROJECT: Mutex<Option<(String, String)>> = Mutex::new(None);
+    PENDING_PROJECT.lock().ok().and_then(|mut guard| guard.take())
 }

@@ -153,6 +153,51 @@ pub enum BandMessage {
     ResetBands,
 }
 
+/// Available export formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportFormat {
+    #[default]
+    Coco,
+    Yolo,
+    YoloSegmentation,
+    Datumaro,
+    PascalVoc,
+}
+
+impl ExportFormat {
+    /// Get format name for display.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ExportFormat::Coco => "COCO",
+            ExportFormat::Yolo => "YOLO",
+            ExportFormat::YoloSegmentation => "YOLO Seg",
+            ExportFormat::Datumaro => "Datumaro",
+            ExportFormat::PascalVoc => "Pascal VOC",
+        }
+    }
+
+    /// Get all available formats.
+    pub fn all() -> &'static [ExportFormat] {
+        &[
+            ExportFormat::Coco,
+            ExportFormat::Yolo,
+            ExportFormat::YoloSegmentation,
+            ExportFormat::Datumaro,
+            ExportFormat::PascalVoc,
+        ]
+    }
+
+    /// Get format from index.
+    pub fn from_index(index: usize) -> Self {
+        Self::all().get(index).copied().unwrap_or_default()
+    }
+
+    /// Get index of this format.
+    pub fn index(&self) -> usize {
+        Self::all().iter().position(|f| f == self).unwrap_or(0)
+    }
+}
+
 /// Messages for annotation tools and operations.
 #[derive(Debug, Clone)]
 pub enum AnnotationMessage {
@@ -172,9 +217,41 @@ pub enum AnnotationMessage {
     SelectAnnotation(Option<u64>),
     DeleteSelected,
     // Import/Export
+    /// Open export dialog with format selection
+    OpenExportDialog,
+    /// Close export dialog
+    CloseExportDialog,
+    /// Set the export format
+    SetExportFormat(ExportFormat),
+    /// Toggle export format dropdown
+    ToggleExportFormatDropdown,
+    /// Perform the export with the selected format
+    PerformExport,
+    /// Legacy: export to JSON (now opens dialog)
     ExportJson,
     ImportJson,
     ClearAll,
+}
+
+/// Messages for project file management.
+#[derive(Debug, Clone)]
+pub enum ProjectMessage {
+    /// Save project to file
+    SaveProject,
+    /// Load project from file
+    LoadProject,
+    /// Project save completed
+    #[cfg(not(target_arch = "wasm32"))]
+    ProjectSaved(Result<std::path::PathBuf, String>),
+    /// Project load completed
+    #[cfg(not(target_arch = "wasm32"))]
+    ProjectLoaded(Result<(std::path::PathBuf, crate::project::Project), String>),
+    /// WASM: Download project as file
+    #[cfg(target_arch = "wasm32")]
+    DownloadProject,
+    /// WASM: Project file uploaded
+    #[cfg(target_arch = "wasm32")]
+    ProjectUploaded(String, String), // (filename, json_content)
 }
 
 /// Top-level message enum that delegates to sub-message types.
@@ -197,6 +274,8 @@ pub enum Message {
     Band(BandMessage),
     /// Annotation tools and operations
     Annotation(AnnotationMessage),
+    /// Project file management
+    Project(ProjectMessage),
     /// FPS tick (called every frame)
     Tick,
 }
@@ -366,7 +445,22 @@ impl Message {
         Message::Annotation(AnnotationMessage::DeleteSelected)
     }
     pub fn export_annotations() -> Self {
-        Message::Annotation(AnnotationMessage::ExportJson)
+        Message::Annotation(AnnotationMessage::OpenExportDialog)
+    }
+    pub fn open_export_dialog() -> Self {
+        Message::Annotation(AnnotationMessage::OpenExportDialog)
+    }
+    pub fn close_export_dialog() -> Self {
+        Message::Annotation(AnnotationMessage::CloseExportDialog)
+    }
+    pub fn set_export_format(format: ExportFormat) -> Self {
+        Message::Annotation(AnnotationMessage::SetExportFormat(format))
+    }
+    pub fn toggle_export_format_dropdown() -> Self {
+        Message::Annotation(AnnotationMessage::ToggleExportFormatDropdown)
+    }
+    pub fn perform_export() -> Self {
+        Message::Annotation(AnnotationMessage::PerformExport)
     }
     pub fn clear_annotations() -> Self {
         Message::Annotation(AnnotationMessage::ClearAll)
@@ -396,5 +490,13 @@ impl Message {
     }
     pub fn reset_bands() -> Self {
         Message::Band(BandMessage::ResetBands)
+    }
+
+    // Project shortcuts
+    pub fn save_project() -> Self {
+        Message::Project(ProjectMessage::SaveProject)
+    }
+    pub fn load_project() -> Self {
+        Message::Project(ProjectMessage::LoadProject)
     }
 }

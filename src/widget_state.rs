@@ -147,6 +147,8 @@ pub struct DropdownState {
     pub band_persistence_open: bool,
     /// Whether image settings persistence dropdown is open
     pub image_settings_persistence_open: bool,
+    /// Whether export format dropdown is open
+    pub export_format_open: bool,
 }
 
 impl DropdownState {
@@ -158,12 +160,21 @@ impl DropdownState {
     pub fn open_band_persistence(&mut self) {
         self.band_persistence_open = true;
         self.image_settings_persistence_open = false;
+        self.export_format_open = false;
     }
 
     /// Open image settings persistence dropdown and close others.
     pub fn open_image_settings_persistence(&mut self) {
         self.image_settings_persistence_open = true;
         self.band_persistence_open = false;
+        self.export_format_open = false;
+    }
+
+    /// Open export format dropdown and close others.
+    pub fn open_export_format(&mut self) {
+        self.export_format_open = true;
+        self.band_persistence_open = false;
+        self.image_settings_persistence_open = false;
     }
 
     /// Close band persistence dropdown.
@@ -176,10 +187,25 @@ impl DropdownState {
         self.image_settings_persistence_open = false;
     }
 
+    /// Close export format dropdown.
+    pub fn close_export_format(&mut self) {
+        self.export_format_open = false;
+    }
+
+    /// Toggle export format dropdown.
+    pub fn toggle_export_format(&mut self) {
+        if self.export_format_open {
+            self.close_export_format();
+        } else {
+            self.open_export_format();
+        }
+    }
+
     /// Close all dropdowns.
     pub fn close_all(&mut self) {
         self.band_persistence_open = false;
         self.image_settings_persistence_open = false;
+        self.export_format_open = false;
     }
 }
 
@@ -303,10 +329,10 @@ mod tests {
         state.set_offset_x(30.0);
         assert_eq!(state.offset_x, 30.0);
 
-        state.start_drag_y();
+        state.start_drag_y(100.0);
         assert!(state.is_dragging_y);
 
-        state.start_drag_x();
+        state.start_drag_x(50.0);
         assert!(state.is_dragging_x);
 
         state.end_drag_y();

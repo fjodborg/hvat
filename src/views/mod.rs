@@ -15,5 +15,5 @@ mod settings;
 
 pub use home::view_home;
 pub use counter::view_counter;
-pub use image_viewer::{view_image_viewer, build_overlay};
+pub use image_viewer::{view_image_viewer, view_export_modal_content, build_overlay};
 pub use settings::view_settings;

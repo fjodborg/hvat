@@ -2,7 +2,7 @@
 
 use crate::annotation::{AnnotationStore, AnnotationTool, DrawingState, Shape};
 use crate::hyperspectral::BandSelection;
-use crate::message::{Message, PersistenceMode};
+use crate::message::{ExportFormat, Message, PersistenceMode};
 use crate::theme::Theme;
 use crate::ui_constants::{
     annotation as ann_const, colors, image_viewer as img_const, padding,
@@ -120,6 +120,60 @@ fn view_annotation_toolbar_compact(
                 .wrap(), // Wrap to next line if not enough space
         ))
         .spacing(spacing::TIGHT)
+}
+
+/// Build the export modal content (centered dialog with format selection).
+pub fn view_export_modal_content(current_format: ExportFormat) -> Column<'static, Message> {
+    column()
+        .push(Element::new(
+            text("Export Annotations")
+                .size(20.0)
+                .color(colors::ACCENT),
+        ))
+        .push(Element::new(
+            text("Select export format:")
+                .size(text_const::NORMAL)
+                .color(colors::MUTED_TEXT),
+        ))
+        // Format selection buttons (radio-button style)
+        .push(Element::new(view_format_buttons(current_format)))
+        .push(Element::new(
+            row()
+                .push(Element::new(
+                    button("Export")
+                        .on_press(Message::perform_export())
+                        .width(120.0),
+                ))
+                .push(Element::new(
+                    button("Cancel")
+                        .on_press(Message::close_export_dialog())
+                        .width(100.0),
+                ))
+                .spacing(spacing::NORMAL),
+        ))
+        .spacing(spacing::NORMAL)
+}
+
+/// Build format selection buttons.
+fn view_format_buttons(current_format: ExportFormat) -> Column<'static, Message> {
+    let mut col = column().spacing(spacing::TIGHT);
+
+    for format in ExportFormat::all() {
+        let is_selected = *format == current_format;
+        let label = if is_selected {
+            format!("[{}]", format.name())
+        } else {
+            format.name().to_string()
+        };
+
+        col = col.push(Element::new(
+            button(label)
+                .on_press(Message::set_export_format(*format))
+                .width(200.0),
+        ));
+    }
+
+    col
 }
 
 /// Build the image viewer view.

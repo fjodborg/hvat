@@ -15,9 +15,9 @@ use crate::handlers::{
 };
 use crate::hyperspectral::{generate_test_hyperspectral, BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
-use crate::message::{Message, PersistenceMode, Tab};
+use crate::message::{ExportFormat, Message, PersistenceMode, Tab};
 use crate::theme::Theme;
-use crate::views::{build_overlay, view_counter, view_home, view_image_viewer, view_settings};
+use crate::views::{build_overlay, view_counter, view_export_modal_content, view_home, view_image_viewer, view_settings};
 use crate::widget_state::WidgetState;
 use hvat_ui::Overlay;
 
@@ -25,8 +25,8 @@ use hvat_ui::Overlay;
 use crate::message::ImageLoadMessage;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_file::take_wasm_pending_files;
-use hvat_ui::widgets::{button, column, container, row, scrollable, text, Element, ScrollDirection};
-use hvat_ui::{Application, BandSelectionUniform, Color, HyperspectralImageHandle, ImageHandle};
+use hvat_ui::widgets::{button, column, container, modal, row, scrollable, text, Element, ScrollDirection};
+use hvat_ui::{Application, Color, HyperspectralImageHandle, ImageHandle};
 use std::collections::HashMap;
 use web_time::Instant;
 
@@ -96,6 +96,12 @@ pub struct HvatApp {
     stored_band_selections: HashMap<String, BandSelection>,
     /// Stored image settings per image (for PerImage mode)
     stored_image_settings: HashMap<String, ImageSettings>,
+
+    // === Export settings ===
+    /// Whether export dialog is visible
+    export_dialog_open: bool,
+    /// Currently selected export format
+    export_format: ExportFormat,
 }
 
 /// Stored image manipulation settings for per-image persistence.
@@ -169,6 +175,8 @@ impl Application for HvatApp {
             image_settings_persistence: PersistenceMode::default(),
             stored_band_selections: HashMap::new(),
             stored_image_settings: HashMap::new(),
+            export_dialog_open: false,
+            export_format: ExportFormat::default(),
         }
     }
 
@@ -267,6 +275,10 @@ impl Application for HvatApp {
                     image_key,
                     zoom: self.zoom,
                     status_message: &mut self.status_message,
+                    export_dialog_open: &mut self.export_dialog_open,
+                    export_format: &mut self.export_format,
+                    widget_state: &mut self.widget_state,
+                    image_cache: &self.image_cache,
                 };
                 handle_annotation(msg, &mut state);
                 // Rebuild overlay if annotations changed
@@ -284,6 +296,28 @@ impl Application for HvatApp {
                 );
                 // Band selection is passed to the GPU widget each frame,
                 // so changes are reflected immediately with no CPU work needed
+            }
+            Message::Project(msg) => {
+                use crate::handlers::{handle_project, ProjectState};
+                let mut state = ProjectState {
+                    annotations_map: &self.annotations_map,
+                    image_cache: &self.image_cache,
+                    band_selection: self.band_selection,
+                    image_settings: ImageSettings {
+                        brightness: self.brightness,
+                        contrast: self.contrast,
+                        gamma: self.gamma,
+                        hue_shift: self.hue_shift,
+                    },
+                    band_persistence: self.band_persistence,
+                    image_settings_persistence: self.image_settings_persistence,
+                    stored_band_selections: &self.stored_band_selections,
+                    stored_image_settings: &self.stored_image_settings,
+                    status_message: &mut self.status_message,
+                };
+                if let Some(project) = handle_project(msg, &mut state) {
+                    self.apply_loaded_project(project);
+                }
             }
             Message::Tick => {
                 self.frame_count += 1;
@@ -399,15 +433,27 @@ impl Application for HvatApp {
             .on_drag_start_x(Message::scrollbar_drag_start_x)
             .on_drag_end_x(Message::scrollbar_drag_end_x);
 
+        // Main app container wrapped with export modal
+        // The modal renders as an overlay on top when visible
+        let main_content = container(Element::new(
+            column()
+                .push(Element::new(header))
+                .push(Element::new(scrollable_content))
+                .spacing(20.0),
+        ))
+        .padding(30.0)
+        .fill();
+
+        // Wrap main content with export modal
+        // Modal uses overlay rendering so it appears on top when visible
         Element::new(
-            container(Element::new(
-                column()
-                    .push(Element::new(header))
-                    .push(Element::new(scrollable_content))
-                    .spacing(20.0),
-            ))
-            .padding(30.0)
-            .fill(),
+            modal(
+                Element::new(main_content),
+                Element::new(view_export_modal_content(self.export_format)),
+            )
+            .visible(self.export_dialog_open)
+            .width(320.0)
+            .on_backdrop_click(Message::close_export_dialog),
         )
     }
 }
@@ -531,5 +577,53 @@ impl HvatApp {
                 // Keep current settings (do nothing)
             }
         }
+    }
+
+    /// Apply a loaded project to the application state.
+    fn apply_loaded_project(&mut self, project: crate::project::Project) {
+        // Apply annotations
+        self.annotations_map.clear();
+        for (image_name, mut store) in project.annotations {
+            // Mark as dirty since deserialization skips the dirty flag
+            store.mark_dirty();
+            self.annotations_map.insert(image_name, store);
+        }
+
+        // Apply global settings
+        self.band_selection = project.settings.band_selection.into();
+        let img_settings: ImageSettings = project.settings.image_settings.into();
+        self.brightness = img_settings.brightness;
+        self.contrast = img_settings.contrast;
+        self.gamma = img_settings.gamma;
+        self.hue_shift = img_settings.hue_shift;
+
+        // Apply persistence modes
+        self.band_persistence = project.settings.band_persistence.into();
+        self.image_settings_persistence = project.settings.image_settings_persistence.into();
+
+        // Apply per-image settings
+        self.stored_band_selections.clear();
+        self.stored_image_settings.clear();
+        for (image_name, settings) in project.per_image_settings {
+            if let Some(band_sel) = settings.band_selection {
+                self.stored_band_selections.insert(image_name.clone(), band_sel.into());
+            }
+            if let Some(img_set) = settings.image_settings {
+                self.stored_image_settings.insert(image_name, img_set.into());
+            }
+        }
+
+        // Note: We don't load image files here - the user can load them separately
+        // The project just stores filenames for reference
+        log::info!(
+            "Applied project: {} annotations across {} images",
+            self.annotations_map.values().map(|s| s.len()).sum::<usize>(),
+            self.annotations_map.len()
+        );
+
+        // Force overlay rebuild by invalidating cached key
+        self.cached_overlay_image_key = String::new();
+        // Rebuild overlay for current image
+        self.rebuild_overlay_if_dirty();
     }
 }
