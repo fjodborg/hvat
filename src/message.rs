@@ -115,6 +115,14 @@ pub enum UIMessage {
     // Persistence modes for settings across image navigation
     SetBandPersistence(PersistenceMode),
     SetImageSettingsPersistence(PersistenceMode),
+    // Dropdown state
+    OpenBandPersistenceDropdown,
+    CloseBandPersistenceDropdown,
+    OpenImageSettingsPersistenceDropdown,
+    CloseImageSettingsPersistenceDropdown,
+    // Collapsible state
+    ToggleImageSettingsCollapsed,
+    ToggleBandSettingsCollapsed,
 }
 
 /// Messages for hyperspectral band selection.
@@ -293,6 +301,26 @@ impl Message {
     }
     pub fn set_image_settings_persistence(mode: PersistenceMode) -> Self {
         Message::UI(UIMessage::SetImageSettingsPersistence(mode))
+    }
+    // Dropdown shortcuts
+    pub fn open_band_persistence_dropdown() -> Self {
+        Message::UI(UIMessage::OpenBandPersistenceDropdown)
+    }
+    pub fn close_band_persistence_dropdown() -> Self {
+        Message::UI(UIMessage::CloseBandPersistenceDropdown)
+    }
+    pub fn open_image_settings_persistence_dropdown() -> Self {
+        Message::UI(UIMessage::OpenImageSettingsPersistenceDropdown)
+    }
+    pub fn close_image_settings_persistence_dropdown() -> Self {
+        Message::UI(UIMessage::CloseImageSettingsPersistenceDropdown)
+    }
+    // Collapsible shortcuts
+    pub fn toggle_image_settings_collapsed() -> Self {
+        Message::UI(UIMessage::ToggleImageSettingsCollapsed)
+    }
+    pub fn toggle_band_settings_collapsed() -> Self {
+        Message::UI(UIMessage::ToggleBandSettingsCollapsed)
     }
 
     // Annotation shortcuts

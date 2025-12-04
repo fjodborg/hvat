@@ -10,7 +10,7 @@ use winit::window::Window;
 
 use hvat_gpu::{
     ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform,
-    HyperspectralPipeline, HyperspectralGpuData, BandSelectionUniform,
+    HyperspectralPipeline, HyperspectralGpuData, BandSelectionUniform, Pipeline,
 };
 use wgpu::util::DeviceExt;
 use glyphon::{
@@ -42,6 +42,11 @@ impl Color {
 
     pub fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
+    }
+
+    /// Create a new color with the same RGB but different alpha.
+    pub fn with_alpha(self, a: f32) -> Self {
+        Self { a, ..self }
     }
 }
 
@@ -227,6 +232,10 @@ pub struct Renderer {
     height: u32,
     /// Draw commands collected during draw phase
     commands: Vec<DrawCommand>,
+    /// Overlay draw commands (rendered after main UI, above other content)
+    overlay_commands: Vec<DrawCommand>,
+    /// Whether we're currently recording to overlay
+    recording_overlay: bool,
     /// Render state for coordinate transforms
     state: RenderState,
     /// Cache for GPU textures (keyed by ImageHandle unique ID)
@@ -303,6 +312,8 @@ impl Renderer {
             width,
             height,
             commands: Vec::new(),
+            overlay_commands: Vec::new(),
+            recording_overlay: false,
             state: RenderState::new(),
             texture_cache: HashMap::new(),
             hyperspectral_cache: HashMap::new(),
@@ -563,6 +574,27 @@ impl Renderer {
     }
 
     // =========================================================================
+    // Overlay API
+    // =========================================================================
+
+    /// Begin recording draw commands to the overlay layer.
+    /// Overlay commands are rendered after all main UI commands,
+    /// appearing above other content (except scrollbars).
+    pub fn begin_overlay(&mut self) {
+        self.recording_overlay = true;
+    }
+
+    /// End recording to the overlay layer.
+    pub fn end_overlay(&mut self) {
+        self.recording_overlay = false;
+    }
+
+    /// Check if currently recording to overlay.
+    pub fn is_recording_overlay(&self) -> bool {
+        self.recording_overlay
+    }
+
+    // =========================================================================
     // Internal helpers
     // =========================================================================
 
@@ -605,12 +637,22 @@ impl Renderer {
             };
 
             if should_draw {
-                self.commands.push(DrawCommand::PushClip(clip));
-                self.commands.push(cmd);
-                self.commands.push(DrawCommand::PopClip);
+                let target = if self.recording_overlay {
+                    &mut self.overlay_commands
+                } else {
+                    &mut self.commands
+                };
+                target.push(DrawCommand::PushClip(clip));
+                target.push(cmd);
+                target.push(DrawCommand::PopClip);
             }
         } else {
-            self.commands.push(cmd);
+            let target = if self.recording_overlay {
+                &mut self.overlay_commands
+            } else {
+                &mut self.commands
+            };
+            target.push(cmd);
         }
     }
 
@@ -639,6 +681,8 @@ impl Renderer {
     pub fn render<Message>(&mut self, element: Element<Message>) {
         // Clear state from last frame
         self.commands.clear();
+        self.overlay_commands.clear();
+        self.recording_overlay = false;
         self.state.clear();
 
         // Layout the element
@@ -694,8 +738,17 @@ impl Renderer {
         // Render images first (they're background content)
         self.render_images(&mut encoder, &view);
 
-        // Render UI elements (rects and text)
-        self.render_ui(&mut encoder, &view);
+        // Render all shapes first (main UI + overlay)
+        // Overlay shapes include opaque backgrounds that will cover main UI
+        self.render_ui_shapes(&mut encoder, &view);
+        if !self.overlay_commands.is_empty() {
+            self.render_overlay_shapes(&mut encoder, &view);
+        }
+
+        // Render ALL text in one pass (main + overlay combined)
+        // Main text that's covered by overlay shapes won't be visible
+        // because the overlay shapes are opaque and rendered first
+        self.render_all_text(&mut encoder, &view);
 
         // Submit and present
         self.gpu_ctx.queue.submit(std::iter::once(encoder.finish()));
@@ -938,292 +991,267 @@ impl Renderer {
         }
     }
 
-    fn render_ui(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        // Collect text items with their clip bounds
-        struct TextItem {
-            text: String,
-            x: f32,
-            y: f32,
-            size: f32,
-            color: Color,
-            clip: Option<Rectangle>,
-        }
-        let mut text_items: Vec<TextItem> = Vec::new();
-        let mut current_clip: Option<Rectangle> = None;
+    fn render_ui_shapes(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        let batches = self.build_shape_batches(&self.commands.clone(), true);
+        self.render_shape_batches(encoder, view, &batches, "UI Shapes Pass");
+    }
 
-        for cmd in &self.commands {
+    fn render_overlay_shapes(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        let batches = self.build_shape_batches(&self.overlay_commands.clone(), false);
+        self.render_shape_batches(encoder, view, &batches, "Overlay Shapes Pass");
+    }
+
+    /// Build shape batches from draw commands.
+    /// If `include_all_shapes` is true, includes lines and circles; otherwise only rects.
+    fn build_shape_batches(&self, commands: &[DrawCommand], include_all_shapes: bool) -> Vec<ShapeBatch> {
+        let window_width = self.width as f32;
+        let window_height = self.height as f32;
+        let mut batches: Vec<ShapeBatch> = Vec::new();
+        let mut current_scissor: Option<(u32, u32, u32, u32)> = None;
+
+        for cmd in commands {
             match cmd {
-                DrawCommand::PushClip(rect) => current_clip = Some(*rect),
-                DrawCommand::PopClip => current_clip = None,
-                DrawCommand::DrawText { text, position, color, size } => {
-                    text_items.push(TextItem {
-                        text: text.clone(),
-                        x: position.x,
-                        y: position.y,
-                        size: *size,
-                        color: *color,
-                        clip: current_clip,
-                    });
+                DrawCommand::PushClip(rect) => {
+                    current_scissor = self.clip_to_scissor(rect);
+                }
+                DrawCommand::PopClip => {
+                    current_scissor = None;
+                }
+                DrawCommand::FillRect { rect, color } => {
+                    let batch = get_or_create_batch(&mut batches, current_scissor);
+                    ColorPipeline::append_rect(
+                        &mut batch.vertices, &mut batch.indices,
+                        rect.x, rect.y, rect.width, rect.height,
+                        [color.r, color.g, color.b, color.a],
+                        window_width, window_height,
+                    );
+                }
+                DrawCommand::StrokeRect { rect, color, width } => {
+                    let batch = get_or_create_batch(&mut batches, current_scissor);
+                    ColorPipeline::append_stroke_rect(
+                        &mut batch.vertices, &mut batch.indices,
+                        rect.x, rect.y, rect.width, rect.height,
+                        [color.r, color.g, color.b, color.a],
+                        *width,
+                        window_width, window_height,
+                    );
+                }
+                DrawCommand::DrawLine { x1, y1, x2, y2, color, width } if include_all_shapes => {
+                    let batch = get_or_create_batch(&mut batches, current_scissor);
+                    ColorPipeline::append_line(
+                        &mut batch.vertices, &mut batch.indices,
+                        *x1, *y1, *x2, *y2,
+                        [color.r, color.g, color.b, color.a],
+                        *width,
+                        window_width, window_height,
+                    );
+                }
+                DrawCommand::FillCircle { cx, cy, radius, color } if include_all_shapes => {
+                    let batch = get_or_create_batch(&mut batches, current_scissor);
+                    ColorPipeline::append_circle(
+                        &mut batch.vertices, &mut batch.indices,
+                        *cx, *cy, *radius,
+                        [color.r, color.g, color.b, color.a],
+                        window_width, window_height,
+                    );
+                }
+                DrawCommand::StrokeCircle { cx, cy, radius, color, width } if include_all_shapes => {
+                    let batch = get_or_create_batch(&mut batches, current_scissor);
+                    ColorPipeline::append_stroke_circle(
+                        &mut batch.vertices, &mut batch.indices,
+                        *cx, *cy, *radius,
+                        [color.r, color.g, color.b, color.a],
+                        *width,
+                        window_width, window_height,
+                    );
                 }
                 _ => {}
             }
         }
+        batches
+    }
 
-        // Render shapes using batched approach
-        // Group shapes by scissor state and batch vertices/indices
-        {
-            // Collect batches: each batch has a scissor rect and accumulated geometry
-            struct ShapeBatch {
-                scissor: Option<(u32, u32, u32, u32)>,
-                vertices: Vec<ColorVertex>,
-                indices: Vec<u16>,
+    /// Render shape batches to the GPU.
+    fn render_shape_batches(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        batches: &[ShapeBatch],
+        label: &str,
+    ) {
+        if batches.is_empty() {
+            return;
+        }
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        pass.set_pipeline(self.color_pipeline.render_pipeline());
+
+        for batch in batches {
+            if batch.vertices.is_empty() {
+                continue;
             }
 
-            let mut batches: Vec<ShapeBatch> = Vec::new();
-            let mut current_scissor: Option<(u32, u32, u32, u32)> = None;
+            // Set scissor
+            if let Some((x, y, w, h)) = batch.scissor {
+                pass.set_scissor_rect(x, y, w, h);
+            } else {
+                pass.set_scissor_rect(0, 0, self.width, self.height);
+            }
 
-            // Helper to get or create current batch
-            let window_width = self.width as f32;
-            let window_height = self.height as f32;
+            // Create GPU buffers
+            let vertex_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Shape Vertex Buffer"),
+                contents: bytemuck::cast_slice(&batch.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let index_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Shape Index Buffer"),
+                contents: bytemuck::cast_slice(&batch.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
-            // Helper closure to get or create batch for current scissor
-            let mut get_batch = |batches: &mut Vec<ShapeBatch>, scissor: Option<(u32, u32, u32, u32)>| -> usize {
-                if let Some(idx) = batches.iter().position(|b| b.scissor == scissor) {
-                    idx
-                } else {
-                    batches.push(ShapeBatch {
-                        scissor,
-                        vertices: Vec::new(),
-                        indices: Vec::new(),
-                    });
-                    batches.len() - 1
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw_indexed(0..batch.indices.len() as u32, 0, 0..1);
+        }
+    }
+
+    /// Render ALL text from both main UI and overlay in a single pass.
+    /// This avoids issues with glyphon's prepare() being called multiple times.
+    /// Main text that overlaps with overlay fill rectangles is excluded to prevent
+    /// it from appearing on top of the overlay.
+    fn render_all_text(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        // Collect overlay fill rects (opaque areas that hide main text)
+        let overlay_rects: Vec<Rectangle> = self.overlay_commands.iter()
+            .filter_map(|cmd| match cmd {
+                DrawCommand::FillRect { rect, .. } => Some(*rect),
+                _ => None,
+            })
+            .collect();
+
+        // Collect text from main commands (excluding text under overlay) and overlay commands
+        let mut text_items: Vec<TextItem> = Vec::new();
+        collect_text_items(&self.commands, &mut text_items, &overlay_rects);
+        collect_text_items(&self.overlay_commands, &mut text_items, &[]);
+
+        if text_items.is_empty() {
+            return;
+        }
+
+        // Update viewport
+        self.viewport.update(
+            &self.gpu_ctx.queue,
+            Resolution {
+                width: self.width,
+                height: self.height,
+            },
+        );
+
+        // Create buffers for each text item
+        let mut buffers: Vec<Buffer> = Vec::with_capacity(text_items.len());
+
+        for item in &text_items {
+            let metrics = Metrics::new(item.size, item.size * 1.2);
+            let mut buffer = Buffer::new(&mut self.font_system, metrics);
+            buffer.set_size(&mut self.font_system, Some(self.width as f32), Some(self.height as f32));
+            buffer.set_text(
+                &mut self.font_system,
+                &item.text,
+                &Attrs::new(),
+                Shaping::Advanced,
+            );
+            buffer.shape_until_scroll(&mut self.font_system, false);
+            buffers.push(buffer);
+        }
+
+        // Create text areas from buffers
+        let mut text_areas: Vec<TextArea> = Vec::with_capacity(text_items.len());
+        for (i, item) in text_items.iter().enumerate() {
+            let bounds = if let Some(clip) = item.clip {
+                TextBounds {
+                    left: clip.x as i32,
+                    top: clip.y as i32,
+                    right: (clip.x + clip.width) as i32,
+                    bottom: (clip.y + clip.height) as i32,
+                }
+            } else {
+                TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: self.width as i32,
+                    bottom: self.height as i32,
                 }
             };
 
-            for cmd in &self.commands {
-                match cmd {
-                    DrawCommand::PushClip(rect) => {
-                        current_scissor = self.clip_to_scissor(rect);
-                    }
-                    DrawCommand::PopClip => {
-                        current_scissor = None;
-                    }
-                    DrawCommand::FillRect { rect, color } => {
-                        let idx = get_batch(&mut batches, current_scissor);
-                        let batch = &mut batches[idx];
-                        ColorPipeline::append_rect(
-                            &mut batch.vertices, &mut batch.indices,
-                            rect.x, rect.y, rect.width, rect.height,
-                            [color.r, color.g, color.b, color.a],
-                            window_width, window_height,
-                        );
-                    }
-                    DrawCommand::StrokeRect { rect, color, width } => {
-                        let idx = get_batch(&mut batches, current_scissor);
-                        let batch = &mut batches[idx];
-                        ColorPipeline::append_stroke_rect(
-                            &mut batch.vertices, &mut batch.indices,
-                            rect.x, rect.y, rect.width, rect.height,
-                            [color.r, color.g, color.b, color.a],
-                            *width,
-                            window_width, window_height,
-                        );
-                    }
-                    DrawCommand::DrawLine { x1, y1, x2, y2, color, width } => {
-                        let idx = get_batch(&mut batches, current_scissor);
-                        let batch = &mut batches[idx];
-                        ColorPipeline::append_line(
-                            &mut batch.vertices, &mut batch.indices,
-                            *x1, *y1, *x2, *y2,
-                            [color.r, color.g, color.b, color.a],
-                            *width,
-                            window_width, window_height,
-                        );
-                    }
-                    DrawCommand::FillCircle { cx, cy, radius, color } => {
-                        let idx = get_batch(&mut batches, current_scissor);
-                        let batch = &mut batches[idx];
-                        ColorPipeline::append_circle(
-                            &mut batch.vertices, &mut batch.indices,
-                            *cx, *cy, *radius,
-                            [color.r, color.g, color.b, color.a],
-                            window_width, window_height,
-                        );
-                    }
-                    DrawCommand::StrokeCircle { cx, cy, radius, color, width } => {
-                        let idx = get_batch(&mut batches, current_scissor);
-                        let batch = &mut batches[idx];
-                        ColorPipeline::append_stroke_circle(
-                            &mut batch.vertices, &mut batch.indices,
-                            *cx, *cy, *radius,
-                            [color.r, color.g, color.b, color.a],
-                            *width,
-                            window_width, window_height,
-                        );
-                    }
-                    _ => {}
-                }
-            }
+            text_areas.push(TextArea {
+                buffer: &buffers[i],
+                left: item.x,
+                top: item.y,
+                scale: 1.0,
+                bounds,
+                default_color: GlyphonColor::rgba(
+                    (item.color.r * 255.0) as u8,
+                    (item.color.g * 255.0) as u8,
+                    (item.color.b * 255.0) as u8,
+                    (item.color.a * 255.0) as u8,
+                ),
+                custom_glyphs: &[],
+            });
+        }
 
-            // Render all batches - one GPU buffer pair per scissor state
-            if !batches.is_empty() {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("UI Rects Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
+        // Prepare text for rendering
+        if let Err(e) = self.text_renderer.prepare(
+            &self.gpu_ctx.device,
+            &self.gpu_ctx.queue,
+            &mut self.font_system,
+            &mut self.text_atlas,
+            &self.viewport,
+            text_areas,
+            &mut self.swash_cache,
+        ) {
+            log::error!("Failed to prepare text: {:?}", e);
+        }
 
-                pass.set_pipeline(&self.color_pipeline.render_pipeline);
+        // Render text
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("All Text Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
-                for batch in &batches {
-                    if batch.vertices.is_empty() {
-                        continue;
-                    }
-
-                    // Set scissor
-                    if let Some((x, y, w, h)) = batch.scissor {
-                        pass.set_scissor_rect(x, y, w, h);
-                    } else {
-                        pass.set_scissor_rect(0, 0, self.width, self.height);
-                    }
-
-                    // Create buffers for this batch (one allocation per scissor state, not per shape)
-                    let vertex_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Batched Shape Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&batch.vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-
-                    let index_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Batched Shape Index Buffer"),
-                        contents: bytemuck::cast_slice(&batch.indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-
-                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..batch.indices.len() as u32, 0, 0..1);
-                }
+            if let Err(e) = self.text_renderer.render(&self.text_atlas, &self.viewport, &mut pass) {
+                log::error!("Failed to render text: {:?}", e);
             }
         }
 
-        // Render text using glyphon with TextBounds for clipping
-        if !text_items.is_empty() {
-            // Update viewport
-            self.viewport.update(
-                &self.gpu_ctx.queue,
-                Resolution {
-                    width: self.width,
-                    height: self.height,
-                },
-            );
-
-            // Create text areas for each text item
-            let mut text_areas: Vec<TextArea> = Vec::new();
-            let mut buffers: Vec<Buffer> = Vec::new();
-
-            for item in &text_items {
-                // Create a buffer for this text
-                let mut buffer = Buffer::new(
-                    &mut self.font_system,
-                    Metrics::new(item.size, item.size * 1.2),
-                );
-                buffer.set_size(&mut self.font_system, Some(self.width as f32), Some(self.height as f32));
-                buffer.set_text(
-                    &mut self.font_system,
-                    &item.text,
-                    &Attrs::new(),
-                    Shaping::Advanced,
-                );
-                buffer.shape_until_scroll(&mut self.font_system, false);
-                buffers.push(buffer);
-            }
-
-            // Create text areas from buffers
-            for (i, item) in text_items.iter().enumerate() {
-                let bounds = if let Some(clip) = item.clip {
-                    // Use clip bounds for text clipping - this is the key feature of glyphon!
-                    TextBounds {
-                        left: clip.x as i32,
-                        top: clip.y as i32,
-                        right: (clip.x + clip.width) as i32,
-                        bottom: (clip.y + clip.height) as i32,
-                    }
-                } else {
-                    // No clip - use full viewport
-                    TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: self.width as i32,
-                        bottom: self.height as i32,
-                    }
-                };
-
-                text_areas.push(TextArea {
-                    buffer: &buffers[i],
-                    left: item.x,
-                    top: item.y,
-                    scale: 1.0,
-                    bounds,
-                    default_color: GlyphonColor::rgba(
-                        (item.color.r * 255.0) as u8,
-                        (item.color.g * 255.0) as u8,
-                        (item.color.b * 255.0) as u8,
-                        (item.color.a * 255.0) as u8,
-                    ),
-                    custom_glyphs: &[],
-                });
-            }
-
-            // Prepare text for rendering
-            if let Err(e) = self.text_renderer.prepare(
-                &self.gpu_ctx.device,
-                &self.gpu_ctx.queue,
-                &mut self.font_system,
-                &mut self.text_atlas,
-                &self.viewport,
-                text_areas,
-                &mut self.swash_cache,
-            ) {
-                log::error!("Failed to prepare text: {:?}", e);
-            }
-
-            // Render text
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("UI Text Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-
-                if let Err(e) = self.text_renderer.render(&self.text_atlas, &self.viewport, &mut pass) {
-                    log::error!("Failed to render text: {:?}", e);
-                }
-            }
-
-            // Trim atlas to free unused space
-            self.text_atlas.trim();
-        }
+        // Trim atlas to free unused space
+        self.text_atlas.trim();
     }
 }
 
@@ -1233,4 +1261,72 @@ fn rects_overlap(a: &Rectangle, b: &Rectangle) -> bool {
     a.x + a.width > b.x &&
     a.y < b.y + b.height &&
     a.y + a.height > b.y
+}
+
+/// A batch of shapes sharing the same scissor state.
+struct ShapeBatch {
+    scissor: Option<(u32, u32, u32, u32)>,
+    vertices: Vec<ColorVertex>,
+    indices: Vec<u16>,
+}
+
+/// Get or create a batch for the given scissor state.
+fn get_or_create_batch(batches: &mut Vec<ShapeBatch>, scissor: Option<(u32, u32, u32, u32)>) -> &mut ShapeBatch {
+    // Find existing batch with same scissor, or create new one
+    let idx = if let Some(pos) = batches.iter().position(|b| b.scissor == scissor) {
+        pos
+    } else {
+        batches.push(ShapeBatch {
+            scissor,
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        });
+        batches.len() - 1
+    };
+    &mut batches[idx]
+}
+
+/// A text item collected for rendering.
+struct TextItem {
+    text: String,
+    x: f32,
+    y: f32,
+    size: f32,
+    color: Color,
+    clip: Option<Rectangle>,
+}
+
+/// Collect text items from draw commands.
+/// If `exclude_rects` is non-empty, text overlapping those rectangles is skipped.
+fn collect_text_items(commands: &[DrawCommand], items: &mut Vec<TextItem>, exclude_rects: &[Rectangle]) {
+    let mut current_clip: Option<Rectangle> = None;
+    for cmd in commands {
+        match cmd {
+            DrawCommand::PushClip(rect) => current_clip = Some(*rect),
+            DrawCommand::PopClip => current_clip = None,
+            DrawCommand::DrawText { text, position, color, size } => {
+                // Skip text that overlaps with exclusion rects
+                if !exclude_rects.is_empty() {
+                    let text_rect = Rectangle::new(
+                        position.x,
+                        position.y,
+                        text.len() as f32 * size * 0.6,  // Approximate width
+                        *size * 1.2,                      // Approximate height
+                    );
+                    if exclude_rects.iter().any(|r| rects_overlap(&text_rect, r)) {
+                        continue;
+                    }
+                }
+                items.push(TextItem {
+                    text: text.clone(),
+                    x: position.x,
+                    y: position.y,
+                    size: *size,
+                    color: *color,
+                    clip: current_clip,
+                });
+            }
+            _ => {}
+        }
+    }
 }

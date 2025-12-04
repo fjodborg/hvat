@@ -11,8 +11,8 @@ use crate::ui_constants::{
 use crate::views::helpers::tool_button;
 use crate::widget_state::WidgetState;
 use hvat_ui::widgets::{
-    button, column, container, hyperspectral_image, row, slider, text, Column, Element, Row,
-    SliderId,
+    button, collapsible, column, container, dropdown, hyperspectral_image, row, slider, text,
+    Column, Element, Row, SliderId,
 };
 use hvat_ui::{
     BandSelectionUniform, Color, HyperspectralImageHandle, ImageAdjustments, Length, Overlay,
@@ -251,12 +251,96 @@ pub fn view_image_viewer<'a>(
                 ))
                 .spacing(spacing::STANDARD),
         ))
-        // Image manipulation controls with sliders
+        // Image Settings - collapsible (closed by default)
         .push(Element::new(
-            text("Image Settings:")
+            collapsible(
+                "Image Settings",
+                Element::new(view_image_settings_content(
+                    text_color,
+                    brightness,
+                    contrast,
+                    gamma,
+                    hue_shift,
+                    widget_state,
+                )),
+            )
+            .collapsed(widget_state.collapsible.image_settings_collapsed)
+            .on_toggle(|_| Message::toggle_image_settings_collapsed())
+            .text_color(text_color)
+            .header_color(theme.accent_color().with_alpha(0.3)),
+        ))
+        // Annotation toolbar
+        .push(Element::new(
+            text("Annotation Tools:")
                 .size(text_const::BODY)
                 .color(theme.accent_color()),
         ))
+        .push(Element::new(view_annotation_toolbar(
+            drawing_state.tool,
+            text_color,
+        )))
+        // Annotation info
+        .push(Element::new(
+            text(format!(
+                "Annotations: {} | Tool: {:?} | {}",
+                annotations.len(),
+                drawing_state.tool,
+                if drawing_state.is_drawing {
+                    "Drawing..."
+                } else {
+                    "Ready"
+                }
+            ))
+            .size(text_const::SMALL)
+            .color(text_color),
+        ))
+        // Band Selection - collapsible (open by default)
+        .push(Element::new(
+            collapsible(
+                "Band Selection (RGB Mapping)",
+                Element::new(view_band_selector(
+                    text_color,
+                    widget_state,
+                    band_selection,
+                    num_bands,
+                )),
+            )
+            .collapsed(widget_state.collapsible.band_settings_collapsed)
+            .on_toggle(|_| Message::toggle_band_settings_collapsed())
+            .text_color(text_color)
+            .header_color(theme.accent_color().with_alpha(0.3)),
+        ))
+        // Persistence mode selectors
+        .push(Element::new(
+            text("Settings Persistence:")
+                .size(text_const::BODY)
+                .color(theme.accent_color()),
+        ))
+        .push(Element::new(view_band_persistence_selector(
+            "Bands:",
+            text_color,
+            band_persistence,
+            widget_state.dropdown.band_persistence_open,
+        )))
+        .push(Element::new(view_image_settings_persistence_selector(
+            "Image:",
+            text_color,
+            image_settings_persistence,
+            widget_state.dropdown.image_settings_persistence_open,
+        )))
+        .spacing(spacing::TIGHT + 3.0) // 8.0 = TIGHT(5) + 3
+}
+
+/// Build the image settings content (for inside collapsible).
+fn view_image_settings_content(
+    text_color: Color,
+    brightness: f32,
+    contrast: f32,
+    gamma: f32,
+    hue_shift: f32,
+    widget_state: &WidgetState,
+) -> Column<'static, Message> {
+    column()
         // Brightness slider
         .push(Element::new(view_slider_row(
             &format!("Brightness: {:.2}", brightness),
@@ -307,62 +391,7 @@ pub fn view_image_viewer<'a>(
                 .on_press(Message::reset_image_settings())
                 .width(btn_const::WIDE_WIDTH),
         ))
-        // Annotation toolbar
-        .push(Element::new(
-            text("Annotation Tools:")
-                .size(text_const::BODY)
-                .color(theme.accent_color()),
-        ))
-        .push(Element::new(view_annotation_toolbar(
-            drawing_state.tool,
-            text_color,
-        )))
-        // Annotation info
-        .push(Element::new(
-            text(format!(
-                "Annotations: {} | Tool: {:?} | {}",
-                annotations.len(),
-                drawing_state.tool,
-                if drawing_state.is_drawing {
-                    "Drawing..."
-                } else {
-                    "Ready"
-                }
-            ))
-            .size(text_const::SMALL)
-            .color(text_color),
-        ))
-        // Band selection (always visible)
-        .push(Element::new(
-            text("Band Selection (RGB Mapping):")
-                .size(text_const::BODY)
-                .color(theme.accent_color()),
-        ))
-        .push(Element::new(view_band_selector(
-            text_color,
-            widget_state,
-            band_selection,
-            num_bands,
-        )))
-        // Persistence mode selectors
-        .push(Element::new(
-            text("Settings Persistence:")
-                .size(text_const::BODY)
-                .color(theme.accent_color()),
-        ))
-        .push(Element::new(view_persistence_selector(
-            "Bands:",
-            text_color,
-            band_persistence,
-            Message::set_band_persistence,
-        )))
-        .push(Element::new(view_persistence_selector(
-            "Image:",
-            text_color,
-            image_settings_persistence,
-            Message::set_image_settings_persistence,
-        )))
-        .spacing(spacing::TIGHT + 3.0) // 8.0 = TIGHT(5) + 3
+        .spacing(spacing::TIGHT)
 }
 
 /// Helper to build an image settings slider row.
@@ -489,50 +518,87 @@ where
         .spacing(spacing::STANDARD)
 }
 
-/// Helper to build a persistence mode selector row.
-/// Shows a label and a row of buttons for each mode (radio-button style).
-fn view_persistence_selector<F>(
+/// Helper to build a persistence mode selector row with dropdown.
+/// Shows a label and dropdown for selecting the mode.
+fn view_band_persistence_selector(
     label: &str,
     text_color: Color,
     current_mode: PersistenceMode,
-    on_select: F,
-) -> Row<'static, Message>
-where
-    F: Fn(PersistenceMode) -> Message + Clone + 'static,
-{
-    // Helper to create a mode button
-    let mode_btn = |mode: PersistenceMode, name: &str, on_select: F| {
-        let is_selected = current_mode == mode;
-        // Style differently if selected (by adding selection indicator in text)
-        if is_selected {
-            button(format!("[{}]", name))
-                .width(btn_const::XCOMPACT_WIDTH + 10.0)
-                .on_press(on_select(mode))
-        } else {
-            button(name)
-                .width(btn_const::XCOMPACT_WIDTH)
-                .on_press(on_select(mode))
-        }
+    is_open: bool,
+) -> Row<'static, Message> {
+    let options = vec![
+        "Reset".to_string(),
+        "Per Image".to_string(),
+        "Keep".to_string(),
+    ];
+    let selected_index = match current_mode {
+        PersistenceMode::Reset => 0,
+        PersistenceMode::PerImage => 1,
+        PersistenceMode::Constant => 2,
     };
 
     row()
         .push(Element::new(
             text(label).size(text_const::SMALL).color(text_color),
         ))
-        .push(Element::new(mode_btn(
-            PersistenceMode::Reset,
-            "Reset",
-            on_select.clone(),
-        )))
-        .push(Element::new(mode_btn(
-            PersistenceMode::PerImage,
-            "PerImg",
-            on_select.clone(),
-        )))
-        .push(Element::new(mode_btn(
-            PersistenceMode::Constant,
-            "Keep",
-            on_select,
-        )))
+        .push(Element::new(
+            dropdown(options, selected_index)
+                .width(90.0)
+                .open(is_open)
+                .on_open(|| Message::open_band_persistence_dropdown())
+                .on_close(|| Message::close_band_persistence_dropdown())
+                .on_select(|idx| {
+                    let mode = match idx {
+                        0 => PersistenceMode::Reset,
+                        1 => PersistenceMode::PerImage,
+                        _ => PersistenceMode::Constant,
+                    };
+                    Message::set_band_persistence(mode)
+                })
+                .text_color(text_color)
+                .overlay(true), // Render above other content
+        ))
+        .spacing(spacing::TIGHT)
+}
+
+/// Helper to build an image settings persistence mode selector row with dropdown.
+fn view_image_settings_persistence_selector(
+    label: &str,
+    text_color: Color,
+    current_mode: PersistenceMode,
+    is_open: bool,
+) -> Row<'static, Message> {
+    let options = vec![
+        "Reset".to_string(),
+        "Per Image".to_string(),
+        "Keep".to_string(),
+    ];
+    let selected_index = match current_mode {
+        PersistenceMode::Reset => 0,
+        PersistenceMode::PerImage => 1,
+        PersistenceMode::Constant => 2,
+    };
+
+    row()
+        .push(Element::new(
+            text(label).size(text_const::SMALL).color(text_color),
+        ))
+        .push(Element::new(
+            dropdown(options, selected_index)
+                .width(90.0)
+                .open(is_open)
+                .on_open(|| Message::open_image_settings_persistence_dropdown())
+                .on_close(|| Message::close_image_settings_persistence_dropdown())
+                .on_select(|idx| {
+                    let mode = match idx {
+                        0 => PersistenceMode::Reset,
+                        1 => PersistenceMode::PerImage,
+                        _ => PersistenceMode::Constant,
+                    };
+                    Message::set_image_settings_persistence(mode)
+                })
+                .text_color(text_color)
+                .overlay(true), // Render above other content
+        ))
         .spacing(spacing::TIGHT)
 }

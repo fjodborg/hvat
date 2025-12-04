@@ -124,6 +124,81 @@ impl ScrollState {
     }
 }
 
+/// Transient state for dropdown widgets.
+#[derive(Debug, Clone, Default)]
+pub struct DropdownState {
+    /// Whether band persistence dropdown is open
+    pub band_persistence_open: bool,
+    /// Whether image settings persistence dropdown is open
+    pub image_settings_persistence_open: bool,
+}
+
+impl DropdownState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Open band persistence dropdown and close others.
+    pub fn open_band_persistence(&mut self) {
+        self.band_persistence_open = true;
+        self.image_settings_persistence_open = false;
+    }
+
+    /// Open image settings persistence dropdown and close others.
+    pub fn open_image_settings_persistence(&mut self) {
+        self.image_settings_persistence_open = true;
+        self.band_persistence_open = false;
+    }
+
+    /// Close band persistence dropdown.
+    pub fn close_band_persistence(&mut self) {
+        self.band_persistence_open = false;
+    }
+
+    /// Close image settings persistence dropdown.
+    pub fn close_image_settings_persistence(&mut self) {
+        self.image_settings_persistence_open = false;
+    }
+
+    /// Close all dropdowns.
+    pub fn close_all(&mut self) {
+        self.band_persistence_open = false;
+        self.image_settings_persistence_open = false;
+    }
+}
+
+/// Transient state for collapsible containers.
+#[derive(Debug, Clone)]
+pub struct CollapsibleState {
+    /// Whether image settings section is collapsed
+    pub image_settings_collapsed: bool,
+    /// Whether band settings section is collapsed
+    pub band_settings_collapsed: bool,
+}
+
+impl Default for CollapsibleState {
+    fn default() -> Self {
+        Self {
+            image_settings_collapsed: true,  // Closed by default
+            band_settings_collapsed: false,  // Open by default
+        }
+    }
+}
+
+impl CollapsibleState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn toggle_image_settings(&mut self) {
+        self.image_settings_collapsed = !self.image_settings_collapsed;
+    }
+
+    pub fn toggle_band_settings(&mut self) {
+        self.band_settings_collapsed = !self.band_settings_collapsed;
+    }
+}
+
 /// Combined widget state manager.
 ///
 /// This struct aggregates all transient UI state in one place,
@@ -137,6 +212,10 @@ pub struct WidgetState {
     pub slider: SliderState,
     /// Main content scroll state
     pub scroll: ScrollState,
+    /// Dropdown states
+    pub dropdown: DropdownState,
+    /// Collapsible container states
+    pub collapsible: CollapsibleState,
 }
 
 impl WidgetState {

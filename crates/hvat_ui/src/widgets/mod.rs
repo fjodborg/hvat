@@ -2,9 +2,11 @@
 
 mod button;
 mod canvas;
+mod collapsible;
 mod column;
 mod config;
 mod container;
+mod dropdown;
 mod flex;
 mod hyperspectral_image;
 mod image;
@@ -16,9 +18,11 @@ mod text;
 
 pub use button::{button, Button};
 pub use canvas::{canvas, Canvas, Program};
+pub use collapsible::{collapsible, Collapsible};
 pub use column::{column, Column};
 pub use config::{ButtonConfig, ScrollbarConfig, ScrollDirection, SliderConfig};
 pub use container::{container, Container};
+pub use dropdown::{dropdown, Dropdown};
 pub use flex::{flex_column, flex_row, FlexDirection, FlexLayout};
 pub use hyperspectral_image::{hyperspectral_image, HyperspectralImage};
 pub use image::{image, Image};

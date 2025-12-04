@@ -390,11 +390,39 @@ pub fn handle_ui(
         }
         UIMessage::SetBandPersistence(mode) => {
             *band_persistence = mode;
+            // Close dropdown after selection
+            widget_state.dropdown.close_band_persistence();
             log::debug!("🎚️ Band persistence mode: {:?}", mode);
         }
         UIMessage::SetImageSettingsPersistence(mode) => {
             *image_settings_persistence = mode;
+            // Close dropdown after selection
+            widget_state.dropdown.close_image_settings_persistence();
             log::debug!("🎚️ Image settings persistence mode: {:?}", mode);
+        }
+        UIMessage::OpenBandPersistenceDropdown => {
+            widget_state.dropdown.open_band_persistence();
+            log::debug!("📋 Band persistence dropdown opened");
+        }
+        UIMessage::CloseBandPersistenceDropdown => {
+            widget_state.dropdown.close_band_persistence();
+            log::debug!("📋 Band persistence dropdown closed");
+        }
+        UIMessage::OpenImageSettingsPersistenceDropdown => {
+            widget_state.dropdown.open_image_settings_persistence();
+            log::debug!("📋 Image settings persistence dropdown opened");
+        }
+        UIMessage::CloseImageSettingsPersistenceDropdown => {
+            widget_state.dropdown.close_image_settings_persistence();
+            log::debug!("📋 Image settings persistence dropdown closed");
+        }
+        UIMessage::ToggleImageSettingsCollapsed => {
+            widget_state.collapsible.toggle_image_settings();
+            log::debug!("📦 Image settings collapsed: {}", widget_state.collapsible.image_settings_collapsed);
+        }
+        UIMessage::ToggleBandSettingsCollapsed => {
+            widget_state.collapsible.toggle_band_settings();
+            log::debug!("📦 Band settings collapsed: {}", widget_state.collapsible.band_settings_collapsed);
         }
     }
 }
