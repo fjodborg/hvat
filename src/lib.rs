@@ -82,7 +82,10 @@ pub use wasm_file::{open_wasm_file_picker, take_wasm_pending_files};
 
 // HVAT application (shared between native and WASM)
 mod hvat_app;
-pub use hvat_app::HvatApp;
+pub use hvat_app::{
+    ExportState, FpsTracker, HvatApp, ImageSettings, ImageViewTransform, PersistenceState, Tag,
+    TaggingState,
+};
 
 // ============================================================================
 // Platform Entry Points

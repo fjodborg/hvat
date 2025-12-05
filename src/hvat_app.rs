@@ -41,15 +41,10 @@ pub struct HvatApp {
     counter: i32,
 
     // === Image viewer - transform state ===
-    zoom: f32,
-    pan_x: f32,
-    pan_y: f32,
+    transform: ImageViewTransform,
 
     // === Image manipulation settings ===
-    brightness: f32,
-    contrast: f32,
-    gamma: f32,
-    hue_shift: f32,
+    image_settings: ImageSettings,
 
     // === Settings ===
     show_debug_info: bool,
@@ -87,31 +82,16 @@ pub struct HvatApp {
     cached_overlay_image_key: String,
 
     // === FPS tracking ===
-    frame_count: u32,
-    last_fps_time: Instant,
-    fps: f32,
+    fps_tracker: FpsTracker,
 
     // === Persistence settings ===
-    /// How band selection should persist across image navigation
-    band_persistence: PersistenceMode,
-    /// How image settings (brightness, contrast, etc.) should persist
-    image_settings_persistence: PersistenceMode,
-    /// Stored band selections per image (for PerImage mode)
-    stored_band_selections: HashMap<String, BandSelection>,
-    /// Stored image settings per image (for PerImage mode)
-    stored_image_settings: HashMap<String, ImageSettings>,
+    persistence: PersistenceState,
 
     // === Export settings ===
-    /// Whether export dialog is visible
-    export_dialog_open: bool,
-    /// Currently selected export format
-    export_format: ExportFormat,
+    export: ExportState,
 
     // === Image tagging ===
-    /// Available tag definitions
-    available_tags: Vec<Tag>,
-    /// Tags applied to each image (keyed by image name/path, value is set of tag IDs)
-    image_tags: HashMap<String, HashSet<u32>>,
+    tagging: TaggingState,
 }
 
 /// Stored image manipulation settings for per-image persistence.
@@ -121,6 +101,95 @@ pub struct ImageSettings {
     pub contrast: f32,
     pub gamma: f32,
     pub hue_shift: f32,
+}
+
+/// Image view transform state (zoom and pan).
+#[derive(Clone, Copy, Debug)]
+pub struct ImageViewTransform {
+    pub zoom: f32,
+    pub pan_x: f32,
+    pub pan_y: f32,
+}
+
+impl Default for ImageViewTransform {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            pan_x: 0.0,
+            pan_y: 0.0,
+        }
+    }
+}
+
+/// FPS tracking state.
+#[derive(Debug)]
+pub struct FpsTracker {
+    pub frame_count: u32,
+    pub last_fps_time: Instant,
+    pub fps: f32,
+}
+
+impl Default for FpsTracker {
+    fn default() -> Self {
+        Self {
+            frame_count: 0,
+            last_fps_time: Instant::now(),
+            fps: 0.0,
+        }
+    }
+}
+
+impl FpsTracker {
+    /// Update FPS tracking. Call once per frame.
+    pub fn update(&mut self) {
+        self.frame_count += 1;
+        let elapsed = self.last_fps_time.elapsed();
+        if elapsed.as_secs_f32() >= 1.0 {
+            self.fps = self.frame_count as f32 / elapsed.as_secs_f32();
+            self.frame_count = 0;
+            self.last_fps_time = Instant::now();
+        }
+    }
+}
+
+/// Settings persistence state.
+#[derive(Debug, Default)]
+pub struct PersistenceState {
+    /// How band selection should persist across image navigation
+    pub band_mode: PersistenceMode,
+    /// How image settings (brightness, contrast, etc.) should persist
+    pub image_settings_mode: PersistenceMode,
+    /// Stored band selections per image (for PerImage mode)
+    pub stored_band_selections: HashMap<String, BandSelection>,
+    /// Stored image settings per image (for PerImage mode)
+    pub stored_image_settings: HashMap<String, ImageSettings>,
+}
+
+/// Export dialog state.
+#[derive(Debug)]
+pub struct ExportState {
+    /// Whether export dialog is visible
+    pub dialog_open: bool,
+    /// Currently selected export format
+    pub format: ExportFormat,
+}
+
+impl Default for ExportState {
+    fn default() -> Self {
+        Self {
+            dialog_open: false,
+            format: ExportFormat::default(),
+        }
+    }
+}
+
+/// Image tagging state.
+#[derive(Debug, Default)]
+pub struct TaggingState {
+    /// Available tag definitions
+    pub available_tags: Vec<Tag>,
+    /// Tags applied to each image (keyed by image name/path, value is set of tag IDs)
+    pub image_tags: HashMap<String, HashSet<u32>>,
 }
 
 /// An image tag definition.
@@ -182,13 +251,8 @@ impl Application for HvatApp {
         Self {
             current_tab: Tab::Home,
             counter: 0,
-            zoom: 1.0,
-            pan_x: 0.0,
-            pan_y: 0.0,
-            brightness: 0.0,
-            contrast: 1.0,
-            gamma: 1.0,
-            hue_shift: 0.0,
+            transform: ImageViewTransform::default(),
+            image_settings: ImageSettings::default(),
             show_debug_info: false,
             theme: Theme::dark(),
             hyperspectral_image: hyper_image,
@@ -208,17 +272,10 @@ impl Application for HvatApp {
             drawing_state: DrawingState::new(),
             cached_overlay: Overlay::new(),
             cached_overlay_image_key: String::new(),
-            frame_count: 0,
-            last_fps_time: Instant::now(),
-            fps: 0.0,
-            band_persistence: PersistenceMode::default(),
-            image_settings_persistence: PersistenceMode::default(),
-            stored_band_selections: HashMap::new(),
-            stored_image_settings: HashMap::new(),
-            export_dialog_open: false,
-            export_format: ExportFormat::default(),
-            available_tags: Vec::new(),
-            image_tags: HashMap::new(),
+            fps_tracker: FpsTracker::default(),
+            persistence: PersistenceState::default(),
+            export: ExportState::default(),
+            tagging: TaggingState::default(),
         }
     }
 
@@ -259,28 +316,28 @@ impl Application for HvatApp {
                         // For 1:1, we need actual_scale = 1.0
                         // actual_scale = fit_scale * zoom
                         // zoom = 1.0 / fit_scale
-                        self.zoom = (1.0 / fit_scale).clamp(crate::ui_constants::zoom::MIN, crate::ui_constants::zoom::MAX);
-                        self.pan_x = 0.0;
-                        self.pan_y = 0.0;
-                        log::debug!("🔍 Reset to 1:1 pixel ratio: zoom = {:.2}x", self.zoom);
+                        self.transform.zoom = (1.0 / fit_scale).clamp(crate::ui_constants::zoom::MIN, crate::ui_constants::zoom::MAX);
+                        self.transform.pan_x = 0.0;
+                        self.transform.pan_y = 0.0;
+                        log::debug!("🔍 Reset to 1:1 pixel ratio: zoom = {:.2}x", self.transform.zoom);
                     }
                     return;
                 }
                 handle_image_view(
                     msg,
-                    &mut self.zoom,
-                    &mut self.pan_x,
-                    &mut self.pan_y,
+                    &mut self.transform.zoom,
+                    &mut self.transform.pan_x,
+                    &mut self.transform.pan_y,
                     &mut self.widget_state,
                 );
             }
             Message::ImageSettings(msg) => {
                 handle_image_settings(
                     msg,
-                    &mut self.brightness,
-                    &mut self.contrast,
-                    &mut self.gamma,
-                    &mut self.hue_shift,
+                    &mut self.image_settings.brightness,
+                    &mut self.image_settings.contrast,
+                    &mut self.image_settings.gamma,
+                    &mut self.image_settings.hue_shift,
                     &mut self.widget_state,
                 );
             }
@@ -315,9 +372,9 @@ impl Application for HvatApp {
                     hyperspectral_handle: &mut self.hyperspectral_handle,
                     band_selection: &mut self.band_selection,
                     status_message: &mut self.status_message,
-                    zoom: &mut self.zoom,
-                    pan_x: &mut self.pan_x,
-                    pan_y: &mut self.pan_y,
+                    zoom: &mut self.transform.zoom,
+                    pan_x: &mut self.transform.pan_x,
+                    pan_y: &mut self.transform.pan_y,
                 };
                 handle_image_load(msg, &mut state);
 
@@ -349,9 +406,9 @@ impl Application for HvatApp {
                     let name = self.widget_state.tag_input.new_tag_name.trim().to_string();
                     if !name.is_empty() {
                         // Find next tag ID
-                        let next_id = self.available_tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                        let next_id = self.tagging.available_tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
                         // Add tag to available tags
-                        self.available_tags.push(Tag::new(next_id, &name));
+                        self.tagging.available_tags.push(Tag::new(next_id, &name));
                         log::info!("🏷️ Added new tag: {} (id={})", name, next_id);
                     }
                     // Always clear input and unfocus after submit (even if empty)
@@ -362,8 +419,8 @@ impl Application for HvatApp {
                     &mut self.widget_state,
                     &mut self.show_debug_info,
                     &mut self.theme,
-                    &mut self.band_persistence,
-                    &mut self.image_settings_persistence,
+                    &mut self.persistence.band_mode,
+                    &mut self.persistence.image_settings_mode,
                 );
             }
             Message::Tag(msg) => {
@@ -371,7 +428,7 @@ impl Application for HvatApp {
                 match msg {
                     TagMessage::ToggleTagByHotkey(num) => {
                         // Map hotkey number (1-9) to tag ID based on sorted order
-                        let mut tag_ids: Vec<u32> = self.available_tags.iter().map(|t| t.id).collect();
+                        let mut tag_ids: Vec<u32> = self.tagging.available_tags.iter().map(|t| t.id).collect();
                         tag_ids.sort();
                         let index = (num as usize).saturating_sub(1);
                         if let Some(&tag_id) = tag_ids.get(index) {
@@ -396,8 +453,8 @@ impl Application for HvatApp {
                         }
                     }
                     TagMessage::AddTag(name) => {
-                        let next_id = self.available_tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
-                        self.available_tags.push(Tag::new(next_id, &name));
+                        let next_id = self.tagging.available_tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                        self.tagging.available_tags.push(Tag::new(next_id, &name));
                         log::info!("🏷️ Added new tag: {} (id={})", name, next_id);
                     }
                 }
@@ -409,10 +466,10 @@ impl Application for HvatApp {
                     categories: &mut self.categories,
                     drawing_state: &mut self.drawing_state,
                     image_key,
-                    zoom: self.zoom,
+                    zoom: self.transform.zoom,
                     status_message: &mut self.status_message,
-                    export_dialog_open: &mut self.export_dialog_open,
-                    export_format: &mut self.export_format,
+                    export_dialog_open: &mut self.export.dialog_open,
+                    export_format: &mut self.export.format,
                     widget_state: &mut self.widget_state,
                     image_cache: &self.image_cache,
                 };
@@ -439,16 +496,11 @@ impl Application for HvatApp {
                     annotations_map: &self.annotations_map,
                     image_cache: &self.image_cache,
                     band_selection: self.band_selection,
-                    image_settings: ImageSettings {
-                        brightness: self.brightness,
-                        contrast: self.contrast,
-                        gamma: self.gamma,
-                        hue_shift: self.hue_shift,
-                    },
-                    band_persistence: self.band_persistence,
-                    image_settings_persistence: self.image_settings_persistence,
-                    stored_band_selections: &self.stored_band_selections,
-                    stored_image_settings: &self.stored_image_settings,
+                    image_settings: self.image_settings,
+                    band_persistence: self.persistence.band_mode,
+                    image_settings_persistence: self.persistence.image_settings_mode,
+                    stored_band_selections: &self.persistence.stored_band_selections,
+                    stored_image_settings: &self.persistence.stored_image_settings,
                     status_message: &mut self.status_message,
                 };
                 if let Some(project) = handle_project(msg, &mut state) {
@@ -456,13 +508,7 @@ impl Application for HvatApp {
                 }
             }
             Message::Tick => {
-                self.frame_count += 1;
-                let elapsed = self.last_fps_time.elapsed();
-                if elapsed.as_secs_f32() >= 1.0 {
-                    self.fps = self.frame_count as f32 / elapsed.as_secs_f32();
-                    self.frame_count = 0;
-                    self.last_fps_time = Instant::now();
-                }
+                self.fps_tracker.update();
                 // No composite generation needed - GPU handles band selection
             }
         }
@@ -510,7 +556,7 @@ impl Application for HvatApp {
             ))
             // FPS counter
             .push(Element::new(
-                text(format!("FPS: {:.0}", self.fps))
+                text(format!("FPS: {:.0}", self.fps_tracker.fps))
                     .size(14.0)
                     .color(Color::rgb(0.5, 0.8, 0.5)),
             ))
@@ -529,13 +575,13 @@ impl Application for HvatApp {
                 &self.theme,
                 text_color,
                 &self.hyperspectral_handle,
-                self.zoom,
-                self.pan_x,
-                self.pan_y,
-                self.brightness,
-                self.contrast,
-                self.gamma,
-                self.hue_shift,
+                self.transform.zoom,
+                self.transform.pan_x,
+                self.transform.pan_y,
+                self.image_settings.brightness,
+                self.image_settings.contrast,
+                self.image_settings.gamma,
+                self.image_settings.hue_shift,
                 &self.widget_state,
                 &self.drawing_state,
                 self.annotations(),
@@ -544,9 +590,9 @@ impl Application for HvatApp {
                 &self.band_selection,
                 self.num_bands(),
                 self.cached_overlay.clone(),
-                self.band_persistence,
-                self.image_settings_persistence,
-                &self.available_tags,
+                self.persistence.band_mode,
+                self.persistence.image_settings_mode,
+                &self.tagging.available_tags,
                 self.current_image_tags(),
                 // Use cached dimensions, or fall back to hyperspectral image dimensions for test images
                 self.image_cache.get_dimensions(self.current_image_index)
@@ -591,9 +637,9 @@ impl Application for HvatApp {
         Element::new(
             modal(
                 Element::new(main_content),
-                Element::new(view_export_modal_content(self.export_format)),
+                Element::new(view_export_modal_content(self.export.format)),
             )
-            .visible(self.export_dialog_open)
+            .visible(self.export.dialog_open)
             .width(320.0)
             .on_backdrop_click(Message::close_export_dialog),
         )
@@ -636,7 +682,7 @@ impl HvatApp {
     fn current_image_tags(&self) -> &HashSet<u32> {
         static EMPTY: std::sync::OnceLock<HashSet<u32>> = std::sync::OnceLock::new();
         let key = self.current_image_key();
-        self.image_tags
+        self.tagging.image_tags
             .get(&key)
             .unwrap_or_else(|| EMPTY.get_or_init(HashSet::new))
     }
@@ -644,7 +690,7 @@ impl HvatApp {
     /// Get mutable tags for the current image.
     fn current_image_tags_mut(&mut self) -> &mut HashSet<u32> {
         let key = self.current_image_key();
-        self.image_tags.entry(key).or_insert_with(HashSet::new)
+        self.tagging.image_tags.entry(key).or_insert_with(HashSet::new)
     }
 
     /// Rebuild overlay if annotations are dirty or image changed.
@@ -662,7 +708,7 @@ impl HvatApp {
             .unwrap_or(false);
 
         // Also check drawing state - preview needs updating during drawing
-        let drawing_active = self.drawing_state.is_drawing;
+        let drawing_active = self.drawing_state.is_drawing();
 
         if image_changed || annotations_dirty || drawing_active {
             // Rebuild overlay (pass global categories for color lookup)
@@ -686,15 +732,10 @@ impl HvatApp {
         let key = self.current_image_key();
 
         // Save band selection
-        self.stored_band_selections.insert(key.clone(), self.band_selection);
+        self.persistence.stored_band_selections.insert(key.clone(), self.band_selection);
 
         // Save image settings
-        self.stored_image_settings.insert(key, ImageSettings {
-            brightness: self.brightness,
-            contrast: self.contrast,
-            gamma: self.gamma,
-            hue_shift: self.hue_shift,
-        });
+        self.persistence.stored_image_settings.insert(key, self.image_settings);
     }
 
     /// Apply settings for the new image based on persistence modes.
@@ -702,14 +743,14 @@ impl HvatApp {
         let key = self.current_image_key();
 
         // Apply band selection based on mode
-        match self.band_persistence {
+        match self.persistence.band_mode {
             PersistenceMode::Reset => {
                 // Reset to defaults
                 self.band_selection = BandSelection::default_rgb();
             }
             PersistenceMode::PerImage => {
                 // Restore stored settings if available, otherwise keep current (for new images)
-                if let Some(stored) = self.stored_band_selections.get(&key) {
+                if let Some(stored) = self.persistence.stored_band_selections.get(&key) {
                     self.band_selection = *stored;
                 }
                 // For new images without stored settings, keep current settings as starting point
@@ -737,20 +778,14 @@ impl HvatApp {
         }
 
         // Apply image settings based on mode
-        match self.image_settings_persistence {
+        match self.persistence.image_settings_mode {
             PersistenceMode::Reset => {
-                self.brightness = 0.0;
-                self.contrast = 1.0;
-                self.gamma = 1.0;
-                self.hue_shift = 0.0;
+                self.image_settings = ImageSettings::default();
             }
             PersistenceMode::PerImage => {
                 // Restore stored settings if available, otherwise keep current (for new images)
-                if let Some(stored) = self.stored_image_settings.get(&key) {
-                    self.brightness = stored.brightness;
-                    self.contrast = stored.contrast;
-                    self.gamma = stored.gamma;
-                    self.hue_shift = stored.hue_shift;
+                if let Some(stored) = self.persistence.stored_image_settings.get(&key) {
+                    self.image_settings = *stored;
                 }
                 // For new images without stored settings, keep current settings as starting point
             }
@@ -772,25 +807,21 @@ impl HvatApp {
 
         // Apply global settings
         self.band_selection = project.settings.band_selection.into();
-        let img_settings: ImageSettings = project.settings.image_settings.into();
-        self.brightness = img_settings.brightness;
-        self.contrast = img_settings.contrast;
-        self.gamma = img_settings.gamma;
-        self.hue_shift = img_settings.hue_shift;
+        self.image_settings = project.settings.image_settings.into();
 
         // Apply persistence modes
-        self.band_persistence = project.settings.band_persistence.into();
-        self.image_settings_persistence = project.settings.image_settings_persistence.into();
+        self.persistence.band_mode = project.settings.band_persistence.into();
+        self.persistence.image_settings_mode = project.settings.image_settings_persistence.into();
 
         // Apply per-image settings
-        self.stored_band_selections.clear();
-        self.stored_image_settings.clear();
+        self.persistence.stored_band_selections.clear();
+        self.persistence.stored_image_settings.clear();
         for (image_name, settings) in project.per_image_settings {
             if let Some(band_sel) = settings.band_selection {
-                self.stored_band_selections.insert(image_name.clone(), band_sel.into());
+                self.persistence.stored_band_selections.insert(image_name.clone(), band_sel.into());
             }
             if let Some(img_set) = settings.image_settings {
-                self.stored_image_settings.insert(image_name, img_set.into());
+                self.persistence.stored_image_settings.insert(image_name, img_set.into());
             }
         }
 

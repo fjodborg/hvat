@@ -527,6 +527,168 @@ impl<'a> AnnotationState<'a> {
     }
 }
 
+// ============================================================================
+// StartDrawing Tool Handlers (extracted for readability)
+// ============================================================================
+
+/// Handle StartDrawing for Select tool.
+/// Returns true if the event was handled and no further processing is needed.
+fn handle_start_drawing_select(state: &mut AnnotationState, x: f32, y: f32) -> bool {
+    let point = Point::new(x, y);
+    let hit_radius = threshold::POINT_HIT_RADIUS / state.zoom;
+    let currently_selected = state.annotations().selected();
+
+    // Check if clicking on the currently selected annotation
+    if let Some(sel_id) = currently_selected {
+        let Some(ann) = state.annotations().get(sel_id) else {
+            return false;
+        };
+        if let Some(handle) = ann.shape.hit_test_handle(&point, hit_radius) {
+            // Clicking on selected annotation - start drag (cycling happens on release if no movement)
+            let original = ann.shape.clone();
+            // was_already_selected = true (clicking on already-selected annotation)
+            state.drawing_state.editing.start_drag(sel_id, handle, point, original, true);
+            log::debug!("🔧 Started dragging {:?} of annotation {}", handle, sel_id);
+            return true;
+        }
+    }
+
+    // Not clicking on selected annotation - find what we hit
+    if let Some((hit_id, handle)) = state.annotations().hit_test_any_handle(&point, hit_radius) {
+        state.annotations_mut().select(Some(hit_id));
+        let Some(ann) = state.annotations().get(hit_id) else {
+            return true;
+        };
+        let original = ann.shape.clone();
+        // was_already_selected = false (just selected this annotation)
+        state.drawing_state.editing.start_drag(hit_id, handle, point, original, false);
+        log::debug!("🔧 Selected annotation {} and started dragging {:?}", hit_id, handle);
+    } else {
+        // Clicked on empty space - deselect
+        state.annotations_mut().select(None);
+        log::debug!("🔍 Deselected (clicked empty space)");
+    }
+    true
+}
+
+/// Handle StartDrawing for Point tool.
+fn handle_start_drawing_point(state: &mut AnnotationState, x: f32, y: f32) {
+    let category = state.drawing_state.current_category;
+    let id = state
+        .annotations_mut()
+        .add(category, Shape::Point(Point::new(x, y)));
+    log::info!("✅ Created point annotation {} at ({:.1}, {:.1})", id, x, y);
+}
+
+/// Handle StartDrawing for BoundingBox tool.
+fn handle_start_drawing_bbox(state: &mut AnnotationState, x: f32, y: f32) {
+    state.drawing_state.start(Point::new(x, y));
+    log::debug!("✏️ Started bbox at ({:.1}, {:.1})", x, y);
+}
+
+/// Handle StartDrawing for Polygon tool.
+/// Returns true if the polygon was closed and no further processing is needed.
+fn handle_start_drawing_polygon(state: &mut AnnotationState, x: f32, y: f32) -> bool {
+    if state.drawing_state.is_drawing() {
+        // Check if clicking near first point to close polygon
+        if state.drawing_state.points().len() >= 3 {
+            let Some(first) = state.drawing_state.points().first().copied() else {
+                return false;
+            };
+            let click_point = Point::new(x, y);
+            // Close threshold in image coordinates (scaled by zoom)
+            if first.distance_to(&click_point) < threshold::POLYGON_CLOSE / state.zoom {
+                // Close the polygon
+                let category = state.drawing_state.current_category;
+                if let Some(shape) = state.drawing_state.finish() {
+                    let id = state.annotations_mut().add(category, shape);
+                    log::info!("✅ Closed polygon annotation {} (category={})", id, category);
+                }
+                return true;
+            }
+        }
+        // Not closing - add another point
+        state.drawing_state.add_point(Point::new(x, y));
+        log::debug!(
+            "✏️ Added polygon point at ({:.1}, {:.1}), total: {}",
+            x, y,
+            state.drawing_state.points().len()
+        );
+    } else {
+        // Start new polygon
+        state.drawing_state.start(Point::new(x, y));
+        log::debug!("✏️ Started polygon at ({:.1}, {:.1})", x, y);
+    }
+    false
+}
+
+/// Handle ContinueDrawing for editing/dragging.
+/// Returns true if drag was handled and no further processing is needed.
+fn handle_continue_drawing_drag(state: &mut AnnotationState, x: f32, y: f32) -> bool {
+    if !state.drawing_state.editing.is_dragging() {
+        return false;
+    }
+
+    let point = Point::new(x, y);
+    let Some(ann_id) = state.drawing_state.editing.annotation_id() else {
+        return true;
+    };
+    let Some(handle) = state.drawing_state.editing.handle() else {
+        return true;
+    };
+    let Some(start) = state.drawing_state.editing.drag_start() else {
+        return true;
+    };
+
+    // Calculate delta from drag start
+    let delta = Point::new(point.x - start.x, point.y - start.y);
+
+    // Only apply if there's significant movement (avoid jitter)
+    let move_threshold = 1.0 / state.zoom; // 1 pixel in screen space
+    if delta.x.abs() > move_threshold || delta.y.abs() > move_threshold {
+        // Mark that we've actually moved (not just a click)
+        state.drawing_state.editing.mark_moved();
+
+        // Get original shape and apply delta
+        if let Some(original) = state.drawing_state.editing.original_shape() {
+            let new_shape = original.apply_drag(handle, delta);
+            state.annotations_mut().update_shape(ann_id, new_shape);
+        }
+    }
+    true
+}
+
+/// Handle FinishDrawing for editing/dragging.
+/// Returns true if drag was handled and no further processing is needed.
+fn handle_finish_drawing_drag(state: &mut AnnotationState) -> bool {
+    if !state.drawing_state.editing.is_dragging() {
+        return false;
+    }
+
+    let editing = &state.drawing_state.editing;
+    let was_click = editing.was_click();
+    let was_body_drag = matches!(editing.handle(), Some(DragHandle::Body));
+    let was_already_selected = editing.was_already_selected();
+    let ann_id = editing.annotation_id();
+    let drag_start = editing.drag_start();
+
+    // Check if this was a click (no movement) on the body of an already-selected annotation
+    // If so, cycle to the next overlapping annotation
+    if was_click && was_body_drag && was_already_selected {
+        if let (Some(sel_id), Some(point)) = (ann_id, drag_start) {
+            if let Some(next_id) = state.annotations().cycle_selection(&point, Some(sel_id)) {
+                if next_id != sel_id {
+                    state.annotations_mut().select(Some(next_id));
+                    log::debug!("🔄 Cycled to annotation {} (click without drag)", next_id);
+                }
+            }
+        }
+    }
+
+    state.drawing_state.editing.finish_drag();
+    true
+}
+
 /// Handle annotation messages.
 pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
     match msg {
@@ -573,129 +735,31 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
 
             match state.drawing_state.tool {
                 AnnotationTool::Select => {
-                    let point = Point::new(x, y);
-                    let hit_radius = threshold::POINT_HIT_RADIUS / state.zoom;
-                    let currently_selected = state.annotations().selected();
-
-                    // Check if clicking on the currently selected annotation
-                    if let Some(sel_id) = currently_selected {
-                        if let Some(ann) = state.annotations().get(sel_id) {
-                            if let Some(handle) = ann.shape.hit_test_handle(&point, hit_radius) {
-                                // Clicking on selected annotation - start drag (cycling happens on release if no movement)
-                                let original = ann.shape.clone();
-                                // was_already_selected = true (clicking on already-selected annotation)
-                                state.drawing_state.editing.start_drag(sel_id, handle, point, original, true);
-                                log::debug!("🔧 Started dragging {:?} of annotation {}", handle, sel_id);
-                                return;
-                            }
-                        }
-                    }
-
-                    // Not clicking on selected annotation - find what we hit
-                    if let Some((hit_id, handle)) = state.annotations().hit_test_any_handle(&point, hit_radius) {
-                        state.annotations_mut().select(Some(hit_id));
-                        if let Some(ann) = state.annotations().get(hit_id) {
-                            let original = ann.shape.clone();
-                            // was_already_selected = false (just selected this annotation)
-                            state.drawing_state.editing.start_drag(hit_id, handle, point, original, false);
-                            log::debug!("🔧 Selected annotation {} and started dragging {:?}", hit_id, handle);
-                        }
-                    } else {
-                        // Clicked on empty space - deselect
-                        state.annotations_mut().select(None);
-                        log::debug!("🔍 Deselected (clicked empty space)");
-                    }
+                    handle_start_drawing_select(state, x, y);
                 }
                 AnnotationTool::Point => {
-                    // Point tool: create immediately on click
-                    let category = state.drawing_state.current_category;
-                    let id = state
-                        .annotations_mut()
-                        .add(category, Shape::Point(Point::new(x, y)));
-                    log::info!(
-                        "✅ Created point annotation {} at ({:.1}, {:.1})",
-                        id,
-                        x,
-                        y
-                    );
+                    handle_start_drawing_point(state, x, y);
                 }
                 AnnotationTool::BoundingBox => {
-                    // Start drawing for bbox
-                    state.drawing_state.start(Point::new(x, y));
-                    log::debug!("✏️ Started bbox at ({:.1}, {:.1})", x, y);
+                    handle_start_drawing_bbox(state, x, y);
                 }
                 AnnotationTool::Polygon => {
-                    if state.drawing_state.is_drawing {
-                        // Check if clicking near first point to close polygon
-                        if state.drawing_state.points.len() >= 3 {
-                            if let Some(first) = state.drawing_state.points.first() {
-                                let click_point = Point::new(x, y);
-                                // Close threshold in image coordinates (scaled by zoom)
-                                if first.distance_to(&click_point) < threshold::POLYGON_CLOSE / state.zoom {
-                                    // Close the polygon
-                                    let category = state.drawing_state.current_category;
-                                    if let Some(shape) = state.drawing_state.finish() {
-                                        let id = state.annotations_mut().add(category, shape);
-                                        log::info!(
-                                            "✅ Closed polygon annotation {} (category={})",
-                                            id,
-                                            category
-                                        );
-                                    }
-                                    return;
-                                }
-                            }
-                        }
-                        // Not closing - add another point
-                        state.drawing_state.add_point(Point::new(x, y));
-                        log::debug!(
-                            "✏️ Added polygon point at ({:.1}, {:.1}), total: {}",
-                            x,
-                            y,
-                            state.drawing_state.points.len()
-                        );
-                    } else {
-                        // Start new polygon
-                        state.drawing_state.start(Point::new(x, y));
-                        log::debug!("✏️ Started polygon at ({:.1}, {:.1})", x, y);
-                    }
+                    handle_start_drawing_polygon(state, x, y);
                 }
             }
         }
         AnnotationMessage::ContinueDrawing(x, y) => {
             // Handle editing/dragging in Select mode
-            if state.drawing_state.editing.is_dragging {
-                let point = Point::new(x, y);
-                if let (Some(ann_id), Some(handle), Some(start)) = (
-                    state.drawing_state.editing.annotation_id,
-                    state.drawing_state.editing.handle,
-                    state.drawing_state.editing.drag_start,
-                ) {
-                    // Calculate delta from drag start
-                    let delta = Point::new(point.x - start.x, point.y - start.y);
-
-                    // Only apply if there's significant movement (avoid jitter)
-                    let move_threshold = 1.0 / state.zoom; // 1 pixel in screen space
-                    if delta.x.abs() > move_threshold || delta.y.abs() > move_threshold {
-                        // Mark that we've actually moved (not just a click)
-                        state.drawing_state.editing.mark_moved();
-
-                        // Get original shape and apply delta
-                        if let Some(original) = &state.drawing_state.editing.original_shape {
-                            let new_shape = original.apply_drag(handle, delta);
-                            state.annotations_mut().update_shape(ann_id, new_shape);
-                        }
-                    }
-                }
+            if handle_continue_drawing_drag(state, x, y) {
                 return;
             }
 
             // Handle normal drawing
-            if state.drawing_state.is_drawing {
+            if state.drawing_state.is_drawing() {
                 match state.drawing_state.tool {
                     AnnotationTool::BoundingBox => {
                         // For bbox, we need exactly 2 points - add second if missing, else update
-                        if state.drawing_state.points.len() == 1 {
+                        if state.drawing_state.points().len() == 1 {
                             state.drawing_state.add_point(Point::new(x, y));
                         } else {
                             state.drawing_state.update_last(Point::new(x, y));
@@ -711,29 +775,7 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
         }
         AnnotationMessage::FinishDrawing => {
             // Handle editing/dragging finish in Select mode
-            if state.drawing_state.editing.is_dragging {
-                let editing = &state.drawing_state.editing;
-                let was_click = !editing.has_moved;
-                let was_body_drag = matches!(editing.handle, Some(DragHandle::Body));
-                let was_already_selected = editing.was_already_selected;
-                let ann_id = editing.annotation_id;
-                let drag_start = editing.drag_start;
-
-                // Check if this was a click (no movement) on the body of an already-selected annotation
-                // If so, cycle to the next overlapping annotation
-                // Only cycle if: no movement, on body, AND was already selected before click
-                if was_click && was_body_drag && was_already_selected {
-                    if let (Some(sel_id), Some(point)) = (ann_id, drag_start) {
-                        if let Some(next_id) = state.annotations().cycle_selection(&point, Some(sel_id)) {
-                            if next_id != sel_id {
-                                state.annotations_mut().select(Some(next_id));
-                                log::debug!("🔄 Cycled to annotation {} (click without drag)", next_id);
-                            }
-                        }
-                    }
-                }
-
-                state.drawing_state.editing.finish_drag();
+            if handle_finish_drawing_drag(state) {
                 return;
             }
 
@@ -759,9 +801,9 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
         AnnotationMessage::ForceFinishPolygon => {
             // Called via Space key - force close polygon if valid
             if state.drawing_state.tool == AnnotationTool::Polygon
-                && state.drawing_state.is_drawing
+                && state.drawing_state.is_drawing()
             {
-                if state.drawing_state.points.len() >= 3 {
+                if state.drawing_state.points().len() >= 3 {
                     let category = state.drawing_state.current_category;
                     if let Some(shape) = state.drawing_state.finish() {
                         let id = state.annotations_mut().add(category, shape);
@@ -770,7 +812,7 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 } else {
                     log::debug!(
                         "📝 Polygon needs at least 3 points, currently has {}",
-                        state.drawing_state.points.len()
+                        state.drawing_state.points().len()
                     );
                 }
             }
@@ -813,10 +855,10 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 }
                 '\x1b' => { // ESC
                     // Cancel drawing or deselect
-                    if state.drawing_state.is_drawing {
+                    if state.drawing_state.is_drawing() {
                         state.drawing_state.cancel();
                         log::debug!("❌ Drawing cancelled (ESC)");
-                    } else if state.drawing_state.editing.is_dragging {
+                    } else if state.drawing_state.editing.is_dragging() {
                         // Cancel drag and restore original
                         if let Some((id, shape)) = state.drawing_state.editing.cancel_drag() {
                             state.annotations_mut().update_shape(id, shape);
@@ -872,15 +914,15 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
             }
         }
         AnnotationMessage::ContinueDrag(x, y) => {
-            if !state.drawing_state.editing.is_dragging {
+            if !state.drawing_state.editing.is_dragging() {
                 return;
             }
 
             let point = Point::new(x, y);
             if let (Some(ann_id), Some(handle), Some(start)) = (
-                state.drawing_state.editing.annotation_id,
-                state.drawing_state.editing.handle,
-                state.drawing_state.editing.drag_start,
+                state.drawing_state.editing.annotation_id(),
+                state.drawing_state.editing.handle(),
+                state.drawing_state.editing.drag_start(),
             ) {
                 // Calculate delta from drag start
                 let delta = Point::new(point.x - start.x, point.y - start.y);
@@ -892,7 +934,7 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                     state.drawing_state.editing.mark_moved();
 
                     // Get original shape and apply delta
-                    if let Some(original) = &state.drawing_state.editing.original_shape {
+                    if let Some(original) = state.drawing_state.editing.original_shape() {
                         let new_shape = original.apply_drag(handle, delta);
                         state.annotations_mut().update_shape(ann_id, new_shape);
                     }
@@ -902,7 +944,7 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
         AnnotationMessage::FinishDrag => {
             // Note: This is currently unused - FinishDrawing handles drag end.
             // Kept for potential future use with separate drag tracking.
-            if state.drawing_state.editing.is_dragging {
+            if state.drawing_state.editing.is_dragging() {
                 state.drawing_state.editing.finish_drag();
             }
         }

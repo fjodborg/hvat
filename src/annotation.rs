@@ -827,24 +827,101 @@ pub enum DragHandle {
     Point,
 }
 
+// ============================================================================
+// Typestate Pattern: EditingPhase
+// ============================================================================
+
+/// Typestate enum representing the current editing phase.
+///
+/// This replaces the boolean flags in EditingState with explicit states,
+/// making invalid state combinations impossible at compile time.
+#[derive(Debug, Clone)]
+pub enum EditingPhase {
+    /// Not editing any annotation
+    Idle,
+    /// Dragging an annotation (mouse is down)
+    Dragging {
+        /// Which annotation is being edited
+        annotation_id: u64,
+        /// Which handle/part is being dragged
+        handle: DragHandle,
+        /// Starting point of the drag in image coordinates
+        drag_start: Point,
+        /// Original shape before editing (for undo/preview)
+        original_shape: Shape,
+        /// Whether the annotation was already selected when drag started
+        was_already_selected: bool,
+        /// Whether the mouse has actually moved since drag started
+        has_moved: bool,
+    },
+}
+
+impl Default for EditingPhase {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+impl EditingPhase {
+    /// Check if currently dragging
+    pub fn is_dragging(&self) -> bool {
+        matches!(self, Self::Dragging { .. })
+    }
+
+    /// Get the annotation ID if dragging
+    pub fn annotation_id(&self) -> Option<u64> {
+        match self {
+            Self::Dragging { annotation_id, .. } => Some(*annotation_id),
+            Self::Idle => None,
+        }
+    }
+
+    /// Get the drag handle if dragging
+    pub fn handle(&self) -> Option<DragHandle> {
+        match self {
+            Self::Dragging { handle, .. } => Some(*handle),
+            Self::Idle => None,
+        }
+    }
+
+    /// Get the drag start point if dragging
+    pub fn drag_start(&self) -> Option<Point> {
+        match self {
+            Self::Dragging { drag_start, .. } => Some(*drag_start),
+            Self::Idle => None,
+        }
+    }
+
+    /// Get reference to the original shape if dragging
+    pub fn original_shape(&self) -> Option<&Shape> {
+        match self {
+            Self::Dragging { original_shape, .. } => Some(original_shape),
+            Self::Idle => None,
+        }
+    }
+
+    /// Check if the drag has moved
+    pub fn has_moved(&self) -> bool {
+        match self {
+            Self::Dragging { has_moved, .. } => *has_moved,
+            Self::Idle => false,
+        }
+    }
+
+    /// Check if was already selected when drag started
+    pub fn was_already_selected(&self) -> bool {
+        match self {
+            Self::Dragging { was_already_selected, .. } => *was_already_selected,
+            Self::Idle => false,
+        }
+    }
+}
+
 /// State for editing an existing annotation.
 #[derive(Debug, Clone, Default)]
 pub struct EditingState {
-    /// Whether we're currently dragging (mouse is down)
-    pub is_dragging: bool,
-    /// Whether the mouse has actually moved since drag started
-    pub has_moved: bool,
-    /// Whether the annotation was already selected when drag started
-    /// (used to determine if clicking should cycle to next annotation)
-    pub was_already_selected: bool,
-    /// Which annotation is being edited
-    pub annotation_id: Option<u64>,
-    /// Which handle/part is being dragged
-    pub handle: Option<DragHandle>,
-    /// Starting point of the drag in image coordinates
-    pub drag_start: Option<Point>,
-    /// Original shape before editing (for undo/preview)
-    pub original_shape: Option<Shape>,
+    /// Current editing phase (typestate)
+    phase: EditingPhase,
 }
 
 impl EditingState {
@@ -852,48 +929,104 @@ impl EditingState {
         Self::default()
     }
 
+    /// Check if currently dragging
+    pub fn is_dragging(&self) -> bool {
+        self.phase.is_dragging()
+    }
+
+    /// Get the annotation ID if dragging
+    pub fn annotation_id(&self) -> Option<u64> {
+        self.phase.annotation_id()
+    }
+
+    /// Get the drag handle if dragging
+    pub fn handle(&self) -> Option<DragHandle> {
+        self.phase.handle()
+    }
+
+    /// Get the drag start point if dragging
+    pub fn drag_start(&self) -> Option<Point> {
+        self.phase.drag_start()
+    }
+
+    /// Get reference to the original shape if dragging
+    pub fn original_shape(&self) -> Option<&Shape> {
+        self.phase.original_shape()
+    }
+
+    /// Check if the drag has moved
+    pub fn has_moved(&self) -> bool {
+        self.phase.has_moved()
+    }
+
+    /// Check if was already selected when drag started
+    pub fn was_already_selected(&self) -> bool {
+        self.phase.was_already_selected()
+    }
+
     /// Start dragging an annotation
-    /// `was_already_selected` indicates if the annotation was selected before this click
     pub fn start_drag(&mut self, ann_id: u64, handle: DragHandle, point: Point, original: Shape, was_already_selected: bool) {
-        self.is_dragging = true;
-        self.has_moved = false;
-        self.was_already_selected = was_already_selected;
-        self.annotation_id = Some(ann_id);
-        self.handle = Some(handle);
-        self.drag_start = Some(point);
-        self.original_shape = Some(original);
+        self.phase = EditingPhase::Dragging {
+            annotation_id: ann_id,
+            handle,
+            drag_start: point,
+            original_shape: original,
+            was_already_selected,
+            has_moved: false,
+        };
     }
 
     /// Mark that the drag has actually moved
     pub fn mark_moved(&mut self) {
-        self.has_moved = true;
+        if let EditingPhase::Dragging { has_moved, .. } = &mut self.phase {
+            *has_moved = true;
+        }
     }
 
     /// Check if this was just a click (no movement)
     pub fn was_click(&self) -> bool {
-        !self.has_moved
+        !self.has_moved()
     }
 
     /// Finish dragging
     pub fn finish_drag(&mut self) {
-        self.is_dragging = false;
-        self.has_moved = false;
-        self.was_already_selected = false;
-        self.annotation_id = None;
-        self.handle = None;
-        self.drag_start = None;
-        self.original_shape = None;
+        self.phase = EditingPhase::Idle;
     }
 
     /// Cancel dragging (restore original)
     pub fn cancel_drag(&mut self) -> Option<(u64, Shape)> {
-        if let (Some(id), Some(shape)) = (self.annotation_id, self.original_shape.take()) {
-            self.finish_drag();
-            Some((id, shape))
-        } else {
-            self.finish_drag();
-            None
-        }
+        let result = match &self.phase {
+            EditingPhase::Dragging { annotation_id, original_shape, .. } => {
+                Some((*annotation_id, original_shape.clone()))
+            }
+            EditingPhase::Idle => None,
+        };
+        self.phase = EditingPhase::Idle;
+        result
+    }
+}
+
+// ============================================================================
+// Typestate Pattern: DrawingPhase
+// ============================================================================
+
+/// Typestate enum representing the current drawing phase.
+///
+/// This replaces the boolean `is_drawing` flag with explicit states.
+#[derive(Debug, Clone)]
+pub enum DrawingPhase {
+    /// Not currently drawing
+    Idle,
+    /// Actively drawing a shape
+    Drawing {
+        /// Points collected during the current drawing operation
+        points: Vec<Point>,
+    },
+}
+
+impl Default for DrawingPhase {
+    fn default() -> Self {
+        Self::Idle
     }
 }
 
@@ -904,12 +1037,26 @@ pub struct DrawingState {
     pub tool: AnnotationTool,
     /// The category to assign to new annotations.
     pub current_category: u32,
-    /// Points collected during the current drawing operation.
-    pub points: Vec<Point>,
-    /// Whether we're currently drawing.
-    pub is_drawing: bool,
+    /// Current drawing phase (typestate)
+    phase: DrawingPhase,
     /// Editing state for modifying existing annotations
     pub editing: EditingState,
+}
+
+// Legacy compatibility: expose fields that handlers expect
+impl DrawingState {
+    /// Check if currently drawing (legacy compatibility)
+    pub fn is_drawing(&self) -> bool {
+        matches!(self.phase, DrawingPhase::Drawing { .. })
+    }
+
+    /// Get points slice (legacy compatibility)
+    pub fn points(&self) -> &[Point] {
+        match &self.phase {
+            DrawingPhase::Drawing { points } => points,
+            DrawingPhase::Idle => &[],
+        }
+    }
 }
 
 impl DrawingState {
@@ -919,43 +1066,41 @@ impl DrawingState {
 
     /// Start a new drawing operation.
     pub fn start(&mut self, point: Point) {
-        self.points.clear();
-        self.points.push(point);
-        self.is_drawing = true;
+        self.phase = DrawingPhase::Drawing {
+            points: vec![point],
+        };
     }
 
     /// Add a point to the current drawing.
     pub fn add_point(&mut self, point: Point) {
-        self.points.push(point);
+        if let DrawingPhase::Drawing { points } = &mut self.phase {
+            points.push(point);
+        }
     }
 
     /// Update the last point (for dragging).
     pub fn update_last(&mut self, point: Point) {
-        if let Some(last) = self.points.last_mut() {
-            *last = point;
+        if let DrawingPhase::Drawing { points } = &mut self.phase {
+            if let Some(last) = points.last_mut() {
+                *last = point;
+            }
         }
     }
 
     /// Finish the current drawing and return the shape.
     pub fn finish(&mut self) -> Option<Shape> {
-        if !self.is_drawing {
+        let DrawingPhase::Drawing { points } = &self.phase else {
             return None;
-        }
-
-        self.is_drawing = false;
+        };
 
         let shape = match self.tool {
             AnnotationTool::Select => None,
             AnnotationTool::Point => {
-                if let Some(p) = self.points.first() {
-                    Some(Shape::Point(*p))
-                } else {
-                    None
-                }
+                points.first().map(|p| Shape::Point(*p))
             }
             AnnotationTool::BoundingBox => {
-                if self.points.len() >= 2 {
-                    let bbox = BoundingBox::from_corners(self.points[0], *self.points.last().unwrap());
+                if points.len() >= 2 {
+                    let bbox = BoundingBox::from_corners(points[0], *points.last().unwrap());
                     if bbox.area() > 0.0 {
                         Some(Shape::BoundingBox(bbox))
                     } else {
@@ -966,9 +1111,9 @@ impl DrawingState {
                 }
             }
             AnnotationTool::Polygon => {
-                if self.points.len() >= 3 {
+                if points.len() >= 3 {
                     let mut poly = Polygon::new();
-                    for p in &self.points {
+                    for p in points {
                         poly.push(*p);
                     }
                     poly.close();
@@ -979,39 +1124,38 @@ impl DrawingState {
             }
         };
 
-        self.points.clear();
+        self.phase = DrawingPhase::Idle;
         shape
     }
 
     /// Cancel the current drawing.
     pub fn cancel(&mut self) {
-        self.points.clear();
-        self.is_drawing = false;
+        self.phase = DrawingPhase::Idle;
     }
 
     /// Get the preview shape for the current drawing.
     pub fn preview(&self) -> Option<Shape> {
-        if !self.is_drawing {
+        let DrawingPhase::Drawing { points } = &self.phase else {
             return None;
-        }
+        };
 
         match self.tool {
             AnnotationTool::Select => None,
-            AnnotationTool::Point => self.points.first().map(|p| Shape::Point(*p)),
+            AnnotationTool::Point => points.first().map(|p| Shape::Point(*p)),
             AnnotationTool::BoundingBox => {
-                if self.points.len() >= 2 {
+                if points.len() >= 2 {
                     Some(Shape::BoundingBox(BoundingBox::from_corners(
-                        self.points[0],
-                        *self.points.last().unwrap(),
+                        points[0],
+                        *points.last().unwrap(),
                     )))
                 } else {
                     None
                 }
             }
             AnnotationTool::Polygon => {
-                if !self.points.is_empty() {
+                if !points.is_empty() {
                     let mut poly = Polygon::new();
-                    for p in &self.points {
+                    for p in points {
                         poly.push(*p);
                     }
                     // Don't close for preview

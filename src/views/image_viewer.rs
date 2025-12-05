@@ -424,7 +424,7 @@ pub fn view_image_viewer<'a>(
         .pan((pan_x, pan_y))
         .zoom(zoom)
         .dragging(widget_state.image.is_dragging)
-        .drawing(drawing_state.is_drawing || drawing_state.editing.is_dragging)
+        .drawing(drawing_state.is_drawing() || drawing_state.editing.is_dragging())
         .adjustments(adjustments)
         .overlay(overlay)
         .width(Length::Fill)
@@ -633,7 +633,7 @@ pub fn view_image_viewer<'a>(
             text(format!(
                 "{} annotations | {}",
                 annotations.len(),
-                if drawing_state.is_drawing {
+                if drawing_state.is_drawing() {
                     "Drawing..."
                 } else {
                     "Ready"
