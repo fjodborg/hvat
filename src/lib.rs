@@ -21,8 +21,8 @@ pub use zoom_math::Transform;
 // Annotation system for image labeling
 mod annotation;
 pub use annotation::{
-    Annotation, AnnotationStore, AnnotationTool, BoundingBox, Category, DrawingState, Point,
-    Polygon, Shape,
+    Annotation, AnnotationStore, AnnotationTool, AnnotationToolBehavior, BoundingBox, Category,
+    DrawingState, Point, Polygon, Shape,
 };
 
 // Hyperspectral image support

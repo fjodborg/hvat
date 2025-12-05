@@ -75,8 +75,14 @@ pub fn run<A: Application + 'static>(settings: Settings) -> Result<(), String> {
     use winit::event_loop::{ControlFlow, EventLoop};
     use winit::window::WindowBuilder;
 
+    // Parse RUST_LOG environment variable first, use settings.log_level as fallback
+    let log_level = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(settings.log_level);
+
     env_logger::Builder::from_default_env()
-        .filter_level(settings.log_level)
+        .filter_level(log_level)
         // Mute noisy dependency logs
         .filter_module("cosmic_text", log::LevelFilter::Warn)
         .filter_module("wgpu", log::LevelFilter::Warn)

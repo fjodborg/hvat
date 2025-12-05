@@ -768,6 +768,50 @@ pub enum AnnotationTool {
     Point,
 }
 
+/// Trait defining behavior and metadata for annotation tools.
+///
+/// This trait centralizes tool-specific information that was previously
+/// scattered across multiple match statements in the codebase.
+pub trait AnnotationToolBehavior {
+    /// Get the icon name for caching purposes.
+    fn icon_name(&self) -> &'static str;
+
+    /// Get the tooltip text including keyboard shortcut.
+    fn tooltip(&self) -> &'static str;
+
+    /// Get the keyboard shortcut character.
+    fn hotkey(&self) -> char;
+}
+
+impl AnnotationToolBehavior for AnnotationTool {
+    fn icon_name(&self) -> &'static str {
+        match self {
+            Self::Select => "cursor",
+            Self::BoundingBox => "bounding-box",
+            Self::Polygon => "hexagon",
+            Self::Point => "geo-alt",
+        }
+    }
+
+    fn tooltip(&self) -> &'static str {
+        match self {
+            Self::Select => "Select and edit annotations (s)",
+            Self::BoundingBox => "Draw bounding boxes (b)",
+            Self::Polygon => "Draw polygon masks (m)",
+            Self::Point => "Place point markers (p)",
+        }
+    }
+
+    fn hotkey(&self) -> char {
+        match self {
+            Self::Select => 's',
+            Self::BoundingBox => 'b',
+            Self::Polygon => 'm',
+            Self::Point => 'p',
+        }
+    }
+}
+
 /// Which part of an annotation is being dragged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DragHandle {

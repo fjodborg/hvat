@@ -2,7 +2,7 @@
 //!
 //! These helpers reduce code duplication in view construction.
 
-use crate::annotation::AnnotationTool;
+use crate::annotation::{AnnotationTool, AnnotationToolBehavior};
 use crate::message::Message;
 use crate::ui_constants::{button as btn_const, icons as icon_const, slider as slider_const, spacing, text, tooltip as tooltip_const};
 use crate::widget_state::TooltipState;
@@ -113,7 +113,7 @@ where
 /// Creates an icon button that shows active state and a tooltip on hover.
 ///
 /// # Arguments
-/// * `label` - Button label (shown in tooltip)
+/// * `label` - Button label (fallback for icon failures)
 /// * `tool` - The annotation tool this button represents
 /// * `active_tool` - Currently selected tool
 /// * `tooltip_state` - External tooltip state for hover tracking
@@ -123,19 +123,16 @@ pub fn tool_button(
     active_tool: AnnotationTool,
     tooltip_state: &TooltipState,
 ) -> Element<'static, Message> {
-    let tooltip_text = match tool {
-        AnnotationTool::Select => "Select and edit annotations (s)",
-        AnnotationTool::BoundingBox => "Draw bounding boxes (b)",
-        AnnotationTool::Polygon => "Draw polygon masks (m)",
-        AnnotationTool::Point => "Place point markers (p)",
-    };
+    // Use trait methods for tool metadata
+    let tooltip_text = tool.tooltip();
+    let icon_name = tool.icon_name();
 
-    // Get the appropriate icon for this tool
-    let (icon_name, icon_data) = match tool {
-        AnnotationTool::Select => ("cursor", icons::CURSOR),
-        AnnotationTool::BoundingBox => ("bounding-box", icons::BOUNDING_BOX),
-        AnnotationTool::Polygon => ("hexagon", icons::HEXAGON),
-        AnnotationTool::Point => ("geo-alt", icons::GEO_ALT),
+    // Get the icon data for this tool
+    let icon_data = match tool {
+        AnnotationTool::Select => icons::CURSOR,
+        AnnotationTool::BoundingBox => icons::BOUNDING_BOX,
+        AnnotationTool::Polygon => icons::HEXAGON,
+        AnnotationTool::Point => icons::GEO_ALT,
     };
 
     // Try to get the icon; fall back to text button if it fails
