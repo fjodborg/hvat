@@ -573,29 +573,14 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                     let hit_radius = threshold::POINT_HIT_RADIUS / state.zoom;
                     let currently_selected = state.annotations().selected();
 
-                    // Check if clicking on the body of the currently selected annotation
-                    // If so, cycle to next overlapping annotation immediately
+                    // Check if clicking on the currently selected annotation
                     if let Some(sel_id) = currently_selected {
                         if let Some(ann) = state.annotations().get(sel_id) {
                             if let Some(handle) = ann.shape.hit_test_handle(&point, hit_radius) {
-                                if matches!(handle, DragHandle::Body) {
-                                    // Clicking on selected annotation's body - cycle to next
-                                    if let Some(next_id) = state.annotations().cycle_selection(&point, Some(sel_id)) {
-                                        if next_id != sel_id {
-                                            state.annotations_mut().select(Some(next_id));
-                                            log::debug!("🔄 Cycled to annotation {}", next_id);
-                                            // Start drag on the NEW annotation
-                                            if let Some(next_ann) = state.annotations().get(next_id) {
-                                                let original = next_ann.shape.clone();
-                                                state.drawing_state.editing.start_drag(next_id, DragHandle::Body, point, original);
-                                            }
-                                            return;
-                                        }
-                                    }
-                                }
-                                // Clicking on a handle (corner/vertex) of selected - start drag
+                                // Clicking on selected annotation - start drag (cycling happens on release if no movement)
                                 let original = ann.shape.clone();
-                                state.drawing_state.editing.start_drag(sel_id, handle, point, original);
+                                // was_already_selected = true (clicking on already-selected annotation)
+                                state.drawing_state.editing.start_drag(sel_id, handle, point, original, true);
                                 log::debug!("🔧 Started dragging {:?} of annotation {}", handle, sel_id);
                                 return;
                             }
@@ -607,7 +592,8 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                         state.annotations_mut().select(Some(hit_id));
                         if let Some(ann) = state.annotations().get(hit_id) {
                             let original = ann.shape.clone();
-                            state.drawing_state.editing.start_drag(hit_id, handle, point, original);
+                            // was_already_selected = false (just selected this annotation)
+                            state.drawing_state.editing.start_drag(hit_id, handle, point, original, false);
                             log::debug!("🔧 Selected annotation {} and started dragging {:?}", hit_id, handle);
                         }
                     } else {
@@ -722,7 +708,27 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
         AnnotationMessage::FinishDrawing => {
             // Handle editing/dragging finish in Select mode
             if state.drawing_state.editing.is_dragging {
-                log::debug!("🔧 Finished editing annotation {:?}", state.drawing_state.editing.annotation_id);
+                let editing = &state.drawing_state.editing;
+                let was_click = !editing.has_moved;
+                let was_body_drag = matches!(editing.handle, Some(DragHandle::Body));
+                let was_already_selected = editing.was_already_selected;
+                let ann_id = editing.annotation_id;
+                let drag_start = editing.drag_start;
+
+                // Check if this was a click (no movement) on the body of an already-selected annotation
+                // If so, cycle to the next overlapping annotation
+                // Only cycle if: no movement, on body, AND was already selected before click
+                if was_click && was_body_drag && was_already_selected {
+                    if let (Some(sel_id), Some(point)) = (ann_id, drag_start) {
+                        if let Some(next_id) = state.annotations().cycle_selection(&point, Some(sel_id)) {
+                            if next_id != sel_id {
+                                state.annotations_mut().select(Some(next_id));
+                                log::debug!("🔄 Cycled to annotation {} (click without drag)", next_id);
+                            }
+                        }
+                    }
+                }
+
                 state.drawing_state.editing.finish_drag();
                 return;
             }
@@ -839,7 +845,8 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 if let Some(handle) = state.annotations().hit_test_handle(&point, hit_radius) {
                     if let Some(ann) = state.annotations().get(selected_id) {
                         let original = ann.shape.clone();
-                        state.drawing_state.editing.start_drag(selected_id, handle, point, original);
+                        // was_already_selected = true (clicking on already-selected annotation's handle)
+                        state.drawing_state.editing.start_drag(selected_id, handle, point, original, true);
                         log::debug!("🔧 Started dragging handle {:?} of annotation {}", handle, selected_id);
                     }
                     return;
@@ -851,7 +858,8 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 state.annotations_mut().select(Some(hit_id));
                 if let Some(ann) = state.annotations().get(hit_id) {
                     let original = ann.shape.clone();
-                    state.drawing_state.editing.start_drag(hit_id, DragHandle::Body, point, original);
+                    // was_already_selected = false (just selected this annotation)
+                    state.drawing_state.editing.start_drag(hit_id, DragHandle::Body, point, original, false);
                     log::debug!("🔧 Selected and started body drag of annotation {}", hit_id);
                 }
             } else {
@@ -873,16 +881,24 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 // Calculate delta from drag start
                 let delta = Point::new(point.x - start.x, point.y - start.y);
 
-                // Get original shape and apply delta
-                if let Some(original) = &state.drawing_state.editing.original_shape {
-                    let new_shape = original.apply_drag(handle, delta);
-                    state.annotations_mut().update_shape(ann_id, new_shape);
+                // Only apply drag if we've moved beyond threshold
+                let move_threshold = threshold::DRAG_MOVEMENT / state.zoom;
+                if delta.x.abs() > move_threshold || delta.y.abs() > move_threshold {
+                    // Mark that we've actually moved (not just a click)
+                    state.drawing_state.editing.mark_moved();
+
+                    // Get original shape and apply delta
+                    if let Some(original) = &state.drawing_state.editing.original_shape {
+                        let new_shape = original.apply_drag(handle, delta);
+                        state.annotations_mut().update_shape(ann_id, new_shape);
+                    }
                 }
             }
         }
         AnnotationMessage::FinishDrag => {
+            // Note: This is currently unused - FinishDrawing handles drag end.
+            // Kept for potential future use with separate drag tracking.
             if state.drawing_state.editing.is_dragging {
-                log::debug!("🔧 Finished dragging annotation {:?}", state.drawing_state.editing.annotation_id);
                 state.drawing_state.editing.finish_drag();
             }
         }

@@ -810,6 +810,9 @@ pub struct EditingState {
     pub is_dragging: bool,
     /// Whether the mouse has actually moved since drag started
     pub has_moved: bool,
+    /// Whether the annotation was already selected when drag started
+    /// (used to determine if clicking should cycle to next annotation)
+    pub was_already_selected: bool,
     /// Which annotation is being edited
     pub annotation_id: Option<u64>,
     /// Which handle/part is being dragged
@@ -826,9 +829,11 @@ impl EditingState {
     }
 
     /// Start dragging an annotation
-    pub fn start_drag(&mut self, ann_id: u64, handle: DragHandle, point: Point, original: Shape) {
+    /// `was_already_selected` indicates if the annotation was selected before this click
+    pub fn start_drag(&mut self, ann_id: u64, handle: DragHandle, point: Point, original: Shape, was_already_selected: bool) {
         self.is_dragging = true;
         self.has_moved = false;
+        self.was_already_selected = was_already_selected;
         self.annotation_id = Some(ann_id);
         self.handle = Some(handle);
         self.drag_start = Some(point);
@@ -849,6 +854,7 @@ impl EditingState {
     pub fn finish_drag(&mut self) {
         self.is_dragging = false;
         self.has_moved = false;
+        self.was_already_selected = false;
         self.annotation_id = None;
         self.handle = None;
         self.drag_start = None;
