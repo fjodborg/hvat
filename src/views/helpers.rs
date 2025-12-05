@@ -4,14 +4,11 @@
 
 use crate::annotation::AnnotationTool;
 use crate::message::Message;
-use crate::ui_constants::{button as btn_const, slider as slider_const, spacing, text};
+use crate::ui_constants::{button as btn_const, icons as icon_const, slider as slider_const, spacing, text, tooltip as tooltip_const};
 use crate::widget_state::TooltipState;
 use hvat_ui::icon::{get_icon, icons};
 use hvat_ui::widgets::{button, icon_button, row, slider, text as text_widget, tooltip, Element, Row, SliderId, TooltipPosition};
 use hvat_ui::Color;
-
-/// Default tooltip delay in milliseconds.
-const TOOLTIP_DELAY_MS: u64 = 400;
 
 /// Build a labeled slider row.
 ///
@@ -110,14 +107,6 @@ where
         .spacing(spacing::STANDARD)
 }
 
-/// Icon size for toolbar buttons.
-const ICON_SIZE: u32 = 20;
-
-/// Icon button size (icon + padding).
-const ICON_BUTTON_SIZE: f32 = 28.0;
-
-/// Icon color (white).
-const ICON_COLOR: [u8; 4] = [255, 255, 255, 255];
 
 /// Build an annotation tool button with tooltip.
 ///
@@ -150,7 +139,7 @@ pub fn tool_button(
     };
 
     // Try to get the icon; fall back to text button if it fails
-    let Some(icon) = get_icon(icon_name, icon_data, ICON_SIZE, ICON_COLOR) else {
+    let Some(icon) = get_icon(icon_name, icon_data, icon_const::SIZE, icon_const::COLOR) else {
         // Fallback to text button if icon rasterization fails
         let display_label = if tool == active_tool {
             format!("{} *", label)
@@ -169,7 +158,7 @@ pub fn tool_button(
     let tooltip_id = format!("tool_{:?}", tool);
 
     // Check if tooltip should be shown based on external state
-    let show = tooltip_state.should_show(&tooltip_id, TOOLTIP_DELAY_MS);
+    let show = tooltip_state.should_show(&tooltip_id, tooltip_const::DELAY_MS);
 
     // Check if this tooltip is the currently active one
     let is_hover_active = tooltip_state.current_hover() == Some(tooltip_id.as_str());
@@ -182,7 +171,7 @@ pub fn tool_button(
             Element::new(
                 icon_button(icon)
                     .on_press(Message::set_annotation_tool(tool))
-                    .size(ICON_BUTTON_SIZE)
+                    .size(icon_const::BUTTON_SIZE)
                     .active(is_tool_active),
             ),
             tooltip_text,
@@ -272,7 +261,7 @@ pub fn simple_icon_button(
     tooltip_state: &TooltipState,
 ) -> Element<'static, Message> {
     // Try to get the icon; fall back to text button if it fails
-    let Some(icon) = get_icon(icon_name, icon_data, ICON_SIZE, ICON_COLOR) else {
+    let Some(icon) = get_icon(icon_name, icon_data, icon_const::SIZE, icon_const::COLOR) else {
         // Fallback to text button if icon rasterization fails
         return Element::new(
             button(icon_name)
@@ -286,7 +275,7 @@ pub fn simple_icon_button(
     let tooltip_id_clone = tooltip_id.clone();
 
     // Check if tooltip should be shown based on external state
-    let show = tooltip_state.should_show(&tooltip_id, TOOLTIP_DELAY_MS);
+    let show = tooltip_state.should_show(&tooltip_id, tooltip_const::DELAY_MS);
 
     // Check if this tooltip is the currently active one
     let is_hover_active = tooltip_state.current_hover() == Some(tooltip_id.as_str());
@@ -298,7 +287,7 @@ pub fn simple_icon_button(
             Element::new(
                 icon_button(icon)
                     .on_press(message)
-                    .size(ICON_BUTTON_SIZE),
+                    .size(icon_const::BUTTON_SIZE),
             ),
             tooltip_text,
         )

@@ -8,6 +8,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::color_utils::hsv_to_rgb;
+use crate::ui_constants::annotation as ann_const;
+
 // ============================================================================
 // Core Geometry Types
 // ============================================================================
@@ -375,13 +378,13 @@ pub struct Category {
 
 impl Category {
     pub fn new(id: u32, name: impl Into<String>) -> Self {
-        // Generate a default color based on the ID
-        let hue = (id as f32 * 137.5) % 360.0; // Golden angle for good distribution
+        // Generate a default color based on the ID using golden angle for good distribution
+        let hue = (id as f32 * ann_const::GOLDEN_ANGLE) % 360.0;
         let (r, g, b) = hsv_to_rgb(hue, 0.7, 0.9);
         Self {
             id,
             name: name.into(),
-            color: [r, g, b, 0.7],
+            color: [r, g, b, ann_const::DEFAULT_ALPHA],
         }
     }
 
@@ -389,29 +392,6 @@ impl Category {
         self.color = color;
         self
     }
-}
-
-/// Convert HSV to RGB (h in degrees, s and v in 0-1).
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let c = v * s;
-    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-    let m = v - c;
-
-    let (r, g, b) = if h < 60.0 {
-        (c, x, 0.0)
-    } else if h < 120.0 {
-        (x, c, 0.0)
-    } else if h < 180.0 {
-        (0.0, c, x)
-    } else if h < 240.0 {
-        (0.0, x, c)
-    } else if h < 300.0 {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-
-    (r + m, g + m, b + m)
 }
 
 // ============================================================================

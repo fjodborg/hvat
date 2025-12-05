@@ -34,6 +34,9 @@ pub use hyperspectral::{
 // UI constants for consistent styling
 pub mod ui_constants;
 
+// Color utility functions (shared across modules)
+pub mod color_utils;
+
 // Annotation import/export formats
 pub mod formats;
 

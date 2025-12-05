@@ -183,6 +183,40 @@ pub mod annotation {
     pub const PREVIEW_ALPHA: f32 = 0.5;
 }
 
+/// Window dimension constants.
+pub mod window {
+    /// Default window size (width, height)
+    pub const DEFAULT_SIZE: (u32, u32) = (1200, 800);
+    /// Minimum window size (width, height)
+    pub const MIN_SIZE: (u32, u32) = (600, 400);
+}
+
+/// Tooltip constants.
+pub mod tooltip {
+    /// Default tooltip delay in milliseconds
+    pub const DELAY_MS: u64 = 400;
+}
+
+/// Icon constants for toolbar buttons.
+pub mod icons {
+    /// Icon size for toolbar buttons (pixels)
+    pub const SIZE: u32 = 20;
+    /// Icon button size (icon + padding)
+    pub const BUTTON_SIZE: f32 = 28.0;
+    /// Default icon color (white, RGBA)
+    pub const COLOR: [u8; 4] = [255, 255, 255, 255];
+}
+
+/// Test image generation constants.
+pub mod test_image {
+    /// Default test image width
+    pub const WIDTH: u32 = 4096;
+    /// Default test image height
+    pub const HEIGHT: u32 = 4096;
+    /// Default number of spectral bands
+    pub const BANDS: usize = 9;
+}
+
 /// Common UI colors (beyond theme colors).
 pub mod colors {
     use super::Color;

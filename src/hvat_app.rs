@@ -9,6 +9,7 @@
 //! - wasm_file: WASM file loading
 
 use crate::annotation::{AnnotationStore, DrawingState};
+use crate::color_utils::hsv_to_rgb;
 use crate::handlers::{
     handle_annotation, handle_band, handle_counter, handle_image_load, handle_image_settings,
     handle_image_view, handle_navigation, handle_ui, AnnotationState, ImageLoadState,
@@ -17,6 +18,7 @@ use crate::hyperspectral::{generate_test_hyperspectral, BandSelection, Hyperspec
 use crate::image_cache::ImageCache;
 use crate::message::{ExportFormat, Message, PersistenceMode, Tab};
 use crate::theme::Theme;
+use crate::ui_constants::{annotation as ann_const, test_image};
 use crate::views::{build_overlay, view_counter, view_export_modal_content, view_home, view_image_viewer, view_settings};
 use crate::widget_state::WidgetState;
 use hvat_ui::Overlay;
@@ -133,7 +135,7 @@ impl Tag {
     /// Create a new tag with auto-generated color.
     pub fn new(id: u32, name: impl Into<String>) -> Self {
         // Generate distinct colors using golden angle
-        let hue = (id as f32 * 137.5) % 360.0;
+        let hue = (id as f32 * ann_const::GOLDEN_ANGLE) % 360.0;
         let (r, g, b) = hsv_to_rgb(hue, 0.7, 0.9);
         Self {
             id,
@@ -141,22 +143,6 @@ impl Tag {
             color: [r, g, b, 1.0],
         }
     }
-}
-
-/// Convert HSV to RGB (same as Category color generation).
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let c = v * s;
-    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
-    let m = v - c;
-    let (r, g, b) = match (h / 60.0) as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    (r + m, g + m, b + m)
 }
 
 impl Default for ImageSettings {
@@ -174,11 +160,14 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn new() -> Self {
-        // Create a test hyperspectral image (9 bands)
-        log::info!("Creating 4096x4096 test hyperspectral image (9 bands)...");
-        let width = 4096;
-        let height = 4096;
-        let hyper_image = generate_test_hyperspectral(width, height, 9);
+        // Create a test hyperspectral image
+        log::info!(
+            "Creating {}x{} test hyperspectral image ({} bands)...",
+            test_image::WIDTH,
+            test_image::HEIGHT,
+            test_image::BANDS
+        );
+        let hyper_image = generate_test_hyperspectral(test_image::WIDTH, test_image::HEIGHT, test_image::BANDS);
         let band_selection = BandSelection::default_rgb();
 
         // Create GPU handle for hyperspectral rendering (band data uploaded once)
