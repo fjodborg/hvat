@@ -115,11 +115,16 @@ pub enum UIMessage {
     /// Scrollbar drag start with mouse X position for relative dragging
     ScrollbarDragStartX(f32),
     ScrollbarDragEndX,
-    // Sidebar scrolling (independent)
+    // Right sidebar scrolling (independent)
     SidebarScrollY(f32),
     /// Sidebar scrollbar drag start with mouse Y position for relative dragging
     SidebarScrollbarDragStartY(f32),
     SidebarScrollbarDragEndY,
+    // Left sidebar scrolling (independent)
+    LeftSidebarScrollY(f32),
+    /// Left sidebar scrollbar drag start with mouse Y position for relative dragging
+    LeftSidebarScrollbarDragStartY(f32),
+    LeftSidebarScrollbarDragEndY,
     // Settings
     ToggleDebugInfo,
     SetTheme(Theme),
@@ -420,7 +425,7 @@ impl Message {
     pub fn scrollbar_drag_end_x() -> Self {
         Message::UI(UIMessage::ScrollbarDragEndX)
     }
-    // UI shortcuts - sidebar scrolling
+    // UI shortcuts - right sidebar scrolling
     pub fn sidebar_scroll_y(offset: f32) -> Self {
         Message::UI(UIMessage::SidebarScrollY(offset))
     }
@@ -429,6 +434,16 @@ impl Message {
     }
     pub fn sidebar_scrollbar_drag_end_y() -> Self {
         Message::UI(UIMessage::SidebarScrollbarDragEndY)
+    }
+    // UI shortcuts - left sidebar scrolling
+    pub fn left_sidebar_scroll_y(offset: f32) -> Self {
+        Message::UI(UIMessage::LeftSidebarScrollY(offset))
+    }
+    pub fn left_sidebar_scrollbar_drag_start_y(mouse_y: f32) -> Self {
+        Message::UI(UIMessage::LeftSidebarScrollbarDragStartY(mouse_y))
+    }
+    pub fn left_sidebar_scrollbar_drag_end_y() -> Self {
+        Message::UI(UIMessage::LeftSidebarScrollbarDragEndY)
     }
     pub fn toggle_debug_info() -> Self {
         Message::UI(UIMessage::ToggleDebugInfo)

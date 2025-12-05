@@ -2,14 +2,26 @@
 
 use crate::{Color, Element, Event, Layout, Limits, Rectangle, Renderer, Widget};
 
-/// Position of the title bar.
+/// Position of the title bar (left or right).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TitlePosition {
-    /// Title in top-left corner (default)
+    /// Title on left side (default)
     #[default]
-    TopLeft,
-    /// Title in top-right corner
-    TopRight,
+    Left,
+    /// Title on right side
+    Right,
+}
+
+/// Style of the title bar display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TitleStyle {
+    /// Title bar overlays the content in the corner (original style)
+    #[default]
+    Inside,
+    /// Title bar is above the content, full width, content starts below it
+    Above,
+    /// No title bar displayed
+    None,
 }
 
 /// A container with a small title label displayed in a corner.
@@ -18,8 +30,14 @@ pub struct TitledContainer<'a, Message> {
     title: String,
     /// Child content
     child: Element<'a, Message>,
-    /// Title position
+    /// Optional header content (rendered at top, below title bar)
+    header: Option<Element<'a, Message>>,
+    /// Optional footer content (rendered at bottom, above status bar area)
+    footer: Option<Element<'a, Message>>,
+    /// Title position (left or right)
     title_position: TitlePosition,
+    /// Title style (inside, above, or none)
+    title_style: TitleStyle,
     /// Title bar background color
     title_bg_color: Color,
     /// Title text color
@@ -40,6 +58,10 @@ pub struct TitledContainer<'a, Message> {
     background: Option<Color>,
     /// Whether to fill available space
     fill: bool,
+    /// Cached header height for use in draw/event
+    header_height: std::cell::Cell<f32>,
+    /// Cached footer height for use in draw/event
+    footer_height: std::cell::Cell<f32>,
 }
 
 impl<'a, Message> TitledContainer<'a, Message> {
@@ -48,7 +70,10 @@ impl<'a, Message> TitledContainer<'a, Message> {
         Self {
             title: title.into(),
             child,
-            title_position: TitlePosition::TopLeft,
+            header: None,
+            footer: None,
+            title_position: TitlePosition::Left,
+            title_style: TitleStyle::Inside,
             title_bg_color: Color::new(0.15, 0.18, 0.22, 0.95),
             title_text_color: Color::new(0.8, 0.85, 0.9, 1.0),
             title_font_size: 11.0,
@@ -59,7 +84,23 @@ impl<'a, Message> TitledContainer<'a, Message> {
             border_width: 1.0,
             background: None,
             fill: false,
+            header_height: std::cell::Cell::new(0.0),
+            footer_height: std::cell::Cell::new(0.0),
         }
+    }
+
+    /// Set a header element to be rendered at the top of the container (below title bar).
+    /// The header is measured first, then remaining height goes to the main child.
+    pub fn header(mut self, header: Element<'a, Message>) -> Self {
+        self.header = Some(header);
+        self
+    }
+
+    /// Set a footer element to be rendered at the bottom of the container.
+    /// The footer is measured first, then remaining height goes to the main child.
+    pub fn footer(mut self, footer: Element<'a, Message>) -> Self {
+        self.footer = Some(footer);
+        self
     }
 
     /// Make the container fill all available space.
@@ -68,9 +109,15 @@ impl<'a, Message> TitledContainer<'a, Message> {
         self
     }
 
-    /// Set the title position.
+    /// Set the title position (left or right).
     pub fn title_position(mut self, position: TitlePosition) -> Self {
         self.title_position = position;
+        self
+    }
+
+    /// Set the title style (inside, above, or none).
+    pub fn title_style(mut self, style: TitleStyle) -> Self {
+        self.title_style = style;
         self
     }
 
@@ -131,41 +178,68 @@ impl<'a, Message> TitledContainer<'a, Message> {
 
 impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
     fn layout(&self, limits: &Limits) -> Layout {
-        // Calculate child limits (accounting for content padding)
-        let child_max_width = if limits.max_width.is_finite() {
+        let content_max_width = if limits.max_width.is_finite() {
             (limits.max_width - self.content_padding * 2.0).max(0.0)
         } else {
             f32::INFINITY
         };
+
+        // Calculate title bar height based on style
+        let title_h = match self.title_style {
+            TitleStyle::Above => self.title_bar_height(),
+            TitleStyle::Inside | TitleStyle::None => 0.0,
+        };
+
+        // Measure header if present
+        let header_h = if let Some(ref header) = self.header {
+            let header_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
+            let header_layout = header.widget().layout(&header_limits);
+            header_layout.size().height
+        } else {
+            0.0
+        };
+        self.header_height.set(header_h);
+
+        // Measure footer if present
+        let footer_h = if let Some(ref footer) = self.footer {
+            let footer_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
+            let footer_layout = footer.widget().layout(&footer_limits);
+            footer_layout.size().height
+        } else {
+            0.0
+        };
+        self.footer_height.set(footer_h);
+
+        // Calculate child limits (accounting for content padding, title bar (if Above), header, AND footer)
         let child_max_height = if limits.max_height.is_finite() {
-            (limits.max_height - self.content_padding * 2.0).max(0.0)
+            (limits.max_height - self.content_padding * 2.0 - title_h - header_h - footer_h).max(0.0)
         } else {
             f32::INFINITY
         };
 
-        let child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
+        let child_limits = Limits::with_range(0.0, content_max_width, 0.0, child_max_height);
         let child_layout = self.child.widget().layout(&child_limits);
         let child_size = child_layout.size();
 
         // Container size depends on fill mode
         let (width, height) = if self.fill {
             // Fill mode: use all available space (up to limits)
-            // Return 0 when limits are infinite to signal "fill remaining space" to parent
             let w = if limits.max_width.is_finite() {
                 limits.max_width
             } else {
-                0.0 // Signal to parent that we want to fill
+                0.0
             };
             let h = if limits.max_height.is_finite() {
                 limits.max_height
             } else {
-                0.0 // Signal to parent that we want to fill
+                0.0
             };
             (w, h)
         } else {
-            // Content mode: size to child + padding, capped by limits
+            // Content mode: size to child + title (if Above) + header + footer + padding
             let w = (child_size.width + self.content_padding * 2.0).min(limits.max_width);
-            let h = (child_size.height + self.content_padding * 2.0).min(limits.max_height);
+            let h = (child_size.height + title_h + header_h + footer_h + self.content_padding * 2.0)
+                .min(limits.max_height);
             (w, h)
         };
 
@@ -174,6 +248,14 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
+        let header_h = self.header_height.get();
+        let footer_h = self.footer_height.get();
+
+        // Calculate title bar height based on style
+        let title_h = match self.title_style {
+            TitleStyle::Above => self.title_bar_height(),
+            TitleStyle::Inside | TitleStyle::None => 0.0,
+        };
 
         // Draw background if specified
         if let Some(bg) = self.background {
@@ -185,51 +267,144 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
             renderer.stroke_rect(bounds, border, self.border_width);
         }
 
-        // Draw child with offset for padding
-        let child_width = (bounds.width - self.content_padding * 2.0).max(0.0);
-        let child_height = (bounds.height - self.content_padding * 2.0).max(0.0);
+        let content_width = (bounds.width - self.content_padding * 2.0).max(0.0);
+
+        // For TitleStyle::Above, draw full-width title bar first and offset content below
+        if self.title_style == TitleStyle::Above {
+            let title_height = self.title_bar_height();
+
+            // Title bar background (full width)
+            let title_rect = Rectangle::new(bounds.x, bounds.y, bounds.width, title_height);
+            renderer.fill_rect(title_rect, self.title_bg_color);
+
+            // Title text (positioned based on title_position)
+            let text_x = match self.title_position {
+                TitlePosition::Left => bounds.x + self.title_padding_h,
+                TitlePosition::Right => {
+                    bounds.x + bounds.width - self.title_bar_width() + self.title_padding_h
+                }
+            };
+            let text_y = bounds.y + self.title_padding_v;
+            renderer.draw_text(
+                &self.title,
+                crate::Point::new(text_x, text_y),
+                self.title_text_color,
+                self.title_font_size,
+            );
+        }
+
+        // Draw header below title bar (if Above style) or at top
+        if let Some(ref header) = self.header {
+            let header_bounds = Rectangle::new(
+                bounds.x + self.content_padding,
+                bounds.y + self.content_padding + title_h,
+                content_width,
+                header_h,
+            );
+            let header_layout = Layout::new(header_bounds);
+            header.widget().draw(renderer, &header_layout);
+        }
+
+        // Draw child with offset for padding, title bar (if Above), header, and reduced height for footer
+        let child_height =
+            (bounds.height - self.content_padding * 2.0 - title_h - header_h - footer_h).max(0.0);
         let child_bounds = Rectangle::new(
             bounds.x + self.content_padding,
-            bounds.y + self.content_padding,
-            child_width,
+            bounds.y + self.content_padding + title_h + header_h,
+            content_width,
             child_height,
         );
         let child_layout = Layout::new(child_bounds);
         self.child.widget().draw(renderer, &child_layout);
 
-        // Draw title bar on top of content
-        let title_height = self.title_bar_height();
-        let title_width = self.title_bar_width();
+        // Draw footer at bottom if present
+        if let Some(ref footer) = self.footer {
+            let footer_bounds = Rectangle::new(
+                bounds.x + self.content_padding,
+                bounds.y + bounds.height - footer_h - self.content_padding,
+                content_width,
+                footer_h,
+            );
+            let footer_layout = Layout::new(footer_bounds);
+            footer.widget().draw(renderer, &footer_layout);
+        }
 
-        let title_x = match self.title_position {
-            TitlePosition::TopLeft => bounds.x,
-            TitlePosition::TopRight => bounds.x + bounds.width - title_width,
-        };
-        let title_y = bounds.y;
+        // For TitleStyle::Inside, draw title bar overlaying content (original behavior)
+        if self.title_style == TitleStyle::Inside {
+            let title_height = self.title_bar_height();
+            let title_width = self.title_bar_width();
 
-        // Title bar background with slight rounded appearance (via solid rect)
-        let title_rect = Rectangle::new(title_x, title_y, title_width, title_height);
-        renderer.fill_rect(title_rect, self.title_bg_color);
+            let title_x = match self.title_position {
+                TitlePosition::Left => bounds.x,
+                TitlePosition::Right => bounds.x + bounds.width - title_width,
+            };
+            let title_y = bounds.y;
 
-        // Title text
-        let text_x = title_x + self.title_padding_h;
-        let text_y = title_y + self.title_padding_v;
-        renderer.draw_text(
-            &self.title,
-            crate::Point::new(text_x, text_y),
-            self.title_text_color,
-            self.title_font_size,
-        );
+            // Title bar background
+            let title_rect = Rectangle::new(title_x, title_y, title_width, title_height);
+            renderer.fill_rect(title_rect, self.title_bg_color);
+
+            // Title text
+            let text_x = title_x + self.title_padding_h;
+            let text_y = title_y + self.title_padding_v;
+            renderer.draw_text(
+                &self.title,
+                crate::Point::new(text_x, text_y),
+                self.title_text_color,
+                self.title_font_size,
+            );
+        }
+        // TitleStyle::None - don't draw any title
     }
 
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
         let bounds = layout.bounds();
-        let child_width = (bounds.width - self.content_padding * 2.0).max(0.0);
-        let child_height = (bounds.height - self.content_padding * 2.0).max(0.0);
+        let header_h = self.header_height.get();
+        let footer_h = self.footer_height.get();
+        let content_width = (bounds.width - self.content_padding * 2.0).max(0.0);
+
+        // Calculate title bar height based on style
+        let title_h = match self.title_style {
+            TitleStyle::Above => self.title_bar_height(),
+            TitleStyle::Inside | TitleStyle::None => 0.0,
+        };
+
+        let child_height =
+            (bounds.height - self.content_padding * 2.0 - title_h - header_h - footer_h).max(0.0);
+
+        // First, try header events
+        if let Some(ref mut header) = self.header {
+            let header_bounds = Rectangle::new(
+                bounds.x + self.content_padding,
+                bounds.y + self.content_padding + title_h,
+                content_width,
+                header_h,
+            );
+            let header_layout = Layout::new(header_bounds);
+            if let Some(msg) = header.widget_mut().on_event(event, &header_layout) {
+                return Some(msg);
+            }
+        }
+
+        // Then try footer events
+        if let Some(ref mut footer) = self.footer {
+            let footer_bounds = Rectangle::new(
+                bounds.x + self.content_padding,
+                bounds.y + bounds.height - footer_h - self.content_padding,
+                content_width,
+                footer_h,
+            );
+            let footer_layout = Layout::new(footer_bounds);
+            if let Some(msg) = footer.widget_mut().on_event(event, &footer_layout) {
+                return Some(msg);
+            }
+        }
+
+        // Finally try child events
         let child_bounds = Rectangle::new(
             bounds.x + self.content_padding,
-            bounds.y + self.content_padding,
-            child_width,
+            bounds.y + self.content_padding + title_h + header_h,
+            content_width,
             child_height,
         );
         let child_layout = Layout::new(child_bounds);

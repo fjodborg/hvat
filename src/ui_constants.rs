@@ -127,10 +127,14 @@ pub mod image_viewer {
 
 /// Sidebar dimension constants.
 pub mod sidebar {
-    /// Default sidebar width
-    pub const WIDTH: f32 = 220.0;
+    /// Default sidebar width (right sidebar)
+    pub const WIDTH: f32 = 160.0;
+    /// Left sidebar width (FILES, TOOLS)
+    pub const LEFT_WIDTH: f32 = 160.0;
+    /// Right sidebar width (TAGS, CATEGORIES)
+    pub const RIGHT_WIDTH: f32 = 160.0;
     /// Spacing between sidebar and main content
-    pub const GAP: f32 = 15.0;
+    pub const GAP: f32 = 5.0;
 }
 
 /// Title bar constants for titled containers.

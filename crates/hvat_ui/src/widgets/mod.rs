@@ -39,7 +39,7 @@ pub use scrollable::{scrollable, Scrollable};
 pub use slider::{slider, Slider, SliderId};
 pub use text::{text, Text};
 pub use text_input::{text_input, TextInput};
-pub use titled_container::{titled_container, TitledContainer, TitlePosition};
+pub use titled_container::{titled_container, TitledContainer, TitlePosition, TitleStyle};
 pub use tooltip::{tooltip, Tooltip, TooltipPosition};
 
 // Re-export Element for convenience (it's actually in the element module)

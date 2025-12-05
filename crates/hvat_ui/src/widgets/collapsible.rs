@@ -8,6 +8,8 @@ pub struct Collapsible<'a, Message> {
     title: String,
     /// Child content (shown when expanded)
     child: Element<'a, Message>,
+    /// Optional action element shown on the right side of the header
+    header_action: Option<Element<'a, Message>>,
     /// Whether the container is collapsed
     is_collapsed: bool,
     /// Whether the header is hovered
@@ -34,6 +36,7 @@ impl<'a, Message> Collapsible<'a, Message> {
         Self {
             title: title.into(),
             child,
+            header_action: None,
             is_collapsed: false,
             is_hovered: false,
             on_toggle: None,
@@ -44,6 +47,14 @@ impl<'a, Message> Collapsible<'a, Message> {
             header_height: 24.0,
             padding: 4.0,
         }
+    }
+
+    /// Set an action element to display on the right side of the header.
+    /// This is typically used for buttons like reset/settings that should
+    /// always be visible regardless of collapsed state.
+    pub fn header_action(mut self, action: Element<'a, Message>) -> Self {
+        self.header_action = Some(action);
+        self
     }
 
     /// Set the collapsed state.
@@ -167,6 +178,22 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
         let title_y = bounds.y + (self.header_height - 12.0) / 2.0;
         renderer.draw_text(&self.title, Point::new(title_x, title_y), self.text_color, 12.0);
 
+        // Draw header action on the right side if present
+        if let Some(ref action) = self.header_action {
+            // Layout the action element to get its size
+            let action_limits = Limits::with_range(0.0, 100.0, 0.0, self.header_height);
+            let action_layout = action.widget().layout(&action_limits);
+            let action_size = action_layout.size();
+
+            // Position it on the right side of the header, centered vertically
+            let action_x = bounds.x + bounds.width - action_size.width - 4.0;
+            let action_y = bounds.y + (self.header_height - action_size.height) / 2.0;
+
+            let action_bounds = Rectangle::new(action_x, action_y, action_size.width, action_size.height);
+            let action_layout = Layout::new(action_bounds);
+            action.widget().draw(renderer, &action_layout);
+        }
+
         // Draw content if expanded
         if !self.is_collapsed {
             let content_y = bounds.y + self.header_height;
@@ -199,6 +226,16 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
         let bounds = layout.bounds();
         let header_rect = Rectangle::new(bounds.x, bounds.y, bounds.width, self.header_height);
 
+        // Helper to get header action layout
+        let get_action_layout = |bounds: &Rectangle, header_height: f32, action: &Element<'_, Message>| {
+            let action_limits = Limits::with_range(0.0, 100.0, 0.0, header_height);
+            let action_layout = action.widget().layout(&action_limits);
+            let action_size = action_layout.size();
+            let action_x = bounds.x + bounds.width - action_size.width - 4.0;
+            let action_y = bounds.y + (header_height - action_size.height) / 2.0;
+            Layout::new(Rectangle::new(action_x, action_y, action_size.width, action_size.height))
+        };
+
         // Helper to get child layout
         let get_child_layout = |bounds: &Rectangle, padding: f32, child: &Element<'_, Message>| {
             let content_y = bounds.y + 24.0; // header_height
@@ -215,6 +252,14 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
             Event::MouseMoved { position } => {
                 self.is_hovered = header_rect.contains(*position);
 
+                // Forward to header action if present
+                if let Some(ref mut action) = self.header_action {
+                    let action_layout = get_action_layout(&bounds, self.header_height, action);
+                    if let Some(msg) = action.widget_mut().on_event(event, &action_layout) {
+                        return Some(msg);
+                    }
+                }
+
                 // Forward to child if expanded
                 if !self.is_collapsed {
                     let child_layout = get_child_layout(&bounds, self.padding, &self.child);
@@ -226,7 +271,15 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
                 button: MouseButton::Left,
                 position,
             } => {
-                // Check if clicking on header
+                // First check if clicking on header action (takes priority over toggle)
+                if let Some(ref mut action) = self.header_action {
+                    let action_layout = get_action_layout(&bounds, self.header_height, action);
+                    if action_layout.bounds().contains(*position) {
+                        return action.widget_mut().on_event(event, &action_layout);
+                    }
+                }
+
+                // Check if clicking on header (but not on action)
                 if header_rect.contains(*position) {
                     self.is_collapsed = !self.is_collapsed;
                     return self.on_toggle.as_ref().map(|f| f(self.is_collapsed));
@@ -240,6 +293,14 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
                 None
             }
             _ => {
+                // Forward to header action if present
+                if let Some(ref mut action) = self.header_action {
+                    let action_layout = get_action_layout(&bounds, self.header_height, action);
+                    if let Some(msg) = action.widget_mut().on_event(event, &action_layout) {
+                        return Some(msg);
+                    }
+                }
+
                 // Forward other events to child if expanded
                 if !self.is_collapsed {
                     let child_layout = get_child_layout(&bounds, self.padding, &self.child);

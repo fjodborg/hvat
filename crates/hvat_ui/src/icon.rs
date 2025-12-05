@@ -189,4 +189,5 @@ pub mod icons {
     pub const DOWNLOAD: &[u8] = include_bytes!("../assets/icons/download.svg");
     pub const ESCAPE: &[u8] = include_bytes!("../assets/icons/escape.svg");
     pub const X_CIRCLE: &[u8] = include_bytes!("../assets/icons/x-circle.svg");
+    pub const RELOAD: &[u8] = include_bytes!("../assets/icons/arrow-clockwise.svg");
 }

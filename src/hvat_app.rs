@@ -607,7 +607,7 @@ impl Application for HvatApp {
 
         // Wrap content in scrollable - supports both vertical and horizontal scrolling
         // fill_viewport enables children with Length::Fill to expand to fill the viewport
-        let scrollable_content = scrollable(content)
+        let mut scrollable_content = scrollable(content)
             .direction(ScrollDirection::Both)
             .fill_viewport()
             .scroll_offset_y(self.widget_state.scroll.offset_y)
@@ -620,6 +620,20 @@ impl Application for HvatApp {
             .on_drag_end_y(Message::scrollbar_drag_end_y)
             .on_drag_start_x(Message::scrollbar_drag_start_x)
             .on_drag_end_x(Message::scrollbar_drag_end_x);
+
+        // Pass drag start values for relative scrollbar dragging
+        if let (Some(mouse_y), Some(scroll_y)) = (
+            self.widget_state.scroll.drag_start_mouse_y,
+            self.widget_state.scroll.drag_start_scroll_y,
+        ) {
+            scrollable_content = scrollable_content.drag_start_y(mouse_y, scroll_y);
+        }
+        if let (Some(mouse_x), Some(scroll_x)) = (
+            self.widget_state.scroll.drag_start_mouse_x,
+            self.widget_state.scroll.drag_start_scroll_x,
+        ) {
+            scrollable_content = scrollable_content.drag_start_x(mouse_x, scroll_x);
+        }
 
         // Main app container wrapped with export modal
         // The modal renders as an overlay on top when visible

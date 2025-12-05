@@ -230,7 +230,7 @@ pub struct CollapsibleState {
 impl Default for CollapsibleState {
     fn default() -> Self {
         Self {
-            image_settings_collapsed: true,  // Closed by default
+            image_settings_collapsed: false,  // Closed by default
             band_settings_collapsed: false,  // Open by default
         }
     }
@@ -379,8 +379,10 @@ pub struct WidgetState {
     pub slider: SliderState,
     /// Main content scroll state
     pub scroll: ScrollState,
-    /// Sidebar scroll state (independent from main content)
+    /// Right sidebar scroll state (independent from main content)
     pub sidebar_scroll: ScrollState,
+    /// Left sidebar scroll state (independent from right sidebar)
+    pub left_sidebar_scroll: ScrollState,
     /// Dropdown states
     pub dropdown: DropdownState,
     /// Collapsible container states

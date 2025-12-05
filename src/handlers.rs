@@ -393,11 +393,26 @@ pub fn handle_ui(
         }
         UIMessage::SidebarScrollbarDragStartY(mouse_y) => {
             widget_state.sidebar_scroll.start_drag_y(mouse_y);
-            log::debug!("📜 Sidebar scrollbar Y drag started at y={:.1}", mouse_y);
+            log::debug!("📜 Right sidebar scrollbar Y drag started at y={:.1}", mouse_y);
         }
         UIMessage::SidebarScrollbarDragEndY => {
             widget_state.sidebar_scroll.end_drag_y();
-            log::debug!("📜 Sidebar scrollbar Y drag ended");
+            log::debug!("📜 Right sidebar scrollbar Y drag ended");
+        }
+        UIMessage::LeftSidebarScrollY(offset) => {
+            let current = widget_state.left_sidebar_scroll.offset_y;
+            if (current - offset).abs() > threshold::SCROLL_CHANGE {
+                widget_state.left_sidebar_scroll.set_offset_y(offset);
+                log::debug!("📜 Left sidebar scroll Y offset: {:.1}", offset);
+            }
+        }
+        UIMessage::LeftSidebarScrollbarDragStartY(mouse_y) => {
+            widget_state.left_sidebar_scroll.start_drag_y(mouse_y);
+            log::debug!("📜 Left sidebar scrollbar Y drag started at y={:.1}", mouse_y);
+        }
+        UIMessage::LeftSidebarScrollbarDragEndY => {
+            widget_state.left_sidebar_scroll.end_drag_y();
+            log::debug!("📜 Left sidebar scrollbar Y drag ended");
         }
         UIMessage::ToggleDebugInfo => {
             *show_debug_info = !*show_debug_info;
