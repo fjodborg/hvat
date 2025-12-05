@@ -7,7 +7,7 @@ use crate::message::{ExportFormat, Message, PersistenceMode};
 use crate::theme::Theme;
 use std::collections::HashSet;
 use crate::ui_constants::{
-    annotation as ann_const, colors, image_viewer as img_const, padding,
+    annotation as ann_const, colors, image_adjust, image_viewer as img_const, padding,
     sidebar as sidebar_const, spacing, text as text_const, title_bar as title_const,
 };
 use crate::views::helpers::{simple_icon_button, tool_button};
@@ -62,14 +62,13 @@ pub fn build_overlay(
         // Add drag handles for selected annotation (when in Select mode)
         if selected && drawing_state.tool == AnnotationTool::Select {
             let handle_color = Color::WHITE;
-            let handle_radius = 4.0; // Small handle circles
 
             for (_handle_type, pos) in ann.shape.get_handles() {
                 overlay.push(OverlayItem::new(
                     OverlayShape::Point {
                         x: pos.x,
                         y: pos.y,
-                        radius: handle_radius,
+                        radius: ann_const::HANDLE_RADIUS,
                     },
                     handle_color,
                 ));
@@ -713,8 +712,8 @@ fn view_image_settings_sidebar(
         .push(Element::new(view_compact_slider(
             "Brightness",
             text_color,
-            -1.0,
-            1.0,
+            image_adjust::BRIGHTNESS_MIN,
+            image_adjust::BRIGHTNESS_MAX,
             brightness,
             SliderId::Brightness,
             widget_state.slider.is_dragging(SliderId::Brightness),
@@ -723,8 +722,8 @@ fn view_image_settings_sidebar(
         .push(Element::new(view_compact_slider(
             "Contrast",
             text_color,
-            0.1,
-            3.0,
+            image_adjust::CONTRAST_MIN,
+            image_adjust::CONTRAST_MAX,
             contrast,
             SliderId::Contrast,
             widget_state.slider.is_dragging(SliderId::Contrast),
@@ -733,8 +732,8 @@ fn view_image_settings_sidebar(
         .push(Element::new(view_compact_slider(
             "Gamma",
             text_color,
-            0.1,
-            3.0,
+            image_adjust::GAMMA_MIN,
+            image_adjust::GAMMA_MAX,
             gamma,
             SliderId::Gamma,
             widget_state.slider.is_dragging(SliderId::Gamma),
@@ -743,8 +742,8 @@ fn view_image_settings_sidebar(
         .push(Element::new(view_compact_slider(
             "Hue",
             text_color,
-            -180.0,
-            180.0,
+            image_adjust::HUE_MIN,
+            image_adjust::HUE_MAX,
             hue_shift,
             SliderId::HueShift,
             widget_state.slider.is_dragging(SliderId::HueShift),

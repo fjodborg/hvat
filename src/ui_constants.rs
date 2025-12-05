@@ -95,6 +95,26 @@ pub mod slider {
     }
 }
 
+/// Image adjustment range constants.
+pub mod image_adjust {
+    /// Brightness range minimum
+    pub const BRIGHTNESS_MIN: f32 = -1.0;
+    /// Brightness range maximum
+    pub const BRIGHTNESS_MAX: f32 = 1.0;
+    /// Contrast range minimum
+    pub const CONTRAST_MIN: f32 = 0.1;
+    /// Contrast range maximum
+    pub const CONTRAST_MAX: f32 = 3.0;
+    /// Gamma range minimum
+    pub const GAMMA_MIN: f32 = 0.1;
+    /// Gamma range maximum
+    pub const GAMMA_MAX: f32 = 3.0;
+    /// Hue shift range minimum (degrees)
+    pub const HUE_MIN: f32 = -180.0;
+    /// Hue shift range maximum (degrees)
+    pub const HUE_MAX: f32 = 180.0;
+}
+
 /// Image viewer dimension constants.
 pub mod image_viewer {
     /// Default image display width
@@ -175,6 +195,8 @@ pub mod zoom {
 pub mod annotation {
     /// Default point marker radius
     pub const POINT_RADIUS: f32 = 6.0;
+    /// Drag handle radius for selected annotations
+    pub const HANDLE_RADIUS: f32 = 4.0;
     /// Golden angle for category color generation (degrees)
     pub const GOLDEN_ANGLE: f32 = 137.5;
     /// Default category color alpha

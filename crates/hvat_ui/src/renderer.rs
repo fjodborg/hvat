@@ -851,7 +851,9 @@ impl Renderer {
                     let cache_key = handle.id();
                     if let Some((_texture, bind_group)) = self.texture_cache.get(&cache_key) {
                         // For small images (icons), use per-icon vertex buffers with baked positions
-                        // to avoid uniform buffer synchronization issues
+                        // to avoid uniform buffer synchronization issues.
+                        // Note: Reusable buffer optimization was attempted but caused rendering issues
+                        // due to queue.write_buffer timing with render pass submission.
                         if is_small {
                             // Create vertex buffer with positions baked in (NDC coordinates)
                             let (vertices, indices) = self.create_icon_vertices(rect);
@@ -1000,7 +1002,16 @@ impl Renderer {
         }
     }
 
-    fn calculate_image_transform(&self, handle: &crate::ImageHandle, rect: &Rectangle, pan: (f32, f32), zoom: f32) -> TransformUniform {
+    /// Calculate transform matrix for rendering an image with pan and zoom.
+    /// This is the shared implementation used by both regular and hyperspectral images.
+    fn calculate_transform_for_dimensions(
+        &self,
+        img_width: u32,
+        img_height: u32,
+        rect: &Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+    ) -> TransformUniform {
         // Convert rect position to NDC (Normalized Device Coordinates)
         let ndc_x = (rect.x / self.width as f32) * 2.0 - 1.0;
         let ndc_y = 1.0 - (rect.y / self.height as f32) * 2.0;
@@ -1008,7 +1019,7 @@ impl Renderer {
         let ndc_h = (rect.height / self.height as f32) * 2.0;
 
         // Calculate aspect ratios
-        let img_aspect = handle.width() as f32 / handle.height() as f32;
+        let img_aspect = img_width as f32 / img_height as f32;
         let rect_aspect = rect.width / rect.height;
         let window_aspect = self.width as f32 / self.height as f32;
 
@@ -1047,46 +1058,24 @@ impl Renderer {
         }
     }
 
-    fn calculate_hyperspectral_transform(&self, handle: &crate::HyperspectralImageHandle, rect: &Rectangle, pan: (f32, f32), zoom: f32) -> TransformUniform {
-        // Convert rect position to NDC (Normalized Device Coordinates)
-        let ndc_x = (rect.x / self.width as f32) * 2.0 - 1.0;
-        let ndc_y = 1.0 - (rect.y / self.height as f32) * 2.0;
-        let ndc_w = (rect.width / self.width as f32) * 2.0;
-        let ndc_h = (rect.height / self.height as f32) * 2.0;
+    fn calculate_image_transform(
+        &self,
+        handle: &crate::ImageHandle,
+        rect: &Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+    ) -> TransformUniform {
+        self.calculate_transform_for_dimensions(handle.width(), handle.height(), rect, pan, zoom)
+    }
 
-        // Calculate aspect ratios
-        let img_aspect = handle.width() as f32 / handle.height() as f32;
-        let rect_aspect = rect.width / rect.height;
-        let window_aspect = self.width as f32 / self.height as f32;
-
-        // Calculate scale to fit image in rect while preserving aspect ratio
-        let (scale_x, scale_y) = if img_aspect > rect_aspect {
-            let sx = ndc_w / 2.0;
-            let sy = sx / img_aspect * window_aspect;
-            (sx, sy)
-        } else {
-            let sy = ndc_h / 2.0;
-            let sx = sy * img_aspect / window_aspect;
-            (sx, sy)
-        };
-
-        let scale_x = scale_x * zoom;
-        let scale_y = scale_y * zoom;
-
-        let pan_ndc_x = (pan.0 / self.width as f32) * 2.0;
-        let pan_ndc_y = -(pan.1 / self.height as f32) * 2.0;
-
-        let center_x = ndc_x + ndc_w / 2.0 + pan_ndc_x;
-        let center_y = ndc_y - ndc_h / 2.0 + pan_ndc_y;
-
-        TransformUniform {
-            matrix: [
-                [scale_x, 0.0, 0.0, 0.0],
-                [0.0, scale_y, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [center_x, center_y, 0.0, 1.0],
-            ],
-        }
+    fn calculate_hyperspectral_transform(
+        &self,
+        handle: &crate::HyperspectralImageHandle,
+        rect: &Rectangle,
+        pan: (f32, f32),
+        zoom: f32,
+    ) -> TransformUniform {
+        self.calculate_transform_for_dimensions(handle.width(), handle.height(), rect, pan, zoom)
     }
 
     /// Create vertex and index data for an icon at a specific screen rectangle.
@@ -1111,12 +1100,12 @@ impl Renderer {
     }
 
     fn render_ui_shapes(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        let batches = self.build_shape_batches(&self.commands.clone(), true);
+        let batches = self.build_shape_batches(&self.commands, true);
         self.render_shape_batches(encoder, view, &batches, "UI Shapes Pass");
     }
 
     fn render_overlay_shapes(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        let batches = self.build_shape_batches(&self.overlay_commands.clone(), false);
+        let batches = self.build_shape_batches(&self.overlay_commands, false);
         self.render_shape_batches(encoder, view, &batches, "Overlay Shapes Pass");
     }
 
