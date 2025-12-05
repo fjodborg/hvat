@@ -10,8 +10,9 @@ use crate::ui_constants::{
     annotation as ann_const, colors, image_viewer as img_const, padding,
     sidebar as sidebar_const, spacing, text as text_const, title_bar as title_const,
 };
-use crate::views::helpers::tool_button;
+use crate::views::helpers::{simple_icon_button, tool_button};
 use crate::widget_state::WidgetState;
+use hvat_ui::icon::icons;
 use hvat_ui::widgets::{
     button, collapsible, column, container, dropdown, hyperspectral_image, row, scrollable, slider,
     text, text_input, titled_container, Column, Element, Row, ScrollDirection, SliderId,
@@ -126,25 +127,33 @@ fn view_annotation_toolbar_compact(
         ))
         .push(Element::new(
             row()
-                .push(Element::new(
-                    button("Del(⌫)")
-                        .on_press(Message::delete_selected_annotation())
-                        .width(60.0),
+                .push(simple_icon_button(
+                    "trash",
+                    icons::TRASH,
+                    "Delete selected (Del)",
+                    Message::delete_selected_annotation(),
+                    tooltip_state,
                 ))
-                .push(Element::new(
-                    button("Esc")
-                        .on_press(Message::tool_shortcut('\x1b'))
-                        .width(45.0),
+                .push(simple_icon_button(
+                    "escape",
+                    icons::ESCAPE,
+                    "Cancel/Deselect (Esc)",
+                    Message::tool_shortcut('\x1b'),
+                    tooltip_state,
                 ))
-                .push(Element::new(
-                    button("Exp")
-                        .on_press(Message::export_annotations())
-                        .width(45.0),
+                .push(simple_icon_button(
+                    "download",
+                    icons::DOWNLOAD,
+                    "Export annotations",
+                    Message::export_annotations(),
+                    tooltip_state,
                 ))
-                .push(Element::new(
-                    button("Clr")
-                        .on_press(Message::clear_annotations())
-                        .width(45.0),
+                .push(simple_icon_button(
+                    "x-circle",
+                    icons::X_CIRCLE,
+                    "Clear all annotations",
+                    Message::clear_annotations(),
+                    tooltip_state,
                 ))
                 .spacing(spacing::TIGHT)
                 .wrap(), // Wrap to next line if not enough space
@@ -460,20 +469,26 @@ pub fn view_image_viewer<'a>(
         // File controls
         .push(Element::new(
             row()
-                .push(Element::new(
-                    button("Load")
-                        .on_press(Message::load_folder())
-                        .width(60.0),
+                .push(simple_icon_button(
+                    "folder-open",
+                    icons::FOLDER_OPEN,
+                    "Load folder",
+                    Message::load_folder(),
+                    &widget_state.tooltip,
                 ))
-                .push(Element::new(
-                    button("<")
-                        .on_press(Message::previous_image())
-                        .width(35.0),
+                .push(simple_icon_button(
+                    "arrow-left",
+                    icons::ARROW_LEFT,
+                    "Previous image (←)",
+                    Message::previous_image(),
+                    &widget_state.tooltip,
                 ))
-                .push(Element::new(
-                    button(">")
-                        .on_press(Message::next_image())
-                        .width(35.0),
+                .push(simple_icon_button(
+                    "arrow-right",
+                    icons::ARROW_RIGHT,
+                    "Next image (→)",
+                    Message::next_image(),
+                    &widget_state.tooltip,
                 ))
                 .spacing(spacing::TIGHT),
         ))
@@ -528,25 +543,33 @@ pub fn view_image_viewer<'a>(
                         .size(text_const::SMALL)
                         .color(colors::MUTED_TEXT),
                 ))
-                .push(Element::new(
-                    button("+")
-                        .on_press(Message::zoom_in())
-                        .width(30.0),
+                .push(simple_icon_button(
+                    "zoon in",
+                    icons::ZOOM_IN,
+                    "Zoom in (+)",
+                    Message::zoom_in(),
+                    &widget_state.tooltip,
                 ))
-                .push(Element::new(
-                    button("-")
-                        .on_press(Message::zoom_out())
-                        .width(30.0),
+                .push(simple_icon_button(
+                    "zoom out",
+                    icons::ZOOM_OUT,
+                    "Zoom out (-)",
+                    Message::zoom_out(),
+                    &widget_state.tooltip,
                 ))
-                .push(Element::new(
-                    button("1:1")
-                        .on_press(Message::reset_to_one_to_one())
-                        .width(35.0),
+                .push(simple_icon_button(
+                    "rulers",
+                    icons::RULERS,
+                    "1:1 pixel ratio",
+                    Message::reset_to_one_to_one(),
+                    &widget_state.tooltip,
                 ))
-                .push(Element::new(
-                    button("Fit")
-                        .on_press(Message::reset_view())
-                        .width(35.0),
+                .push(simple_icon_button(
+                    "fit",
+                    icons::ASPECT_RATIO,
+                    "Fit to view",
+                    Message::reset_view(),
+                    &widget_state.tooltip,
                 ))
                 .spacing(spacing::TIGHT)
         }))

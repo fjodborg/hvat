@@ -74,12 +74,14 @@ impl TexturePipeline {
         });
 
         // Create render pipeline using builder
+        // Use PREMULTIPLIED_ALPHA_BLENDING for correct alpha blending with icons
+        // (tiny-skia outputs premultiplied alpha format)
         let render_pipeline = PipelineBuilder::new(&ctx.device, ctx.surface_config.format)
             .with_label("Texture Render Pipeline")
             .with_shader(&shader, "vs_main", "fs_main")
             .with_vertex_buffer(Vertex::desc())
             .with_bind_group_layouts(&[&uniform_bind_group_layout, &texture_bind_group_layout])
-            .with_blend_state(wgpu::BlendState::REPLACE)
+            .with_blend_state(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)
             .with_cull_mode(Some(wgpu::Face::Back))
             .build();
 

@@ -10,6 +10,7 @@ pub use hvat_gpu;
 mod application;
 mod element;
 mod event;
+pub mod icon;
 mod image;
 mod layout;
 mod layout_cache;

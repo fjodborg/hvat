@@ -10,7 +10,7 @@ use winit::window::Window;
 
 use hvat_gpu::{
     ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, TexturePipeline, Texture, TransformUniform,
-    HyperspectralPipeline, HyperspectralGpuData, BandSelectionUniform, Pipeline,
+    HyperspectralPipeline, HyperspectralGpuData, BandSelectionUniform, Pipeline, Vertex,
 };
 use wgpu::util::DeviceExt;
 use glyphon::{
@@ -227,6 +227,9 @@ pub struct Renderer {
     text_cache: Cache,
     text_atlas: TextAtlas,
     text_renderer: TextRenderer,
+    /// Separate text renderer for overlay text (tooltips, modals)
+    /// This allows main text and overlay text to be rendered in separate passes
+    overlay_text_renderer: TextRenderer,
     viewport: Viewport,
     width: u32,
     height: u32,
@@ -294,6 +297,12 @@ impl Renderer {
             wgpu::MultisampleState::default(),
             None,
         );
+        let overlay_text_renderer = TextRenderer::new(
+            &mut text_atlas,
+            &gpu_ctx.device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
 
         // Create hyperspectral pipeline
         let hyperspectral_pipeline = Some(HyperspectralPipeline::new(&gpu_ctx));
@@ -308,6 +317,7 @@ impl Renderer {
             text_cache,
             text_atlas,
             text_renderer,
+            overlay_text_renderer,
             viewport,
             width,
             height,
@@ -744,20 +754,27 @@ impl Renderer {
             });
         }
 
-        // Render images first (they're background content)
-        self.render_images(&mut encoder, &view);
+        // Render large images first (they're background content like the main viewer)
+        self.render_images(&mut encoder, &view, false);
 
-        // Render all shapes first (main UI + overlay)
-        // Overlay shapes include opaque backgrounds that will cover main UI
+        // Render main UI shapes (buttons, panels, etc.)
         self.render_ui_shapes(&mut encoder, &view);
+
+        // Render small images (icons) AFTER main UI shapes so they appear on top of button backgrounds
+        // but BEFORE overlay so tooltips appear on top of icons
+        self.render_images(&mut encoder, &view, true);
+
+        // Render main UI text BEFORE overlay shapes
+        // This ensures text is visible but can be covered by overlay backgrounds
+        self.render_all_text_main(&mut encoder, &view);
+
+        // Render overlay shapes (tooltips, modals) on top of main UI including its text
         if !self.overlay_commands.is_empty() {
             self.render_overlay_shapes(&mut encoder, &view);
         }
 
-        // Render ALL text in one pass (main + overlay combined)
-        // Main text that's covered by overlay shapes won't be visible
-        // because the overlay shapes are opaque and rendered first
-        self.render_all_text(&mut encoder, &view);
+        // Render overlay text AFTER overlay shapes so tooltip text appears on top
+        self.render_all_text_overlay(&mut encoder, &view);
 
         // Submit and present
         self.gpu_ctx.queue.submit(std::iter::once(encoder.finish()));
@@ -773,12 +790,15 @@ impl Renderer {
                     // even if the allocator reuses the same memory address.
                     let key = handle.id();
                     if !self.texture_cache.contains_key(&key) {
+                        log::debug!("Creating texture for image id={}, size={}x{}, data_len={}",
+                            key, handle.width(), handle.height(), handle.data().len());
                         match Texture::from_rgba8(&self.gpu_ctx, handle.data(), handle.width(), handle.height()) {
                             Ok(texture) => {
+                                log::debug!("Texture created successfully for id={}", key);
                                 let bind_group = self.texture_pipeline.create_texture_bind_group(&self.gpu_ctx, &texture);
                                 self.texture_cache.insert(key, (texture, bind_group));
                             }
-                            Err(e) => log::error!("Failed to create texture: {:?}", e),
+                            Err(e) => log::error!("Failed to create texture for id={}: {:?}", key, e),
                         }
                     }
                 }
@@ -806,7 +826,10 @@ impl Renderer {
         }
     }
 
-    fn render_images(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+    /// Render images.
+    /// If `small_only` is true, only render small images (icons, <=32px).
+    /// If `small_only` is false, only render large images (main content).
+    fn render_images(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, small_only: bool) {
         // Track current scissor for proper clipping
         let mut clip_stack: Vec<Rectangle> = Vec::new();
 
@@ -819,48 +842,114 @@ impl Renderer {
                     clip_stack.pop();
                 }
                 DrawCommand::DrawImage { handle, rect, pan, zoom, adjustments } => {
+                    // Filter based on image size
+                    let is_small = handle.width() <= 32 && handle.height() <= 32;
+                    if is_small != small_only {
+                        continue;
+                    }
+
                     let cache_key = handle.id();
                     if let Some((_texture, bind_group)) = self.texture_cache.get(&cache_key) {
-                        // Calculate transform
-                        let transform = self.calculate_image_transform(handle, rect, *pan, *zoom);
-                        self.texture_pipeline.update_transform(&self.gpu_ctx, transform);
-                        self.texture_pipeline.update_adjustments(&self.gpu_ctx, *adjustments);
+                        // For small images (icons), use per-icon vertex buffers with baked positions
+                        // to avoid uniform buffer synchronization issues
+                        if is_small {
+                            // Create vertex buffer with positions baked in (NDC coordinates)
+                            let (vertices, indices) = self.create_icon_vertices(rect);
 
-                        // Render
-                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("Image Pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            })],
-                            depth_stencil_attachment: None,
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                        });
+                            let vertex_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Icon Vertex Buffer"),
+                                contents: bytemuck::cast_slice(&vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                            let index_buffer = self.gpu_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Icon Index Buffer"),
+                                contents: bytemuck::cast_slice(&indices),
+                                usage: wgpu::BufferUsages::INDEX,
+                            });
 
-                        // Set scissor
-                        if let Some(clip) = clip_stack.last() {
-                            if let Some((x, y, w, h)) = self.clip_to_scissor(clip) {
-                                pass.set_scissor_rect(x, y, w, h);
+                            // Use identity transform since positions are already in NDC
+                            self.texture_pipeline.update_transform(&self.gpu_ctx, TransformUniform::new());
+                            self.texture_pipeline.update_adjustments(&self.gpu_ctx, *adjustments);
+
+                            // Render
+                            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Icon Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                    depth_slice: None,
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
+
+                            // Set scissor
+                            if let Some(clip) = clip_stack.last() {
+                                if let Some((x, y, w, h)) = self.clip_to_scissor(clip) {
+                                    pass.set_scissor_rect(x, y, w, h);
+                                }
+                            } else {
+                                pass.set_scissor_rect(0, 0, self.width, self.height);
                             }
-                        } else {
-                            pass.set_scissor_rect(0, 0, self.width, self.height);
-                        }
 
-                        pass.set_pipeline(&self.texture_pipeline.render_pipeline);
-                        pass.set_bind_group(0, &self.texture_pipeline.uniform_bind_group, &[]);
-                        pass.set_bind_group(1, bind_group, &[]);
-                        pass.set_vertex_buffer(0, self.texture_pipeline.vertex_buffer.slice(..));
-                        pass.set_index_buffer(self.texture_pipeline.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                        pass.draw_indexed(0..self.texture_pipeline.num_indices, 0, 0..1);
+                            pass.set_pipeline(&self.texture_pipeline.render_pipeline);
+                            pass.set_bind_group(0, &self.texture_pipeline.uniform_bind_group, &[]);
+                            pass.set_bind_group(1, bind_group, &[]);
+                            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                            pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                            pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                        } else {
+                            // For large images, use the standard transform-based approach
+                            let transform = self.calculate_image_transform(handle, rect, *pan, *zoom);
+                            self.texture_pipeline.update_transform(&self.gpu_ctx, transform);
+                            self.texture_pipeline.update_adjustments(&self.gpu_ctx, *adjustments);
+
+                            // Render
+                            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Image Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                    depth_slice: None,
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
+
+                            // Set scissor
+                            if let Some(clip) = clip_stack.last() {
+                                if let Some((x, y, w, h)) = self.clip_to_scissor(clip) {
+                                    pass.set_scissor_rect(x, y, w, h);
+                                }
+                            } else {
+                                pass.set_scissor_rect(0, 0, self.width, self.height);
+                            }
+
+                            pass.set_pipeline(&self.texture_pipeline.render_pipeline);
+                            pass.set_bind_group(0, &self.texture_pipeline.uniform_bind_group, &[]);
+                            pass.set_bind_group(1, bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.texture_pipeline.vertex_buffer.slice(..));
+                            pass.set_index_buffer(self.texture_pipeline.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                            pass.draw_indexed(0..self.texture_pipeline.num_indices, 0, 0..1);
+                        }
                     }
                 }
                 DrawCommand::DrawHyperspectralImage { handle, rect, pan, zoom, band_selection, adjustments } => {
+                    // Hyperspectral images are always "large" content - skip in small_only pass
+                    if small_only {
+                        continue;
+                    }
+
                     let cache_key = handle.id();
                     if let (Some(cached), Some(ref pipeline)) = (
                         self.hyperspectral_cache.get(&cache_key),
@@ -998,6 +1087,27 @@ impl Renderer {
                 [center_x, center_y, 0.0, 1.0],
             ],
         }
+    }
+
+    /// Create vertex and index data for an icon at a specific screen rectangle.
+    /// Returns vertices with positions in NDC coordinates (for use with identity transform).
+    fn create_icon_vertices(&self, rect: &Rectangle) -> (Vec<Vertex>, Vec<u16>) {
+        // Convert screen coordinates to NDC
+        let left = (rect.x / self.width as f32) * 2.0 - 1.0;
+        let right = ((rect.x + rect.width) / self.width as f32) * 2.0 - 1.0;
+        let top = 1.0 - (rect.y / self.height as f32) * 2.0;
+        let bottom = 1.0 - ((rect.y + rect.height) / self.height as f32) * 2.0;
+
+        let vertices = vec![
+            Vertex { position: [left, bottom], tex_coords: [0.0, 1.0] },   // Bottom-left
+            Vertex { position: [right, bottom], tex_coords: [1.0, 1.0] }, // Bottom-right
+            Vertex { position: [right, top], tex_coords: [1.0, 0.0] },    // Top-right
+            Vertex { position: [left, top], tex_coords: [0.0, 0.0] },     // Top-left
+        ];
+
+        let indices = vec![0, 1, 2, 0, 2, 3];
+
+        (vertices, indices)
     }
 
     fn render_ui_shapes(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
@@ -1140,28 +1250,38 @@ impl Renderer {
         }
     }
 
-    /// Render ALL text from both main UI and overlay in a single pass.
-    /// This avoids issues with glyphon's prepare() being called multiple times.
-    /// Main text that overlaps with overlay fill rectangles is excluded to prevent
-    /// it from appearing on top of the overlay.
-    fn render_all_text(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        // Collect overlay fill rects (opaque areas that hide main text)
-        let overlay_rects: Vec<Rectangle> = self.overlay_commands.iter()
-            .filter_map(|cmd| match cmd {
-                DrawCommand::FillRect { rect, .. } => Some(*rect),
-                _ => None,
-            })
-            .collect();
-
-        // Collect text from main commands (excluding text under overlay) and overlay commands
+    /// Render main UI text (before overlay shapes).
+    fn render_all_text_main(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         let mut text_items: Vec<TextItem> = Vec::new();
-        collect_text_items(&self.commands, &mut text_items, &overlay_rects);
+        collect_text_items(&self.commands, &mut text_items, &[]);
+
+        if text_items.is_empty() {
+            return;
+        }
+
+        self.render_text_items(encoder, view, text_items, false);
+    }
+
+    /// Render overlay text (after overlay shapes, for tooltip text).
+    fn render_all_text_overlay(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        let mut text_items: Vec<TextItem> = Vec::new();
         collect_text_items(&self.overlay_commands, &mut text_items, &[]);
 
         if text_items.is_empty() {
             return;
         }
 
+        self.render_text_items(encoder, view, text_items, true);
+    }
+
+    /// Internal helper to render a list of text items using the appropriate renderer.
+    fn render_text_items(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        text_items: Vec<TextItem>,
+        use_overlay_renderer: bool,
+    ) {
         // Update viewport
         self.viewport.update(
             &self.gpu_ctx.queue,
@@ -1223,8 +1343,15 @@ impl Renderer {
             });
         }
 
+        // Select the appropriate text renderer
+        let text_renderer = if use_overlay_renderer {
+            &mut self.overlay_text_renderer
+        } else {
+            &mut self.text_renderer
+        };
+
         // Prepare text for rendering
-        if let Err(e) = self.text_renderer.prepare(
+        if let Err(e) = text_renderer.prepare(
             &self.gpu_ctx.device,
             &self.gpu_ctx.queue,
             &mut self.font_system,
@@ -1237,9 +1364,10 @@ impl Renderer {
         }
 
         // Render text
+        let label = if use_overlay_renderer { "Overlay Text Pass" } else { "Main Text Pass" };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("All Text Pass"),
+                label: Some(label),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -1254,7 +1382,7 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            if let Err(e) = self.text_renderer.render(&self.text_atlas, &self.viewport, &mut pass) {
+            if let Err(e) = text_renderer.render(&self.text_atlas, &self.viewport, &mut pass) {
                 log::error!("Failed to render text: {:?}", e);
             }
         }

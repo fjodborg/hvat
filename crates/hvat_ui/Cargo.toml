@@ -12,6 +12,9 @@ bytemuck = { version = "1.20", features = ["derive"] }
 glyphon = { git = "https://github.com/grovesNL/glyphon", branch = "main" }
 cosmic-text = "0.14"
 log = "0.4"
+web-time = "1.1"
+resvg = "0.45"
+tiny-skia = "0.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "27", features = ["webgl"] }
