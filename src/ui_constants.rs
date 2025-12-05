@@ -135,6 +135,10 @@ pub mod sidebar {
     pub const RIGHT_WIDTH: f32 = 160.0;
     /// Spacing between sidebar and main content
     pub const GAP: f32 = 5.0;
+    /// Fixed label width for slider alignment
+    pub const SLIDER_LABEL_WIDTH: f32 = 55.0;
+    /// Fixed label width for band slider alignment (shorter labels)
+    pub const BAND_LABEL_WIDTH: f32 = 30.0;
 }
 
 /// Title bar constants for titled containers.
@@ -227,8 +231,12 @@ pub mod tooltip {
 pub mod icons {
     /// Icon size for toolbar buttons (pixels)
     pub const SIZE: u32 = 20;
+    /// Small icon size for header buttons (pixels)
+    pub const SIZE_SMALL: u32 = 14;
     /// Icon button size (icon + padding)
     pub const BUTTON_SIZE: f32 = 28.0;
+    /// Small icon button size for collapsible headers
+    pub const BUTTON_SIZE_SMALL: f32 = 20.0;
     /// Default icon color (white, RGBA)
     pub const COLOR: [u8; 4] = [255, 255, 255, 255];
 }

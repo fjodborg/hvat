@@ -294,3 +294,61 @@ pub fn simple_icon_button(
         .on_hover_change(move |is_hovered| Message::tooltip_hover(tooltip_id_clone.clone(), is_hovered)),
     )
 }
+
+/// Creates a small icon button for collapsible headers with tooltip.
+///
+/// # Arguments
+/// * `icon_name` - Unique name for caching
+/// * `icon_data` - SVG icon data bytes
+/// * `tooltip_text` - Text shown in tooltip
+/// * `message` - Message to send on click
+/// * `tooltip_state` - External tooltip state for hover tracking
+pub fn small_icon_button(
+    icon_name: &str,
+    icon_data: &'static [u8],
+    tooltip_text: &str,
+    message: Message,
+    tooltip_state: &TooltipState,
+) -> Element<'static, Message> {
+    // Try to get the icon with smaller size; fall back to text button if it fails
+    let Some(icon) = get_icon(
+        &format!("{}_small", icon_name),
+        icon_data,
+        icon_const::SIZE_SMALL,
+        icon_const::COLOR,
+    ) else {
+        // Fallback to text button if icon rasterization fails
+        return Element::new(
+            button(icon_name)
+                .on_press(message)
+                .width(icon_const::BUTTON_SIZE_SMALL),
+        );
+    };
+
+    // Create unique ID for this tooltip
+    let tooltip_id = format!("icon_{}_small", icon_name);
+    let tooltip_id_clone = tooltip_id.clone();
+
+    // Check if tooltip should be shown based on external state
+    let show = tooltip_state.should_show(&tooltip_id, tooltip_const::DELAY_MS);
+
+    // Check if this tooltip is the currently active one
+    let is_hover_active = tooltip_state.current_hover() == Some(tooltip_id.as_str());
+
+    let tooltip_text = tooltip_text.to_string();
+
+    Element::new(
+        tooltip(
+            Element::new(
+                icon_button(icon)
+                    .on_press(message)
+                    .size(icon_const::BUTTON_SIZE_SMALL),
+            ),
+            tooltip_text,
+        )
+        .position(TooltipPosition::Bottom)
+        .show(show)
+        .active(is_hover_active)
+        .on_hover_change(move |is_hovered| Message::tooltip_hover(tooltip_id_clone.clone(), is_hovered)),
+    )
+}

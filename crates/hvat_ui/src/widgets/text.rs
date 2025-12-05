@@ -5,6 +5,8 @@ pub struct Text {
     content: String,
     size: f32,
     color: Color,
+    /// Fixed width (if set, text will use this width regardless of content)
+    fixed_width: Option<f32>,
 }
 
 impl Text {
@@ -14,6 +16,7 @@ impl Text {
             content: content.into(),
             size: 16.0,
             color: Color::WHITE,
+            fixed_width: None,
         }
     }
 
@@ -28,6 +31,13 @@ impl Text {
         self.color = color;
         self
     }
+
+    /// Set a fixed width for the text widget.
+    /// Useful for aligning labels in forms/sliders.
+    pub fn width(mut self, width: f32) -> Self {
+        self.fixed_width = Some(width);
+        self
+    }
 }
 
 impl<Message> Widget<Message> for Text {
@@ -36,7 +46,12 @@ impl<Message> Widget<Message> for Text {
         let metrics = TextMetrics::new(self.size);
         let (text_width, text_height) = metrics.measure(&self.content);
 
-        let width = text_width.min(limits.max_width);
+        // Use fixed width if set, otherwise measure text
+        let width = if let Some(fixed) = self.fixed_width {
+            fixed.min(limits.max_width)
+        } else {
+            text_width.min(limits.max_width)
+        };
         let height = text_height.max(metrics.line_height()); // At least one line
 
         let size = limits.resolve(width, height);

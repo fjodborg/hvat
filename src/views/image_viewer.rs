@@ -10,7 +10,7 @@ use crate::ui_constants::{
     annotation as ann_const, colors, image_adjust, image_viewer as img_const, padding,
     sidebar as sidebar_const, spacing, text as text_const, title_bar as title_const,
 };
-use crate::views::helpers::{simple_icon_button, tool_button};
+use crate::views::helpers::{simple_icon_button, small_icon_button, tool_button};
 use crate::widget_state::WidgetState;
 use hvat_ui::icon::icons;
 use hvat_ui::widgets::{
@@ -247,8 +247,8 @@ fn view_left_sidebar<'a>(
         image_settings_persistence,
     );
 
-    // Reset button for ADJUST section header
-    let adjust_reset_button = simple_icon_button(
+    // Reset button for ADJUST section header (small to fit in header)
+    let adjust_reset_button = small_icon_button(
         "reload-adjust",
         icons::RELOAD,
         "Reset adjustments",
@@ -272,8 +272,8 @@ fn view_left_sidebar<'a>(
         band_persistence,
     );
 
-    // Reset button for BANDS section header
-    let bands_reset_button = simple_icon_button(
+    // Reset button for BANDS section header (small to fit in header)
+    let bands_reset_button = small_icon_button(
         "reload-bands",
         icons::RELOAD,
         "Reset bands",
@@ -539,13 +539,16 @@ where
 
     row()
         .push(Element::new(
-            text(value_str).size(text_const::SMALL).color(text_color),
+            text(value_str)
+                .size(text_const::SMALL)
+                .color(text_color)
+                .width(sidebar_const::SLIDER_LABEL_WIDTH),
         ))
         .push(Element::new(
             slider(min, max, value)
                 .id(slider_id)
                 .dragging(is_dragging)
-                .width(Length::Units(70.0))
+                .width(Length::Units(80.0))
                 .on_drag_start(Message::slider_drag_start)
                 .on_change(on_change)
                 .on_drag_end(Message::slider_drag_end),
@@ -628,14 +631,15 @@ where
         .push(Element::new(
             text(format!("{}: {}", label, value as usize))
                 .size(text_const::SMALL)
-                .color(label_color),
+                .color(label_color)
+                .width(sidebar_const::BAND_LABEL_WIDTH),
         ))
         .push(Element::new(
             slider(0.0, max_band, value)
                 .id(slider_id)
                 .step(1.0)
                 .dragging(is_dragging)
-                .width(Length::Units(70.0))
+                .width(Length::Units(100.0))
                 .on_drag_start(on_drag_start)
                 .on_change(on_change)
                 .on_drag_end(Message::apply_bands),
