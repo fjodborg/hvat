@@ -1,4 +1,5 @@
-use crate::{Color, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use crate::{Color, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use super::tooltip::{Tooltip, TooltipPosition};
 
 /// A button widget that can be clicked.
 pub struct Button<Message> {
@@ -45,6 +46,27 @@ impl<Message: Clone> Button<Message> {
     pub fn bg_color(mut self, color: Color) -> Self {
         self.bg_color = Some(color);
         self
+    }
+
+    /// Wrap this button in a tooltip.
+    /// Returns a Tooltip widget containing this button.
+    pub fn tooltip(self, text: impl Into<String>) -> Tooltip<'static, Message>
+    where
+        Message: 'static,
+    {
+        Tooltip::new(Element::new(self), text)
+    }
+
+    /// Wrap this button in a tooltip with custom position.
+    pub fn tooltip_with_position(
+        self,
+        text: impl Into<String>,
+        position: TooltipPosition,
+    ) -> Tooltip<'static, Message>
+    where
+        Message: 'static,
+    {
+        Tooltip::new(Element::new(self), text).position(position)
     }
 }
 

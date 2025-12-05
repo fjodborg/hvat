@@ -466,6 +466,10 @@ pub fn handle_ui(
             // This is handled in hvat_app.rs since we need access to available_tags
             // The handler there will add the tag and clear the input
         }
+        UIMessage::TooltipHover(id, is_hovered) => {
+            // Update hover state - the timestamp is recorded in update_hover
+            widget_state.tooltip.update_hover(&id, is_hovered, 0);
+        }
     }
 }
 

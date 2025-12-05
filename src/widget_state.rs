@@ -7,6 +7,8 @@
 //! handling drag states, hover states, and other ephemeral UI state.
 
 use hvat_ui::widgets::SliderId;
+use std::collections::HashMap;
+use web_time::Instant;
 
 /// Transient state for the image viewer/pan-zoom widget.
 #[derive(Debug, Clone, Default)]
@@ -310,6 +312,60 @@ impl TagInputState {
     }
 }
 
+/// Transient state for tooltips.
+/// Tracks hover timing per tooltip ID to support delayed appearance.
+#[derive(Debug, Clone, Default)]
+pub struct TooltipState {
+    /// Map of tooltip ID to when hovering started
+    hover_starts: HashMap<String, Instant>,
+    /// Currently hovered tooltip ID
+    current_hover: Option<String>,
+}
+
+impl TooltipState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update hover state for a tooltip. Call this when a tooltip reports being hovered.
+    pub fn update_hover(&mut self, id: &str, is_hovered: bool, _delay_ms: u64) {
+        if is_hovered {
+            if self.current_hover.as_deref() != Some(id) {
+                // Started hovering a new tooltip - this clears the old one
+                self.hover_starts.clear();
+                self.hover_starts.insert(id.to_string(), Instant::now());
+                self.current_hover = Some(id.to_string());
+            }
+            // If same tooltip, keep the existing timer
+        } else if self.current_hover.as_deref() == Some(id) {
+            // Explicitly stopped hovering this tooltip
+            self.hover_starts.remove(id);
+            self.current_hover = None;
+        }
+    }
+
+    /// Clear all tooltip state (e.g., when mouse leaves all tooltip areas)
+    pub fn clear(&mut self) {
+        self.hover_starts.clear();
+        self.current_hover = None;
+    }
+
+    /// Check if a tooltip should currently be shown (without updating state).
+    pub fn should_show(&self, id: &str, delay_ms: u64) -> bool {
+        if self.current_hover.as_deref() == Some(id) {
+            if let Some(start) = self.hover_starts.get(id) {
+                return start.elapsed().as_millis() >= delay_ms as u128;
+            }
+        }
+        false
+    }
+
+    /// Get the currently hovered tooltip ID, if any
+    pub fn current_hover(&self) -> Option<&str> {
+        self.current_hover.as_deref()
+    }
+}
+
 /// Combined widget state manager.
 ///
 /// This struct aggregates all transient UI state in one place,
@@ -333,6 +389,8 @@ pub struct WidgetState {
     pub category_input: CategoryInputState,
     /// Tag input state
     pub tag_input: TagInputState,
+    /// Tooltip states
+    pub tooltip: TooltipState,
 }
 
 impl WidgetState {

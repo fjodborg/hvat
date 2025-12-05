@@ -609,7 +609,16 @@ impl Renderer {
     // =========================================================================
 
     /// Emit a draw command, wrapping it with clip commands if a clip is active.
+    /// Note: Overlay commands bypass clipping to allow tooltips/dropdowns to extend
+    /// outside their parent container bounds.
     fn emit_with_clip(&mut self, cmd: DrawCommand) {
+        // Overlay commands bypass clipping entirely - they should render above
+        // everything and not be constrained by parent container clips
+        if self.recording_overlay {
+            self.overlay_commands.push(cmd);
+            return;
+        }
+
         if let Some(clip) = self.state.clip {
             // Only draw if the command is visible within the clip
             let should_draw = match &cmd {
@@ -647,22 +656,12 @@ impl Renderer {
             };
 
             if should_draw {
-                let target = if self.recording_overlay {
-                    &mut self.overlay_commands
-                } else {
-                    &mut self.commands
-                };
-                target.push(DrawCommand::PushClip(clip));
-                target.push(cmd);
-                target.push(DrawCommand::PopClip);
+                self.commands.push(DrawCommand::PushClip(clip));
+                self.commands.push(cmd);
+                self.commands.push(DrawCommand::PopClip);
             }
         } else {
-            let target = if self.recording_overlay {
-                &mut self.overlay_commands
-            } else {
-                &mut self.commands
-            };
-            target.push(cmd);
+            self.commands.push(cmd);
         }
     }
 

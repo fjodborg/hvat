@@ -377,19 +377,32 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
         let bounds = layout.bounds();
 
+        // For MouseMoved events, we need to process ALL children and return the last message.
+        // This allows multiple tooltips/hover-tracking widgets to all receive the event,
+        // with only the actually-hovered one's message being returned.
+        let is_mouse_moved = matches!(event, Event::MouseMoved { .. });
+
         // Handle wrapped horizontal layout
         if self.wrap && self.is_horizontal() {
             let (positions, _) = self.calculate_wrapped_layout(&bounds);
+            let mut last_message: Option<Message> = None;
+
             for (i, child) in self.children.iter_mut().enumerate() {
                 let positioned_layout = Layout::new(positions[i]);
                 if let Some(message) = child.widget_mut().on_event(event, &positioned_layout) {
-                    return Some(message);
+                    if is_mouse_moved {
+                        // For MouseMoved, keep processing all children but remember the message
+                        last_message = Some(message);
+                    } else {
+                        // For other events, return immediately (original behavior)
+                        return Some(message);
+                    }
                 }
             }
-            return None;
+            return last_message;
         }
 
-        // Non-wrapped layout (original behavior)
+        // Non-wrapped layout
         let (child_sizes, fill_size) = self.calculate_child_sizes(&bounds);
 
         // Cache values to avoid borrowing self during iteration
@@ -397,6 +410,7 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
         let spacing = self.spacing;
         let main_start = if is_horizontal { bounds.x } else { bounds.y };
         let mut main_pos = main_start;
+        let mut last_message: Option<Message> = None;
 
         for (i, child) in self.children.iter_mut().enumerate() {
             if i > 0 {
@@ -415,13 +429,19 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
             let positioned_layout = Layout::new(child_bounds);
 
             if let Some(message) = child.widget_mut().on_event(event, &positioned_layout) {
-                return Some(message);
+                if is_mouse_moved {
+                    // For MouseMoved, keep processing all children but remember the message
+                    last_message = Some(message);
+                } else {
+                    // For other events, return immediately (original behavior)
+                    return Some(message);
+                }
             }
 
             main_pos += actual_size;
         }
 
-        None
+        last_message
     }
 }
 

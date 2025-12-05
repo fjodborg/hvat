@@ -5,8 +5,12 @@
 use crate::annotation::AnnotationTool;
 use crate::message::Message;
 use crate::ui_constants::{button as btn_const, slider as slider_const, spacing, text};
-use hvat_ui::widgets::{button, row, slider, text as text_widget, Element, Row, SliderId};
+use crate::widget_state::TooltipState;
+use hvat_ui::widgets::{button, row, slider, text as text_widget, tooltip, Element, Row, SliderId, TooltipPosition};
 use hvat_ui::Color;
+
+/// Default tooltip delay in milliseconds.
+const TOOLTIP_DELAY_MS: u64 = 400;
 
 /// Build a labeled slider row.
 ///
@@ -105,25 +109,56 @@ where
         .spacing(spacing::STANDARD)
 }
 
-/// Build an annotation tool button.
+/// Build an annotation tool button with tooltip.
 ///
-/// Creates a button that shows active state with "*" suffix.
+/// Creates a button that shows active state with "*" suffix and a tooltip on hover.
 ///
 /// # Arguments
 /// * `label` - Button label (e.g., "Select", "BBox")
 /// * `tool` - The annotation tool this button represents
 /// * `active_tool` - Currently selected tool
-pub fn tool_button(label: &str, tool: AnnotationTool, active_tool: AnnotationTool) -> Element<'static, Message> {
+/// * `tooltip_state` - External tooltip state for hover tracking
+pub fn tool_button(
+    label: &str,
+    tool: AnnotationTool,
+    active_tool: AnnotationTool,
+    tooltip_state: &TooltipState,
+) -> Element<'static, Message> {
     let display_label = if tool == active_tool {
         format!("{} *", label)
     } else {
         label.to_string()
     };
 
+    let tooltip_text = match tool {
+        AnnotationTool::Select => "Select and edit annotations",
+        AnnotationTool::BoundingBox => "Draw bounding boxes",
+        AnnotationTool::Polygon => "Draw polygon masks",
+        AnnotationTool::Point => "Place point markers",
+    };
+
+    // Create unique ID for this tooltip
+    let tooltip_id = format!("tool_{:?}", tool);
+
+    // Check if tooltip should be shown based on external state
+    let show = tooltip_state.should_show(&tooltip_id, TOOLTIP_DELAY_MS);
+
+    // Check if this tooltip is the currently active one
+    let is_active = tooltip_state.current_hover() == Some(tooltip_id.as_str());
+
     Element::new(
-        button(display_label)
-            .on_press(Message::set_annotation_tool(tool))
-            .width(btn_const::TOOL_WIDTH),
+        tooltip(
+            Element::new(
+                button(display_label)
+                    .on_press(Message::set_annotation_tool(tool))
+                    .width(btn_const::TOOL_WIDTH),
+            ),
+            tooltip_text,
+        )
+        .position(TooltipPosition::Bottom)
+        .show(show)
+        .active(is_active)
+        .on_hover_change(move |is_hovered| Message::tooltip_hover(tooltip_id.clone(), is_hovered)),
     )
 }
 

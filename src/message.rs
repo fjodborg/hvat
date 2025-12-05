@@ -142,6 +142,9 @@ pub enum UIMessage {
     SetNewTagText(String),
     SetTagInputFocused(bool),
     SubmitNewTag,
+    // Tooltip state
+    /// Tooltip hover state changed (ID, is_hovered)
+    TooltipHover(String, bool),
 }
 
 /// Messages for hyperspectral band selection.
@@ -478,6 +481,10 @@ impl Message {
     }
     pub fn submit_new_tag() -> Self {
         Message::UI(UIMessage::SubmitNewTag)
+    }
+    // Tooltip shortcuts
+    pub fn tooltip_hover(id: impl Into<String>, is_hovered: bool) -> Self {
+        Message::UI(UIMessage::TooltipHover(id.into(), is_hovered))
     }
 
     // Tag shortcuts

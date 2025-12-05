@@ -18,6 +18,7 @@ mod slider;
 mod text;
 mod text_input;
 mod titled_container;
+pub(crate) mod tooltip;
 
 pub use button::{button, Button};
 pub use canvas::{canvas, Canvas, Program};
@@ -37,6 +38,7 @@ pub use slider::{slider, Slider, SliderId};
 pub use text::{text, Text};
 pub use text_input::{text_input, TextInput};
 pub use titled_container::{titled_container, TitledContainer, TitlePosition};
+pub use tooltip::{tooltip, Tooltip, TooltipPosition};
 
 // Re-export Element for convenience (it's actually in the element module)
 pub use crate::Element;

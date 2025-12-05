@@ -112,14 +112,15 @@ pub fn build_overlay(
 fn view_annotation_toolbar_compact(
     tool: AnnotationTool,
     _text_color: Color,
+    tooltip_state: &crate::widget_state::TooltipState,
 ) -> Column<'static, Message> {
     column()
         .push(Element::new(
             row()
-                .push(tool_button("Sel(s)", AnnotationTool::Select, tool))
-                .push(tool_button("Box(b)", AnnotationTool::BoundingBox, tool))
-                .push(tool_button("Mask(m)", AnnotationTool::Polygon, tool))
-                .push(tool_button("Pt(p)", AnnotationTool::Point, tool))
+                .push(tool_button("Sel(s)", AnnotationTool::Select, tool, tooltip_state))
+                .push(tool_button("Box(b)", AnnotationTool::BoundingBox, tool, tooltip_state))
+                .push(tool_button("Mask(m)", AnnotationTool::Polygon, tool, tooltip_state))
+                .push(tool_button("Pt(p)", AnnotationTool::Point, tool, tooltip_state))
                 .spacing(spacing::TIGHT)
                 .wrap(), // Wrap to next line if not enough space
         ))
@@ -587,6 +588,7 @@ pub fn view_image_viewer<'a>(
         .push(Element::new(view_annotation_toolbar_compact(
             drawing_state.tool,
             text_color,
+            &widget_state.tooltip,
         )))
         // Category selector (compact list with hotkeys 1-9)
         .push(Element::new(view_category_selector(
