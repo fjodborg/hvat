@@ -353,7 +353,6 @@ pub fn handle_ui(
 ) {
     match msg {
         UIMessage::ScrollY(offset) => {
-            // Only update if scroll position actually changed
             let current = widget_state.scroll.offset_y;
             if (current - offset).abs() > threshold::SCROLL_CHANGE {
                 widget_state.scroll.set_offset_y(offset);
@@ -369,7 +368,6 @@ pub fn handle_ui(
             log::debug!("📜 Scrollbar Y drag ended");
         }
         UIMessage::ScrollX(offset) => {
-            // Only update if scroll position actually changed
             let current = widget_state.scroll.offset_x;
             if (current - offset).abs() > threshold::SCROLL_CHANGE {
                 widget_state.scroll.set_offset_x(offset);

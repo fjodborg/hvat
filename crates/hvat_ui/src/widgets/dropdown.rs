@@ -1,6 +1,7 @@
 //! Dropdown widget for selecting from a list of options.
 //!
-//! The dropdown renders its popup below the button when open.
+//! The dropdown renders its popup below the button when open. If there isn't
+//! enough space below (near bottom of viewport), it automatically opens upward.
 //! It auto-closes when:
 //! - An option is clicked
 //! - The mouse leaves the dropdown area (button + popup)
@@ -25,6 +26,8 @@ pub struct Dropdown<Message> {
     text_color: Color,
     popup_bg_color: Color,
     popup_hover_color: Color,
+    /// Cached drop-up state (calculated during draw based on viewport)
+    drop_up: bool,
 }
 
 impl<Message> Dropdown<Message> {
@@ -46,6 +49,7 @@ impl<Message> Dropdown<Message> {
             text_color: Color::WHITE,
             popup_bg_color: colors::DROPDOWN_MENU,
             popup_hover_color: colors::DROPDOWN_OPTION_HOVER,
+            drop_up: false,
         }
     }
 
@@ -77,29 +81,54 @@ impl<Message> Dropdown<Message> {
     fn button_height(&self) -> f32 { 24.0 }
     fn option_height(&self) -> f32 { 22.0 }
 
+    fn popup_height(&self) -> f32 {
+        self.options.len() as f32 * self.option_height()
+    }
+
     fn selected_text(&self) -> &str {
         self.options.get(self.selected).map(|s| s.as_str()).unwrap_or("---")
     }
 
-    fn popup_bounds(&self, button_bounds: &Rectangle) -> Rectangle {
-        let popup_height = self.options.len() as f32 * self.option_height();
-        Rectangle::new(
-            button_bounds.x,
-            button_bounds.y + button_bounds.height,
-            button_bounds.width,
-            popup_height,
-        )
+    /// Check if popup should open upward based on button position and viewport height.
+    fn should_drop_up(&self, button_bounds: &Rectangle, viewport_height: f32) -> bool {
+        let popup_height = self.popup_height();
+        let space_below = viewport_height - (button_bounds.y + button_bounds.height);
+        // Drop up if not enough space below
+        popup_height > space_below
     }
 
-    fn hover_area(&self, button_bounds: &Rectangle) -> Rectangle {
+    fn popup_bounds(&self, button_bounds: &Rectangle, drop_up: bool) -> Rectangle {
+        let popup_height = self.popup_height();
+        let y = if drop_up {
+            // Drop up: position popup above the button
+            button_bounds.y - popup_height
+        } else {
+            // Drop down: position popup below the button
+            button_bounds.y + button_bounds.height
+        };
+        Rectangle::new(button_bounds.x, y, button_bounds.width, popup_height)
+    }
+
+    fn hover_area(&self, button_bounds: &Rectangle, drop_up: bool) -> Rectangle {
         if self.is_open && !self.options.is_empty() {
-            let popup = self.popup_bounds(button_bounds);
-            Rectangle::new(
-                button_bounds.x,
-                button_bounds.y,
-                button_bounds.width,
-                button_bounds.height + popup.height,
-            )
+            let popup = self.popup_bounds(button_bounds, drop_up);
+            if drop_up {
+                // Hover area includes popup above and button
+                Rectangle::new(
+                    button_bounds.x,
+                    popup.y,
+                    button_bounds.width,
+                    popup.height + button_bounds.height,
+                )
+            } else {
+                // Hover area includes button and popup below
+                Rectangle::new(
+                    button_bounds.x,
+                    button_bounds.y,
+                    button_bounds.width,
+                    button_bounds.height + popup.height,
+                )
+            }
         } else {
             *button_bounds
         }
@@ -114,6 +143,10 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
+        let viewport_height = renderer.viewport_height();
+
+        // Calculate drop direction based on available space
+        let drop_up = self.should_drop_up(&bounds, viewport_height);
 
         let bg_color = if self.is_hovered || self.is_open {
             self.button_hover_color
@@ -129,14 +162,14 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
         let text_y = bounds.y + (bounds.height - 12.0) / 2.0;
         renderer.draw_text(text, Point::new(text_x, text_y), self.text_color, 12.0);
 
-        // Draw dropdown arrow
+        // Draw dropdown arrow - always points down when closed, up when open
         let arrow = if self.is_open { ui::ARROW_UP } else { ui::ARROW_DOWN };
         let arrow_x = bounds.x + bounds.width - 16.0;
         renderer.draw_text(arrow, Point::new(arrow_x, text_y), self.text_color, 10.0);
 
         // Draw popup if open
         if self.is_open && !self.options.is_empty() {
-            let popup_rect = self.popup_bounds(&bounds);
+            let popup_rect = self.popup_bounds(&bounds, drop_up);
 
             if self.render_as_overlay {
                 self.draw_popup_overlay(renderer, &bounds, &popup_rect);
@@ -148,7 +181,8 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
 
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
         let bounds = layout.bounds();
-        let hover_area = self.hover_area(&bounds);
+        // Use cached drop_up state for event handling
+        let hover_area = self.hover_area(&bounds, self.drop_up);
 
         match event {
             Event::MouseMoved { position } => {
@@ -156,7 +190,7 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
                 self.is_hovered = bounds.contains(*position);
 
                 if self.is_open {
-                    let popup_rect = self.popup_bounds(&bounds);
+                    let popup_rect = self.popup_bounds(&bounds, self.drop_up);
                     self.hovered_option = None;
 
                     for i in 0..self.options.len() {
@@ -169,14 +203,16 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
                         }
                     }
 
+                    // Close when mouse leaves the dropdown area
                     if !hover_area.contains(*position) && (was_hovered || self.hovered_option.is_some()) {
                         return self.on_close.as_ref().map(|f| f());
                     }
                 }
                 None
             }
-            Event::MousePressed { button: MouseButton::Left, position } => {
-                if bounds.contains(*position) {
+            Event::MousePressed { button, position } => {
+                // Left click on button toggles dropdown
+                if *button == MouseButton::Left && bounds.contains(*position) {
                     if self.is_open {
                         return self.on_close.as_ref().map(|f| f());
                     } else {
@@ -185,9 +221,10 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
                 }
 
                 if self.is_open {
-                    let popup_rect = self.popup_bounds(&bounds);
+                    let popup_rect = self.popup_bounds(&bounds, self.drop_up);
 
-                    if popup_rect.contains(*position) {
+                    // Left click on popup option selects it
+                    if *button == MouseButton::Left && popup_rect.contains(*position) {
                         for i in 0..self.options.len() {
                             let option_y = popup_rect.y + (i as f32 * self.option_height());
                             let option_rect = Rectangle::new(bounds.x, option_y, bounds.width, self.option_height());
@@ -199,9 +236,20 @@ impl<Message: Clone> Widget<Message> for Dropdown<Message> {
                                 return self.on_close.as_ref().map(|f| f());
                             }
                         }
-                    } else {
+                    }
+
+                    // Any click outside dropdown area closes it
+                    if !hover_area.contains(*position) {
                         return self.on_close.as_ref().map(|f| f());
                     }
+                }
+                None
+            }
+            // Close dropdown on ANY scroll event when open (regardless of position)
+            // This handles scrollbar interactions that may not report position inside our bounds
+            Event::MouseWheel { .. } => {
+                if self.is_open {
+                    return self.on_close.as_ref().map(|f| f());
                 }
                 None
             }

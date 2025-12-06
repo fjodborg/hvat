@@ -647,7 +647,8 @@ where
         .spacing(spacing::TIGHT)
 }
 
-/// Compact persistence dropdown for sidebar
+/// Compact persistence dropdown for sidebar.
+/// Automatically drops up if not enough space below (using viewport detection).
 fn view_persistence_dropdown_compact(
     current_mode: PersistenceMode,
     is_open: bool,
@@ -795,6 +796,7 @@ fn view_category_selector(
             row()
                 .push(Element::new(
                     button(color_label)
+                        .on_press(Message::set_annotation_category(category_id))
                         .width(18.0)
                         .height(18.0)
                         .bg_color(cat_color),
@@ -1033,7 +1035,6 @@ pub fn view_image_viewer<'a>(
     }
 
     let left_sidebar = container(Element::new(left_sidebar_scrollable))
-        .fill()
         .border(colors::BORDER);
 
     // === CENTER PANEL: Image with header (zoom toolbar) and footer (status bar) ===
@@ -1095,7 +1096,6 @@ pub fn view_image_viewer<'a>(
     }
 
     let right_sidebar_container = container(Element::new(right_sidebar_scrollable))
-        .fill()
         .border(colors::BORDER);
 
     // === MAIN LAYOUT: left sidebar | center (image+footer) | right sidebar ===
