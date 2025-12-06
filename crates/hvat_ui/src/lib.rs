@@ -15,9 +15,12 @@ mod image;
 mod layout;
 mod layout_cache;
 mod length;
+#[macro_use]
+mod macros;
 mod overlay;
 mod renderer;
 mod text_metrics;
+pub mod theme;
 mod widget;
 
 // Widget implementations

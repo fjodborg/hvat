@@ -1,30 +1,22 @@
 //! Icon button widget with hover effects.
 
 use crate::{
-    Color, ConcreteSize, ConcreteSizeXY, Element, Event, ImageHandle, Layout, Limits, MouseButton, Rectangle, Renderer,
+    builder_field, Color, ConcreteSize, ConcreteSizeXY, Element, Event, ImageHandle, Layout, Limits, MouseButton, Rectangle, Renderer,
     Widget,
 };
+use crate::theme::colors;
 use super::tooltip::{Tooltip, TooltipPosition};
 
 /// An icon button widget that displays an image and responds to clicks.
 pub struct IconButton<Message> {
-    /// The icon image to display
     icon: ImageHandle,
-    /// Message to emit when clicked
     on_press: Option<Message>,
-    /// Button size (width and height)
     size: f32,
-    /// Padding around the icon
     padding: f32,
-    /// Whether the button is currently hovered
     is_hovered: bool,
-    /// Whether the button is in "active" state (e.g., selected tool)
     is_active: bool,
-    /// Background color when active
     active_bg: Color,
-    /// Background color when hovered (but not active)
     hover_bg: Color,
-    /// Normal background color
     normal_bg: Color,
 }
 
@@ -38,9 +30,9 @@ impl<Message: Clone> IconButton<Message> {
             padding: 4.0,
             is_hovered: false,
             is_active: false,
-            active_bg: Color::rgb(0.3, 0.5, 0.7),
-            hover_bg: Color::rgb(0.25, 0.25, 0.3),
-            normal_bg: Color::rgb(0.15, 0.15, 0.2),
+            active_bg: colors::ICON_BUTTON_ACTIVE,
+            hover_bg: colors::ICON_BUTTON_HOVER,
+            normal_bg: colors::ICON_BUTTON_NORMAL,
         }
     }
 
@@ -50,39 +42,16 @@ impl<Message: Clone> IconButton<Message> {
         self
     }
 
-    /// Set the button size (both width and height).
-    pub fn size(mut self, size: f32) -> Self {
-        self.size = size;
-        self
-    }
-
-    /// Set the padding around the icon.
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.padding = padding;
-        self
-    }
+    // Builder methods using macros
+    builder_field!(size, f32);
+    builder_field!(padding, f32);
+    builder_field!(active_bg, Color);
+    builder_field!(hover_bg, Color);
+    builder_field!(normal_bg, Color);
 
     /// Set whether the button is in active state.
     pub fn active(mut self, active: bool) -> Self {
         self.is_active = active;
-        self
-    }
-
-    /// Set the background color when active.
-    pub fn active_bg(mut self, color: Color) -> Self {
-        self.active_bg = color;
-        self
-    }
-
-    /// Set the background color when hovered.
-    pub fn hover_bg(mut self, color: Color) -> Self {
-        self.hover_bg = color;
-        self
-    }
-
-    /// Set the normal background color.
-    pub fn normal_bg(mut self, color: Color) -> Self {
-        self.normal_bg = color;
         self
     }
 
@@ -110,14 +79,12 @@ impl<Message: Clone> IconButton<Message> {
 impl<Message: Clone> Widget<Message> for IconButton<Message> {
     fn layout(&self, limits: &Limits) -> Layout {
         let size = self.size.max(limits.min_width).min(limits.max_width);
-        let bounds = Rectangle::new(0.0, 0.0, size, size);
-        Layout::new(bounds)
+        Layout::new(Rectangle::new(0.0, 0.0, size, size))
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
 
-        // Determine background color based on state
         let bg_color = if self.is_active {
             self.active_bg
         } else if self.is_hovered {
@@ -126,10 +93,8 @@ impl<Message: Clone> Widget<Message> for IconButton<Message> {
             self.normal_bg
         };
 
-        // Draw background
         renderer.fill_rect(bounds, bg_color);
 
-        // Draw border when active
         if self.is_active {
             renderer.stroke_rect(bounds, Color::WHITE, 1.0);
         }
@@ -153,10 +118,7 @@ impl<Message: Clone> Widget<Message> for IconButton<Message> {
                 self.is_hovered = bounds.contains(*position);
                 None
             }
-            Event::MousePressed {
-                button: MouseButton::Left,
-                position,
-            } => {
+            Event::MousePressed { button: MouseButton::Left, position } => {
                 if bounds.contains(*position) && self.on_press.is_some() {
                     self.on_press.clone()
                 } else {
@@ -172,12 +134,11 @@ impl<Message: Clone> Widget<Message> for IconButton<Message> {
     }
 
     fn minimum_size(&self) -> ConcreteSizeXY {
-        // Icon button has fixed minimum size
         ConcreteSizeXY::from_f32(self.size, self.size)
     }
 
     fn is_shrinkable(&self) -> bool {
-        false // Icon buttons don't shrink
+        false
     }
 }
 

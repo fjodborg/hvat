@@ -1,4 +1,5 @@
-use crate::{Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use crate::{builder_option, Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use crate::theme::colors;
 use super::tooltip::{Tooltip, TooltipPosition};
 
 /// A button widget that can be clicked.
@@ -30,26 +31,12 @@ impl<Message: Clone> Button<Message> {
         self
     }
 
-    /// Set the button width.
-    pub fn width(mut self, width: f32) -> Self {
-        self.width = Some(width);
-        self
-    }
-
-    /// Set the button height.
-    pub fn height(mut self, height: f32) -> Self {
-        self.height = Some(height);
-        self
-    }
-
-    /// Set the button background color.
-    pub fn bg_color(mut self, color: Color) -> Self {
-        self.bg_color = Some(color);
-        self
-    }
+    // Builder methods using macros
+    builder_option!(width, f32);
+    builder_option!(height, f32);
+    builder_option!(bg_color, Color);
 
     /// Wrap this button in a tooltip.
-    /// Returns a Tooltip widget containing this button.
     pub fn tooltip(self, text: impl Into<String>) -> Tooltip<'static, Message>
     where
         Message: 'static,
@@ -72,15 +59,13 @@ impl<Message: Clone> Button<Message> {
 
 impl<Message: Clone> Widget<Message> for Button<Message> {
     fn layout(&self, limits: &Limits) -> Layout {
-        // Default button dimensions
         let default_width = 120.0;
         let default_height = 40.0;
 
         let width = self.width.unwrap_or(default_width).max(limits.min_width).min(limits.max_width);
         let height = self.height.unwrap_or(default_height).max(limits.min_height).min(limits.max_height);
 
-        let bounds = Rectangle::new(0.0, 0.0, width, height);
-        Layout::new(bounds)
+        Layout::new(Rectangle::new(0.0, 0.0, width, height))
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
@@ -100,23 +85,25 @@ impl<Message: Clone> Widget<Message> for Button<Message> {
                 custom_color
             }
         } else if self.is_hovered {
-            Color::rgb(0.3, 0.4, 0.6) // Lighter blue when hovered
+            colors::BUTTON_HOVER
         } else {
-            Color::rgb(0.2, 0.3, 0.5) // Normal blue
+            colors::BUTTON_NORMAL
         };
 
-        // Draw button background
         renderer.fill_rect(bounds, button_color);
-
-        // Draw button border
         renderer.stroke_rect(bounds, Color::WHITE, 1.0);
 
         // Draw button text (centered)
+        // Use char count for proper Unicode support (e.g., "✓" is 1 char, not 3 bytes)
+        let char_count = self.label.chars().count() as f32;
+        let font_size = 16.0;
+        let char_width = font_size * 0.6; // Approximate monospace char width
+        let text_width = char_count * char_width;
         let text_position = Point::new(
-            bounds.x + bounds.width / 2.0 - (self.label.len() as f32 * 5.0),
-            bounds.y + bounds.height / 2.0 - 8.0,
+            bounds.x + (bounds.width - text_width) / 2.0,
+            bounds.y + (bounds.height - font_size) / 2.0,
         );
-        renderer.draw_text(&self.label, text_position, Color::WHITE, 16.0);
+        renderer.draw_text(&self.label, text_position, Color::WHITE, font_size);
     }
 
     fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
@@ -139,17 +126,13 @@ impl<Message: Clone> Widget<Message> for Button<Message> {
     }
 
     fn natural_size(&self, _max_width: ConcreteSize) -> ConcreteSizeXY {
-        let default_width = 120.0;
-        let default_height = 40.0;
-
         ConcreteSizeXY::from_f32(
-            self.width.unwrap_or(default_width),
-            self.height.unwrap_or(default_height),
+            self.width.unwrap_or(120.0),
+            self.height.unwrap_or(40.0),
         )
     }
 
     fn minimum_size(&self) -> ConcreteSizeXY {
-        // Button needs at least some space for interaction
         ConcreteSizeXY::from_f32(
             self.width.unwrap_or(40.0),
             self.height.unwrap_or(24.0),

@@ -1,6 +1,7 @@
 //! A slider widget for selecting values within a range.
 
-use crate::{Color, ConcreteSize, ConcreteSizeXY, Event, Layout, Length, Limits, MouseButton, Rectangle, Renderer, Widget};
+use crate::{builder_field, callback_setter, Color, ConcreteSize, ConcreteSizeXY, Event, Layout, Length, Limits, MouseButton, Rectangle, Renderer, Widget};
+use crate::theme::colors;
 
 /// Identifies which slider is being interacted with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,7 +10,6 @@ pub enum SliderId {
     Contrast,
     Gamma,
     HueShift,
-    /// Band selection sliders for hyperspectral RGB composite
     BandRed,
     BandGreen,
     BandBlue,
@@ -18,40 +18,24 @@ pub enum SliderId {
 
 /// A slider widget for selecting values within a range.
 pub struct Slider<Message> {
-    /// Slider identifier
     id: SliderId,
-    /// Current value
     value: f32,
-    /// Minimum value
     min: f32,
-    /// Maximum value
     max: f32,
-    /// Step size (0 for continuous)
     step: f32,
-    /// Widget width
     width: Length,
-    /// Whether this slider is currently being dragged (from external state)
     is_dragging: bool,
-    /// Callback when drag starts (receives slider ID and initial value at click position)
     on_drag_start: Option<Box<dyn Fn(SliderId, f32) -> Message>>,
-    /// Callback when value changes during drag
     on_change: Option<Box<dyn Fn(f32) -> Message>>,
-    /// Callback when drag ends
     on_drag_end: Option<Box<dyn Fn() -> Message>>,
-    /// Track color
     track_color: Color,
-    /// Fill color
     fill_color: Color,
-    /// Thumb color
     thumb_color: Color,
 }
 
 impl<Message> Slider<Message> {
-    /// Height of the slider track
     const TRACK_HEIGHT: f32 = 6.0;
-    /// Diameter of the thumb
     const THUMB_SIZE: f32 = 16.0;
-    /// Total widget height
     const HEIGHT: f32 = 24.0;
 
     /// Create a new slider.
@@ -67,17 +51,19 @@ impl<Message> Slider<Message> {
             on_drag_start: None,
             on_change: None,
             on_drag_end: None,
-            track_color: Color::rgb(0.3, 0.3, 0.3),
-            fill_color: Color::rgb(0.3, 0.6, 0.9),
-            thumb_color: Color::WHITE,
+            track_color: colors::SLIDER_TRACK,
+            fill_color: colors::SLIDER_FILL,
+            thumb_color: colors::SLIDER_THUMB,
         }
     }
 
-    /// Set the slider ID.
-    pub fn id(mut self, id: SliderId) -> Self {
-        self.id = id;
-        self
-    }
+    // Builder methods using macros
+    builder_field!(id, SliderId);
+    builder_field!(width, Length);
+    builder_field!(step, f32);
+    builder_field!(track_color, Color);
+    builder_field!(fill_color, Color);
+    builder_field!(thumb_color, Color);
 
     /// Set whether this slider is being dragged (from external state).
     pub fn dragging(mut self, is_dragging: bool) -> Self {
@@ -85,20 +71,7 @@ impl<Message> Slider<Message> {
         self
     }
 
-    /// Set the slider width.
-    pub fn width(mut self, width: Length) -> Self {
-        self.width = width;
-        self
-    }
-
-    /// Set the step size (0 for continuous).
-    pub fn step(mut self, step: f32) -> Self {
-        self.step = step;
-        self
-    }
-
     /// Set the callback when drag starts.
-    /// The callback receives the slider ID and the initial value at the click position.
     pub fn on_drag_start<F>(mut self, f: F) -> Self
     where
         F: Fn(SliderId, f32) -> Message + 'static,
@@ -107,41 +80,9 @@ impl<Message> Slider<Message> {
         self
     }
 
-    /// Set the callback when value changes.
-    pub fn on_change<F>(mut self, f: F) -> Self
-    where
-        F: Fn(f32) -> Message + 'static,
-    {
-        self.on_change = Some(Box::new(f));
-        self
-    }
-
-    /// Set the callback when drag ends.
-    pub fn on_drag_end<F>(mut self, f: F) -> Self
-    where
-        F: Fn() -> Message + 'static,
-    {
-        self.on_drag_end = Some(Box::new(f));
-        self
-    }
-
-    /// Set the track color.
-    pub fn track_color(mut self, color: Color) -> Self {
-        self.track_color = color;
-        self
-    }
-
-    /// Set the fill color.
-    pub fn fill_color(mut self, color: Color) -> Self {
-        self.fill_color = color;
-        self
-    }
-
-    /// Set the thumb color.
-    pub fn thumb_color(mut self, color: Color) -> Self {
-        self.thumb_color = color;
-        self
-    }
+    // Callback setters using macros
+    callback_setter!(on_change, f32);
+    callback_setter!(on_drag_end);
 
     /// Convert x position to value.
     fn x_to_value(&self, x: f32, bounds: &Rectangle) -> f32 {
@@ -174,7 +115,6 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
         let size = limits.resolve(width, Self::HEIGHT);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
 
-        // Report fill intent based on Length
         if matches!(self.width, Length::Fill) {
             Layout::fill_width(bounds)
         } else {
@@ -221,12 +161,9 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
         match event {
             Event::MousePressed { button: MouseButton::Left, position } => {
                 if bounds.contains(*position) {
-                    // Calculate value from click position
                     let new_value = self.x_to_value(position.x, &bounds);
                     log::debug!("🎚️ Slider {:?} MousePressed at value {:.2}", self.id, new_value);
 
-                    // Emit drag start with both ID and initial value
-                    // This allows the handler to start the drag state AND set the initial value
                     if let Some(ref on_drag_start) = self.on_drag_start {
                         return Some(on_drag_start(self.id, new_value));
                     }
@@ -234,8 +171,6 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
                 None
             }
             Event::MouseReleased { button: MouseButton::Left, .. } => {
-                // Fire on_drag_end if this slider was being dragged
-                // This handles mouse release anywhere on screen, not just within bounds
                 if self.is_dragging {
                     log::info!("🎚️ Slider {:?} MouseReleased while dragging, firing on_drag_end", self.id);
                     if let Some(ref on_drag_end) = self.on_drag_end {
@@ -246,7 +181,6 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
             }
             Event::MouseMoved { position } => {
                 if self.is_dragging {
-                    // Clamp value to slider range even if mouse is outside bounds
                     let new_value = self.x_to_value(position.x, &bounds);
                     if let Some(ref on_change) = self.on_change {
                         return Some(on_change(new_value));
@@ -259,23 +193,19 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
     }
 
     fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
-        // For Fill, return minimum_size (parent will distribute space)
         let width = match self.width {
             Length::Fill | Length::FillPortion(_) => return self.minimum_size(),
             Length::Units(px) => px,
-            Length::Shrink => 200.0, // Default natural width
+            Length::Shrink => 200.0,
         };
-
         ConcreteSizeXY::from_f32(width.min(max_width.get()), Self::HEIGHT)
     }
 
     fn minimum_size(&self) -> ConcreteSizeXY {
-        // Slider needs at least thumb width + some track
         ConcreteSizeXY::from_f32(Self::THUMB_SIZE * 3.0, Self::HEIGHT)
     }
 
     fn is_shrinkable(&self) -> bool {
-        // Slider can shrink, but has a minimum
         true
     }
 }

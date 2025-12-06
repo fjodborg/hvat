@@ -306,6 +306,22 @@ impl Rectangle {
         Size::new(self.width, self.height)
     }
 
+    /// Create a new rectangle with padding applied (inset from all sides).
+    /// Returns a smaller rectangle inside this one.
+    pub fn with_padding(&self, padding: f32) -> Rectangle {
+        Rectangle::new(
+            self.x + padding,
+            self.y + padding,
+            (self.width - padding * 2.0).max(0.0),
+            (self.height - padding * 2.0).max(0.0),
+        )
+    }
+
+    /// Get the center point of this rectangle.
+    pub fn center(&self) -> Point {
+        Point::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
+    }
+
     /// Compute the intersection of two rectangles.
     /// Returns a rectangle representing the overlapping area.
     /// If there's no overlap, returns a zero-sized rectangle at the origin.
