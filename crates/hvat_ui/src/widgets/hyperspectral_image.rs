@@ -4,8 +4,8 @@
 //! band selection changes.
 
 use crate::{
-    BandSelectionUniform, Color, Event, HyperspectralImageHandle, ImageAdjustments, Key, Layout,
-    Length, Limits, MeasureContext, Modifiers, MouseButton, Overlay, OverlayShape, Rectangle, Renderer, Widget,
+    BandSelectionUniform, Color, ConcreteSize, ConcreteSizeXY, Event, HyperspectralImageHandle, ImageAdjustments, Key, Layout,
+    Length, Limits, Modifiers, MouseButton, Overlay, OverlayShape, Rectangle, Renderer, Widget,
 };
 
 /// An interactive hyperspectral image widget that supports panning, zooming, and band selection.
@@ -389,9 +389,6 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
             400.0
         };
 
-        // In ContentMeasure mode, report intrinsic size (not fill behavior)
-        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
-
         // Resolve requested dimensions
         let requested_width = self.width.resolve(available_width, available_width);
         let requested_height = self.height.resolve(available_height, available_height);
@@ -403,19 +400,15 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
         let size = limits.resolve(width, height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
 
-        // Report fill intent based on Length (only when NOT in ContentMeasure mode)
-        if is_content_measure {
-            Layout::new(bounds)
-        } else {
-            let fills_width = matches!(self.width, Length::Fill);
-            let fills_height = matches!(self.height, Length::Fill);
+        // Report fill intent based on Length
+        let fills_width = matches!(self.width, Length::Fill);
+        let fills_height = matches!(self.height, Length::Fill);
 
-            match (fills_width, fills_height) {
-                (true, true) => Layout::fill_both(bounds),
-                (true, false) => Layout::fill_width(bounds),
-                (false, true) => Layout::fill_height(bounds),
-                (false, false) => Layout::new(bounds),
-            }
+        match (fills_width, fills_height) {
+            (true, true) => Layout::fill_both(bounds),
+            (true, false) => Layout::fill_width(bounds),
+            (false, true) => Layout::fill_height(bounds),
+            (false, false) => Layout::new(bounds),
         }
     }
 
@@ -627,6 +620,17 @@ impl<Message: Clone> Widget<Message> for HyperspectralImage<Message> {
         };
 
         result
+    }
+
+    fn natural_size(&self, _max_width: ConcreteSize) -> ConcreteSizeXY {
+        // HyperspectralImage typically fills available space
+        // Return minimum size (200x200) since it's usually Fill
+        ConcreteSizeXY::from_f32(200.0, 200.0)
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // HyperspectralImage needs minimum space for display and interaction
+        ConcreteSizeXY::from_f32(200.0, 200.0)
     }
 }
 

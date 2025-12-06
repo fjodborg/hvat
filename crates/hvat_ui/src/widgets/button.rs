@@ -1,4 +1,4 @@
-use crate::{Color, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use crate::{Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
 use super::tooltip::{Tooltip, TooltipPosition};
 
 /// A button widget that can be clicked.
@@ -136,6 +136,24 @@ impl<Message: Clone> Widget<Message> for Button<Message> {
             }
             _ => None,
         }
+    }
+
+    fn natural_size(&self, _max_width: ConcreteSize) -> ConcreteSizeXY {
+        let default_width = 120.0;
+        let default_height = 40.0;
+
+        ConcreteSizeXY::from_f32(
+            self.width.unwrap_or(default_width),
+            self.height.unwrap_or(default_height),
+        )
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // Button needs at least some space for interaction
+        ConcreteSizeXY::from_f32(
+            self.width.unwrap_or(40.0),
+            self.height.unwrap_or(24.0),
+        )
     }
 }
 

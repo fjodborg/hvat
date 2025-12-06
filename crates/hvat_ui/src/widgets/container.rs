@@ -1,4 +1,4 @@
-use crate::{Color, Element, Event, Layout, Limits, MeasureContext, Rectangle, Renderer, Widget};
+use crate::{Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, Rectangle, Renderer, Widget};
 
 /// A container widget that wraps a single child with optional padding and background color.
 pub struct Container<'a, Message> {
@@ -70,22 +70,16 @@ impl<'a, Message> Widget<Message> for Container<'a, Message> {
             f32::INFINITY
         };
 
-        // Propagate measurement context to children
-        let mut child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
-        child_limits.context = limits.context;
-
+        let child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
         let child_layout = self.child.widget().layout(&child_limits);
         let child_size = child_layout.size();
 
-        // In ContentMeasure mode, always report natural size (ignore fill)
-        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
-
-        // Container size depends on fill mode (but not in ContentMeasure)
+        // Container size depends on fill mode
         // Note: When fill=true and we have a border, we need to leave room for the border
         // so it doesn't get clipped by parent containers
         let border_inset = if self.border_color.is_some() { self.border_width } else { 0.0 };
 
-        let (width, height) = if self.fill && !is_content_measure {
+        let (width, height) = if self.fill {
             // Fill mode: use all available space (up to limits), minus border inset
             let w = if limits.max_width.is_finite() {
                 (limits.max_width - border_inset).max(0.0)
@@ -107,8 +101,8 @@ impl<'a, Message> Widget<Message> for Container<'a, Message> {
 
         let bounds = Rectangle::new(0.0, 0.0, width, height);
 
-        // Report fill intent (only when NOT in ContentMeasure mode)
-        if self.fill && !is_content_measure {
+        // Report fill intent
+        if self.fill {
             Layout::fill_both(bounds)
         } else {
             Layout::new(bounds)
@@ -158,6 +152,34 @@ impl<'a, Message> Widget<Message> for Container<'a, Message> {
         );
         let child_layout = Layout::new(child_bounds);
         self.child.widget_mut().on_event(event, &child_layout)
+    }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        // For fill containers, return minimum_size (parent will distribute space)
+        if self.fill {
+            return self.minimum_size();
+        }
+
+        // Calculate child max width (accounting for padding)
+        let padding = self.padding * 2.0;
+        let child_max = ConcreteSize::new_unchecked((max_width.get() - padding).max(0.0));
+
+        let child_size = self.child.widget().natural_size(child_max);
+
+        ConcreteSizeXY::new(
+            child_size.width + ConcreteSize::new_unchecked(padding),
+            child_size.height + ConcreteSize::new_unchecked(padding),
+        )
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        let padding = ConcreteSize::new_unchecked(self.padding * 2.0);
+        let child_min = self.child.widget().minimum_size();
+
+        ConcreteSizeXY::new(
+            child_min.width + padding,
+            child_min.height + padding,
+        )
     }
 }
 

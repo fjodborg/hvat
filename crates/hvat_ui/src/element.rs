@@ -1,4 +1,4 @@
-use crate::{Layout, Widget};
+use crate::{ConcreteSize, ConcreteSizeXY, Layout, Widget};
 
 /// A unique identifier for a widget in the UI tree.
 ///
@@ -133,6 +133,18 @@ where
             .widget_mut()
             .on_event(event, layout)
             .map(&self.mapper)
+    }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        self.element.widget().natural_size(max_width)
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        self.element.widget().minimum_size()
+    }
+
+    fn is_shrinkable(&self) -> bool {
+        self.element.widget().is_shrinkable()
     }
 }
 

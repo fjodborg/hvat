@@ -5,7 +5,7 @@
 //! - Vertical and/or horizontal scrollbars with track and thumb
 //! - Coordinate transformation for events
 
-use crate::{Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use crate::{ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
 use super::config::{ScrollbarConfig, ScrollDirection};
 
 /// Default scrollbar configuration (used if not overridden).
@@ -362,13 +362,13 @@ impl<'a, Message> Scrollable<'a, Message> {
         renderer.fill_rect(thumb_bounds, thumb_color);
     }
 
-    /// Measure child content using ContentMeasure context.
+    /// Measure child content using natural_size().
     /// This tells children to report natural size, not fill.
     fn measure_content(&self, viewport_width: f32, _viewport_height: f32) -> crate::Size {
-        // Use ContentMeasure context so children report natural size
-        let content_limits = Limits::for_content_measure(viewport_width, f32::INFINITY);
-        let content_layout = self.child.widget().layout(&content_limits);
-        content_layout.size()
+        // Use natural_size() which returns finite sizes even for Fill widgets
+        let max_width = ConcreteSize::new_unchecked(viewport_width);
+        let content_size = self.child.widget().natural_size(max_width);
+        crate::Size::new(content_size.width.get(), content_size.height.get())
     }
 }
 
@@ -668,6 +668,34 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
                 self.child.widget_mut().on_event(event, &make_child_layout())
             }
         }
+    }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        // Report content's natural size (NOT infinity!)
+        // This is the key fix for Fill-in-Scrollable bugs.
+        let content_size = self.child.widget().natural_size(max_width);
+
+        // Use specified dimensions if set, otherwise use content size
+        let width = self.width
+            .map(|w| ConcreteSize::new_unchecked(w))
+            .unwrap_or(content_size.width);
+
+        // Height: use specified height or content height
+        // Note: we don't report Fill for scrollables - they have definite content height
+        let height = self.height
+            .map(|h| ConcreteSize::new_unchecked(h))
+            .unwrap_or(content_size.height);
+
+        ConcreteSizeXY::new(width, height)
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // Scrollable can shrink to zero - it just shows more scrollbar
+        ConcreteSizeXY::ZERO
+    }
+
+    fn is_shrinkable(&self) -> bool {
+        true // Scrollables can always shrink
     }
 }
 

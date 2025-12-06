@@ -1,7 +1,7 @@
 //! Icon button widget with hover effects.
 
 use crate::{
-    Color, Element, Event, ImageHandle, Layout, Limits, MouseButton, Rectangle, Renderer,
+    Color, ConcreteSize, ConcreteSizeXY, Element, Event, ImageHandle, Layout, Limits, MouseButton, Rectangle, Renderer,
     Widget,
 };
 use super::tooltip::{Tooltip, TooltipPosition};
@@ -165,6 +165,19 @@ impl<Message: Clone> Widget<Message> for IconButton<Message> {
             }
             _ => None,
         }
+    }
+
+    fn natural_size(&self, _max_width: ConcreteSize) -> ConcreteSizeXY {
+        ConcreteSizeXY::from_f32(self.size, self.size)
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // Icon button has fixed minimum size
+        ConcreteSizeXY::from_f32(self.size, self.size)
+    }
+
+    fn is_shrinkable(&self) -> bool {
+        false // Icon buttons don't shrink
     }
 }
 

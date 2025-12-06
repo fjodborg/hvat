@@ -1,6 +1,6 @@
 //! A container widget with a small title bar in the corner.
 
-use crate::{Color, Element, Event, Layout, Limits, MeasureContext, Rectangle, Renderer, Widget};
+use crate::{Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, Rectangle, Renderer, Widget};
 
 /// Position of the title bar (left or right).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -190,10 +190,9 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
             TitleStyle::Inside | TitleStyle::None => 0.0,
         };
 
-        // Measure header if present (propagate context)
+        // Measure header if present
         let header_h = if let Some(ref header) = self.header {
-            let mut header_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
-            header_limits.context = limits.context;
+            let header_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
             let header_layout = header.widget().layout(&header_limits);
             header_layout.size().height
         } else {
@@ -201,10 +200,9 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
         };
         self.header_height.set(header_h);
 
-        // Measure footer if present (propagate context)
+        // Measure footer if present
         let footer_h = if let Some(ref footer) = self.footer {
-            let mut footer_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
-            footer_limits.context = limits.context;
+            let footer_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
             let footer_layout = footer.widget().layout(&footer_limits);
             footer_layout.size().height
         } else {
@@ -219,18 +217,12 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
             f32::INFINITY
         };
 
-        // Propagate measurement context to child
-        let mut child_limits = Limits::with_range(0.0, content_max_width, 0.0, child_max_height);
-        child_limits.context = limits.context;
-
+        let child_limits = Limits::with_range(0.0, content_max_width, 0.0, child_max_height);
         let child_layout = self.child.widget().layout(&child_limits);
         let child_size = child_layout.size();
 
-        // In ContentMeasure mode, always report natural size (ignore fill)
-        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
-
-        // Container size depends on fill mode (but not in ContentMeasure)
-        let (width, height) = if self.fill && !is_content_measure {
+        // Container size depends on fill mode
+        let (width, height) = if self.fill {
             // Fill mode: use all available space (up to limits), fallback to content size
             let w = if limits.max_width.is_finite() {
                 limits.max_width
@@ -253,8 +245,8 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
 
         let bounds = Rectangle::new(0.0, 0.0, width, height);
 
-        // Report fill intent (only when NOT in ContentMeasure mode)
-        if self.fill && !is_content_measure {
+        // Report fill intent
+        if self.fill {
             Layout::fill_both(bounds)
         } else {
             Layout::new(bounds)
@@ -424,6 +416,62 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
         );
         let child_layout = Layout::new(child_bounds);
         self.child.widget_mut().on_event(event, &child_layout)
+    }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        // If fill mode, return minimum_size (parent will distribute space)
+        if self.fill {
+            return self.minimum_size();
+        }
+
+        let content_padding = self.content_padding * 2.0;
+        let child_max = ConcreteSize::new_unchecked((max_width.get() - content_padding).max(0.0));
+
+        // Calculate title bar height based on style
+        let title_h = match self.title_style {
+            TitleStyle::Above => self.title_bar_height(),
+            TitleStyle::Inside | TitleStyle::None => 0.0,
+        };
+
+        // Measure header if present
+        let header_h = if let Some(ref header) = self.header {
+            header.widget().natural_size(child_max).height.get()
+        } else {
+            0.0
+        };
+
+        // Measure footer if present
+        let footer_h = if let Some(ref footer) = self.footer {
+            footer.widget().natural_size(child_max).height.get()
+        } else {
+            0.0
+        };
+
+        let child_size = self.child.widget().natural_size(child_max);
+
+        ConcreteSizeXY::new(
+            child_size.width + ConcreteSize::new_unchecked(content_padding),
+            ConcreteSize::new_unchecked(
+                child_size.height.get() + title_h + header_h + footer_h + content_padding
+            ),
+        )
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        let content_padding = ConcreteSize::new_unchecked(self.content_padding * 2.0);
+        let child_min = self.child.widget().minimum_size();
+
+        let title_h = match self.title_style {
+            TitleStyle::Above => self.title_bar_height(),
+            _ => 0.0,
+        };
+
+        ConcreteSizeXY::new(
+            child_min.width + content_padding,
+            ConcreteSize::new_unchecked(
+                child_min.height.get() + title_h + content_padding.get()
+            ),
+        )
     }
 }
 

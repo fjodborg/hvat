@@ -1,4 +1,4 @@
-use crate::{Event, ImageHandle, Layout, Length, Limits, MeasureContext, Rectangle, Renderer, Widget};
+use crate::{ConcreteSize, ConcreteSizeXY, Event, ImageHandle, Layout, Length, Limits, Rectangle, Renderer, Widget};
 
 /// An image widget that displays a texture.
 pub struct Image {
@@ -36,9 +36,6 @@ impl<Message> Widget<Message> for Image {
         let intrinsic_width = self.handle.width() as f32;
         let intrinsic_height = self.handle.height() as f32;
 
-        // In ContentMeasure mode, report intrinsic size (not fill behavior)
-        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
-
         // Resolve width and height based on length specifications
         let width = self.width.resolve(limits.max_width, intrinsic_width);
         let height = self.height.resolve(limits.max_height, intrinsic_height);
@@ -71,19 +68,15 @@ impl<Message> Widget<Message> for Image {
         let size = limits.resolve(final_width, final_height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
 
-        // Report fill intent based on Length (only when NOT in ContentMeasure mode)
-        if is_content_measure {
-            Layout::new(bounds)
-        } else {
-            let fills_width = matches!(self.width, Length::Fill);
-            let fills_height = matches!(self.height, Length::Fill);
+        // Report fill intent based on Length
+        let fills_width = matches!(self.width, Length::Fill);
+        let fills_height = matches!(self.height, Length::Fill);
 
-            match (fills_width, fills_height) {
-                (true, true) => Layout::fill_both(bounds),
-                (true, false) => Layout::fill_width(bounds),
-                (false, true) => Layout::fill_height(bounds),
-                (false, false) => Layout::new(bounds),
-            }
+        match (fills_width, fills_height) {
+            (true, true) => Layout::fill_both(bounds),
+            (true, false) => Layout::fill_width(bounds),
+            (false, true) => Layout::fill_height(bounds),
+            (false, false) => Layout::new(bounds),
         }
     }
 
@@ -91,12 +84,48 @@ impl<Message> Widget<Message> for Image {
         let bounds = layout.bounds();
 
         // Upload texture and draw it
-        // For now, this is a placeholder - we'll need to integrate with hvat_gpu's texture pipeline
         renderer.draw_image(&self.handle, bounds);
     }
 
     fn on_event(&mut self, _event: &Event, _layout: &Layout) -> Option<Message> {
         None // Basic image doesn't handle events
+    }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        let intrinsic_width = self.handle.width() as f32;
+        let intrinsic_height = self.handle.height() as f32;
+
+        // For Fill dimensions, return minimum size (32x32)
+        match (self.width, self.height) {
+            (Length::Fill, _) | (_, Length::Fill) | (Length::FillPortion(_), _) | (_, Length::FillPortion(_)) => {
+                return ConcreteSizeXY::from_f32(32.0, 32.0);
+            }
+            _ => {}
+        }
+
+        // Calculate size based on Length specifications
+        let (width, height) = match (self.width, self.height) {
+            (Length::Shrink, Length::Shrink) => {
+                (intrinsic_width.min(max_width.get()), intrinsic_height)
+            }
+            (Length::Units(w), Length::Units(h)) => (w, h),
+            (Length::Units(w), Length::Shrink) => {
+                let h = w / self.handle.aspect_ratio();
+                (w, h)
+            }
+            (Length::Shrink, Length::Units(h)) => {
+                let w = h * self.handle.aspect_ratio();
+                (w.min(max_width.get()), h)
+            }
+            _ => (intrinsic_width, intrinsic_height),
+        };
+
+        ConcreteSizeXY::from_f32(width, height)
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // Image can shrink to a small thumbnail
+        ConcreteSizeXY::from_f32(32.0, 32.0)
     }
 }
 

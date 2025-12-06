@@ -2,8 +2,20 @@
 //!
 //! This module provides a unified `FlexLayout` widget that handles both row and column layouts.
 //! It uses explicit SizingMode from Layout to determine which children want to fill available space.
+//!
+//! # Compile-Time Context Safety
+//!
+//! `FlexLayout` is generic over a `Context` type parameter that controls whether Fill children
+//! are allowed:
+//!
+//! - `FlexLayout<'a, Message, Bounded>` - Normal context, Fill children allowed
+//! - `FlexLayout<'a, Message, Unbounded>` - Inside scrollable, Fill children NOT allowed
+//!
+//! This prevents the common bug of putting Fill widgets inside scrollables, which would
+//! cause infinite expansion.
 
-use crate::{Element, Event, Layout, Limits, Rectangle, Renderer, SizingMode, Widget};
+use std::marker::PhantomData;
+use crate::{Bounded, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, Rectangle, Renderer, SizingMode, Unbounded, Widget};
 
 /// Direction for flex layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,49 +51,38 @@ struct ChildLayoutInfo {
 /// - Spacing between children
 /// - Fill-behavior where children with SizingMode::Fill share remaining space
 /// - Wrap mode for horizontal layouts (wraps to next line when content exceeds width)
-pub struct FlexLayout<'a, Message> {
+///
+/// # Context Type Parameter
+///
+/// The `Context` type parameter controls whether Fill children are allowed:
+/// - `Bounded` (default): Fill children allowed, use in normal layouts
+/// - `Unbounded`: Fill children NOT allowed, use inside scrollables
+///
+/// This is enforced at compile time - you cannot add Fill children to an unbounded flex.
+pub struct FlexLayout<'a, Message, Context = Bounded> {
     children: Vec<Element<'a, Message>>,
     spacing: f32,
     direction: FlexDirection,
     /// Whether to wrap children to next line when they exceed available width (horizontal only)
     wrap: bool,
+    /// Phantom data for context type
+    _context: PhantomData<Context>,
 }
 
-impl<'a, Message> FlexLayout<'a, Message> {
+// ============================================================================
+// Common methods for all contexts
+// ============================================================================
+
+impl<'a, Message, Context> FlexLayout<'a, Message, Context> {
     /// Create a new flex layout with the given direction.
-    pub fn new(direction: FlexDirection) -> Self {
+    fn new_with_context(direction: FlexDirection) -> Self {
         Self {
             children: Vec::new(),
             spacing: 0.0,
             direction,
             wrap: false,
+            _context: PhantomData,
         }
-    }
-
-    /// Create a horizontal flex layout (row).
-    pub fn row() -> Self {
-        Self::new(FlexDirection::Horizontal)
-    }
-
-    /// Create a vertical flex layout (column).
-    pub fn column() -> Self {
-        Self::new(FlexDirection::Vertical)
-    }
-
-    /// Create a flex layout with children.
-    pub fn with_children(direction: FlexDirection, children: Vec<Element<'a, Message>>) -> Self {
-        Self {
-            children,
-            spacing: 0.0,
-            direction,
-            wrap: false,
-        }
-    }
-
-    /// Add a child element.
-    pub fn push(mut self, child: Element<'a, Message>) -> Self {
-        self.children.push(child);
-        self
     }
 
     /// Set the spacing between children.
@@ -118,6 +119,15 @@ impl<'a, Message> FlexLayout<'a, Message> {
         self.children.is_empty()
     }
 
+    /// Add a child element.
+    ///
+    /// Note: In `Unbounded` context, this is the only way to add children.
+    /// Fill widgets added here will have their Fill behavior ignored (they'll use minimum_size).
+    pub fn push(mut self, child: Element<'a, Message>) -> Self {
+        self.children.push(child);
+        self
+    }
+
     // === Internal helpers ===
 
     /// Get the main axis size from bounds (width for horizontal, height for vertical).
@@ -140,10 +150,8 @@ impl<'a, Message> FlexLayout<'a, Message> {
 
     /// Create limits for measuring children.
     /// Propagates the cross-axis constraint but allows infinite main axis for measurement.
-    /// Also propagates the measurement context (e.g., ContentMeasure for scrollables).
     fn create_child_limits(&self, limits: &Limits) -> Limits {
-        let mut child_limits = if self.is_horizontal() {
-            // Horizontal: propagate height constraint, allow infinite width for measurement
+        if self.is_horizontal() {
             let max_height = if limits.max_height.is_finite() {
                 limits.max_height
             } else {
@@ -151,17 +159,13 @@ impl<'a, Message> FlexLayout<'a, Message> {
             };
             Limits::with_range(0.0, f32::INFINITY, 0.0, max_height)
         } else {
-            // Vertical: propagate width constraint, allow infinite height for measurement
             let max_width = if limits.max_width.is_finite() {
                 limits.max_width
             } else {
                 f32::INFINITY
             };
             Limits::with_range(0.0, max_width, 0.0, f32::INFINITY)
-        };
-        // Propagate measurement context so nested widgets know if they're being measured for content
-        child_limits.context = limits.context;
-        child_limits
+        }
     }
 
     /// Measure all children and collect layout info.
@@ -233,7 +237,6 @@ impl<'a, Message> FlexLayout<'a, Message> {
     /// Position a child given child info and current position.
     fn position_child(&self, parent: &Rectangle, _info: &ChildLayoutInfo, main_pos: f32, actual_main_size: f32, max_cross: f32) -> Rectangle {
         if self.is_horizontal() {
-            // For horizontal, use parent height but cap at max_cross if parent is unreasonably large
             let height = if max_cross > 0.0 && parent.height > max_cross * 2.0 {
                 max_cross
             } else {
@@ -241,7 +244,6 @@ impl<'a, Message> FlexLayout<'a, Message> {
             };
             Rectangle::new(main_pos, parent.y, actual_main_size, height)
         } else {
-            // For vertical, use parent width but cap at max_cross if parent is unreasonably large
             let width = if max_cross > 0.0 && parent.width > max_cross * 2.0 {
                 max_cross
             } else {
@@ -264,15 +266,12 @@ impl<'a, Message> FlexLayout<'a, Message> {
             let child_layout = child.widget().layout(&child_limits);
             let size = child_layout.size();
 
-            // Check if we need to wrap to next line
             if i > 0 && x + size.width > bounds.x + bounds.width {
-                // Move to next line
                 y += row_height + self.spacing;
                 x = bounds.x;
                 row_height = 0.0;
             }
 
-            // Add spacing between items on same row
             if i > 0 && x > bounds.x {
                 x += self.spacing;
             }
@@ -285,9 +284,132 @@ impl<'a, Message> FlexLayout<'a, Message> {
 
         (positions, total_height)
     }
+
+    fn natural_size_row(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        let mut total_width = ConcreteSize::ZERO;
+        let mut max_height = ConcreteSize::ZERO;
+
+        let child_limits = Limits::with_range(0.0, f32::INFINITY, 0.0, f32::INFINITY);
+
+        for (i, child) in self.children.iter().enumerate() {
+            let child_layout = child.widget().layout(&child_limits);
+
+            let child_size = if child_layout.fills_width() {
+                child.widget().minimum_size()
+            } else {
+                child.widget().natural_size(max_width)
+            };
+
+            total_width = total_width + child_size.width;
+            max_height = max_height.max(child_size.height);
+
+            if i > 0 {
+                total_width = total_width + ConcreteSize::new_unchecked(self.spacing);
+            }
+        }
+
+        ConcreteSizeXY::new(total_width, max_height)
+    }
+
+    fn natural_size_column(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        let mut total_height = ConcreteSize::ZERO;
+        let mut max_child_width = ConcreteSize::ZERO;
+
+        let child_limits = Limits::with_range(0.0, max_width.get(), 0.0, f32::INFINITY);
+
+        for (i, child) in self.children.iter().enumerate() {
+            let child_layout = child.widget().layout(&child_limits);
+
+            let child_size = if child_layout.fills_height() {
+                child.widget().minimum_size()
+            } else {
+                child.widget().natural_size(max_width)
+            };
+
+            total_height = total_height + child_size.height;
+            max_child_width = max_child_width.max(child_size.width);
+
+            if i > 0 {
+                total_height = total_height + ConcreteSize::new_unchecked(self.spacing);
+            }
+        }
+
+        ConcreteSizeXY::new(max_child_width, total_height)
+    }
 }
 
-impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
+// ============================================================================
+// Bounded-only methods (normal context where Fill is allowed)
+// ============================================================================
+
+impl<'a, Message> FlexLayout<'a, Message, Bounded> {
+    /// Create a new flex layout with the given direction (bounded context).
+    pub fn new(direction: FlexDirection) -> Self {
+        Self::new_with_context(direction)
+    }
+
+    /// Create a horizontal flex layout (row) in bounded context.
+    pub fn row() -> Self {
+        Self::new(FlexDirection::Horizontal)
+    }
+
+    /// Create a vertical flex layout (column) in bounded context.
+    pub fn column() -> Self {
+        Self::new(FlexDirection::Vertical)
+    }
+
+    /// Create a flex layout with children (bounded context).
+    pub fn with_children(direction: FlexDirection, children: Vec<Element<'a, Message>>) -> Self {
+        Self {
+            children,
+            spacing: 0.0,
+            direction,
+            wrap: false,
+            _context: PhantomData,
+        }
+    }
+
+    /// Convert this flex layout to unbounded context.
+    ///
+    /// Use this when placing a flex layout inside a scrollable.
+    /// Any Fill children will have their Fill behavior ignored (they'll use minimum_size).
+    pub fn into_unbounded(self) -> FlexLayout<'a, Message, Unbounded> {
+        FlexLayout {
+            children: self.children,
+            spacing: self.spacing,
+            direction: self.direction,
+            wrap: self.wrap,
+            _context: PhantomData,
+        }
+    }
+}
+
+// ============================================================================
+// Unbounded-only methods (inside scrollable, Fill not allowed)
+// ============================================================================
+
+impl<'a, Message> FlexLayout<'a, Message, Unbounded> {
+    /// Create a new flex layout with the given direction (unbounded context).
+    pub fn new_unbounded(direction: FlexDirection) -> Self {
+        Self::new_with_context(direction)
+    }
+
+    /// Create a horizontal flex layout (row) in unbounded context.
+    pub fn row_unbounded() -> Self {
+        Self::new_unbounded(FlexDirection::Horizontal)
+    }
+
+    /// Create a vertical flex layout (column) in unbounded context.
+    pub fn column_unbounded() -> Self {
+        Self::new_unbounded(FlexDirection::Vertical)
+    }
+}
+
+// ============================================================================
+// Widget implementation (same for all contexts)
+// ============================================================================
+
+impl<'a, Message, Context> Widget<Message> for FlexLayout<'a, Message, Context> {
     fn layout(&self, limits: &Limits) -> Layout {
         // For wrapped horizontal layout, handle separately
         if self.wrap && self.is_horizontal() && limits.max_width.is_finite() {
@@ -301,7 +423,6 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
                 let child_layout = child.widget().layout(&child_limits);
                 let size = child_layout.size();
 
-                // Check if we need to wrap
                 if i > 0 && x + size.width > limits.max_width {
                     y += row_height + self.spacing;
                     max_width = max_width.max(x - self.spacing);
@@ -350,13 +471,11 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
 
         // Determine our size
         let bounds = if self.is_horizontal() {
-            // If we have fill children and finite width available, use it
             let width = if has_fill_main && limits.max_width.is_finite() {
                 limits.max_width
             } else {
                 total_main
             };
-            // If any child wants to fill height and we have finite height, use it
             let height = if has_fill_cross && limits.max_height.is_finite() {
                 limits.max_height
             } else {
@@ -364,13 +483,11 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
             };
             Rectangle::new(0.0, 0.0, width, height)
         } else {
-            // If we have fill children and finite height available, use it
             let height = if has_fill_main && limits.max_height.is_finite() {
                 limits.max_height
             } else {
                 total_main
             };
-            // If any child wants to fill width and we have finite width, use it
             let width = if has_fill_cross && limits.max_width.is_finite() {
                 limits.max_width
             } else {
@@ -573,16 +690,69 @@ impl<'a, Message> Widget<Message> for FlexLayout<'a, Message> {
 
         first_message
     }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        if self.children.is_empty() {
+            return ConcreteSizeXY::ZERO;
+        }
+
+        if self.is_horizontal() {
+            self.natural_size_row(max_width)
+        } else {
+            self.natural_size_column(max_width)
+        }
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        if self.children.is_empty() {
+            return ConcreteSizeXY::ZERO;
+        }
+
+        let mut total_main = ConcreteSize::ZERO;
+        let mut max_cross = ConcreteSize::ZERO;
+
+        for (i, child) in self.children.iter().enumerate() {
+            let child_min = child.widget().minimum_size();
+
+            if self.is_horizontal() {
+                total_main = total_main + child_min.width;
+                max_cross = max_cross.max(child_min.height);
+            } else {
+                total_main = total_main + child_min.height;
+                max_cross = max_cross.max(child_min.width);
+            }
+
+            if i > 0 {
+                total_main = total_main + ConcreteSize::new_unchecked(self.spacing);
+            }
+        }
+
+        if self.is_horizontal() {
+            ConcreteSizeXY::new(total_main, max_cross)
+        } else {
+            ConcreteSizeXY::new(max_cross, total_main)
+        }
+    }
 }
 
-/// Helper function to create a horizontal flex layout (row).
-pub fn flex_row<'a, Message>() -> FlexLayout<'a, Message> {
+/// Helper function to create a horizontal flex layout (row) in bounded context.
+pub fn flex_row<'a, Message>() -> FlexLayout<'a, Message, Bounded> {
     FlexLayout::row()
 }
 
-/// Helper function to create a vertical flex layout (column).
-pub fn flex_column<'a, Message>() -> FlexLayout<'a, Message> {
+/// Helper function to create a vertical flex layout (column) in bounded context.
+pub fn flex_column<'a, Message>() -> FlexLayout<'a, Message, Bounded> {
     FlexLayout::column()
+}
+
+/// Helper function to create a horizontal flex layout (row) in unbounded context.
+pub fn flex_row_unbounded<'a, Message>() -> FlexLayout<'a, Message, Unbounded> {
+    FlexLayout::row_unbounded()
+}
+
+/// Helper function to create a vertical flex layout (column) in unbounded context.
+pub fn flex_column_unbounded<'a, Message>() -> FlexLayout<'a, Message, Unbounded> {
+    FlexLayout::column_unbounded()
 }
 
 #[cfg(test)]
@@ -591,18 +761,37 @@ mod tests {
 
     #[test]
     fn test_flex_direction() {
-        let row = FlexLayout::<()>::row();
+        let row = FlexLayout::<(), Bounded>::row();
         assert!(row.is_horizontal());
         assert!(row.is_empty());
 
-        let col = FlexLayout::<()>::column();
+        let col = FlexLayout::<(), Bounded>::column();
         assert!(!col.is_horizontal());
         assert!(col.is_empty());
     }
 
     #[test]
     fn test_flex_spacing() {
-        let flex = FlexLayout::<()>::row().spacing(10.0);
+        let flex = FlexLayout::<(), Bounded>::row().spacing(10.0);
         assert_eq!(flex.spacing, 10.0);
+    }
+
+    #[test]
+    fn test_unbounded_flex() {
+        let row = FlexLayout::<(), Unbounded>::row_unbounded();
+        assert!(row.is_horizontal());
+        assert!(row.is_empty());
+
+        let col = FlexLayout::<(), Unbounded>::column_unbounded();
+        assert!(!col.is_horizontal());
+        assert!(col.is_empty());
+    }
+
+    #[test]
+    fn test_into_unbounded() {
+        let bounded = FlexLayout::<(), Bounded>::row().spacing(5.0);
+        let unbounded = bounded.into_unbounded();
+        assert!(unbounded.is_horizontal());
+        assert_eq!(unbounded.spacing, 5.0);
     }
 }

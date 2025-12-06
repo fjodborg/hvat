@@ -1,4 +1,4 @@
-use crate::{Color, Event, Layout, Limits, Point, Rectangle, Renderer, Widget, TextMetrics};
+use crate::{Color, ConcreteSize, ConcreteSizeXY, Event, Layout, Limits, Point, Rectangle, Renderer, Widget, TextMetrics};
 
 /// A text widget that displays a string.
 pub struct Text {
@@ -69,6 +69,21 @@ impl<Message> Widget<Message> for Text {
 
     fn on_event(&mut self, _event: &Event, _layout: &Layout) -> Option<Message> {
         None // Text doesn't handle events
+    }
+
+    fn natural_size(&self, _max_width: ConcreteSize) -> ConcreteSizeXY {
+        let metrics = TextMetrics::new(self.size);
+        let (text_width, text_height) = metrics.measure(&self.content);
+
+        let width = self.fixed_width.unwrap_or(text_width);
+        let height = text_height.max(metrics.line_height());
+
+        ConcreteSizeXY::from_f32(width, height)
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // Text can shrink to at least show ellipsis or nothing
+        ConcreteSizeXY::ZERO
     }
 }
 

@@ -1,3 +1,128 @@
+// ============================================================================
+// Type-Safe Size Types
+// ============================================================================
+
+/// A size value guaranteed to be finite and non-negative.
+/// Used for natural_size() returns - can NEVER be infinity.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct ConcreteSize(f32);
+
+impl ConcreteSize {
+    /// Zero size constant.
+    pub const ZERO: Self = Self(0.0);
+
+    /// Create a ConcreteSize if the value is finite and non-negative.
+    pub fn new(value: f32) -> Option<Self> {
+        if value.is_finite() && value >= 0.0 {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
+    /// Create a ConcreteSize without validation.
+    /// Panics in debug builds if the value is invalid.
+    pub fn new_unchecked(value: f32) -> Self {
+        debug_assert!(
+            value.is_finite() && value >= 0.0,
+            "ConcreteSize must be finite and non-negative, got {}",
+            value
+        );
+        // Clamp to valid range in release builds for safety
+        Self(if value.is_finite() && value >= 0.0 { value } else { 0.0 })
+    }
+
+    /// Get the inner value.
+    #[inline]
+    pub fn get(self) -> f32 {
+        self.0
+    }
+
+    /// Return the maximum of two sizes.
+    #[inline]
+    pub fn max(self, other: Self) -> Self {
+        Self(self.0.max(other.0))
+    }
+
+    /// Return the minimum of two sizes.
+    #[inline]
+    pub fn min(self, other: Self) -> Self {
+        Self(self.0.min(other.0))
+    }
+}
+
+impl std::ops::Add for ConcreteSize {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::AddAssign for ConcreteSize {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl std::ops::Sub for ConcreteSize {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self((self.0 - rhs.0).max(0.0))
+    }
+}
+
+impl Default for ConcreteSize {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+/// A 2D size with guaranteed finite, non-negative dimensions.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct ConcreteSizeXY {
+    pub width: ConcreteSize,
+    pub height: ConcreteSize,
+}
+
+impl ConcreteSizeXY {
+    /// Zero size constant.
+    pub const ZERO: Self = Self {
+        width: ConcreteSize::ZERO,
+        height: ConcreteSize::ZERO,
+    };
+
+    /// Create a new ConcreteSizeXY.
+    pub fn new(width: ConcreteSize, height: ConcreteSize) -> Self {
+        Self { width, height }
+    }
+
+    /// Create from raw f32 values (unchecked).
+    pub fn from_f32(width: f32, height: f32) -> Self {
+        Self {
+            width: ConcreteSize::new_unchecked(width),
+            height: ConcreteSize::new_unchecked(height),
+        }
+    }
+}
+
+// ============================================================================
+// Layout Context Markers
+// ============================================================================
+
+/// Marker type: layout context where Fill makes sense (bounded parent container).
+/// Used as a type parameter to enable/disable Fill methods at compile time.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Bounded;
+
+/// Marker type: layout context where Fill would be infinite (inside scrollable).
+/// Used as a type parameter to disable Fill methods at compile time.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Unbounded;
+
+// ============================================================================
+// Sizing Mode
+// ============================================================================
+
 /// Sizing mode for a single axis - indicates whether a widget has fixed size or wants to fill.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SizingMode {
@@ -13,16 +138,6 @@ impl Default for SizingMode {
     }
 }
 
-/// Measurement context - tells widgets how to interpret limits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MeasureContext {
-    /// Normal layout - use finite bounds, fill widgets expand
-    #[default]
-    Normal,
-    /// Content measurement for scrollable - report natural size, ignore fill behavior
-    ContentMeasure,
-}
-
 /// Size constraints for widget layout.
 ///
 /// Limits define the minimum and maximum size a widget can have.
@@ -32,8 +147,6 @@ pub struct Limits {
     pub max_width: f32,
     pub min_height: f32,
     pub max_height: f32,
-    /// Context for how to interpret these limits
-    pub context: MeasureContext,
 }
 
 impl Limits {
@@ -44,7 +157,6 @@ impl Limits {
             max_width: width,
             min_height: height,
             max_height: height,
-            context: MeasureContext::Normal,
         }
     }
 
@@ -60,7 +172,6 @@ impl Limits {
             max_width,
             min_height,
             max_height,
-            context: MeasureContext::Normal,
         }
     }
 
@@ -71,25 +182,7 @@ impl Limits {
             max_width: f32::INFINITY,
             min_height: 0.0,
             max_height: f32::INFINITY,
-            context: MeasureContext::Normal,
         }
-    }
-
-    /// Create limits for measuring natural content size (used by scrollables).
-    /// Children should report their intrinsic size, ignoring fill behavior.
-    pub fn for_content_measure(max_width: f32, max_height: f32) -> Self {
-        Self {
-            min_width: 0.0,
-            max_width,
-            min_height: 0.0,
-            max_height,
-            context: MeasureContext::ContentMeasure,
-        }
-    }
-
-    /// Check if we're in content measurement mode.
-    pub fn is_content_measure(&self) -> bool {
-        self.context == MeasureContext::ContentMeasure
     }
 
     /// Get the width of these limits.
@@ -108,6 +201,37 @@ impl Limits {
             width: width.max(self.min_width).min(self.max_width),
             height: height.max(self.min_height).min(self.max_height),
         }
+    }
+
+    /// Check if limits are valid (min <= max, all non-negative).
+    pub fn is_valid(&self) -> bool {
+        self.min_width >= 0.0
+            && self.min_height >= 0.0
+            && self.min_width <= self.max_width
+            && self.min_height <= self.max_height
+    }
+
+    /// Create validated limits, clamping invalid values.
+    pub fn validated(mut self) -> Self {
+        self.min_width = self.min_width.max(0.0);
+        self.min_height = self.min_height.max(0.0);
+        if self.max_width < self.min_width {
+            self.max_width = self.min_width;
+        }
+        if self.max_height < self.min_height {
+            self.max_height = self.min_height;
+        }
+        self
+    }
+
+    /// Check if width is bounded (finite max_width).
+    pub fn is_width_bounded(&self) -> bool {
+        self.max_width.is_finite()
+    }
+
+    /// Check if height is bounded (finite max_height).
+    pub fn is_height_bounded(&self) -> bool {
+        self.max_height.is_finite()
     }
 }
 

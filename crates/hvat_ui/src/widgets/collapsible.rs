@@ -1,6 +1,6 @@
 //! Collapsible container widget with title bar and expand/collapse functionality.
 
-use crate::{Color, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
+use crate::{Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
 
 /// A collapsible container that shows/hides its content.
 pub struct Collapsible<'a, Message> {
@@ -139,9 +139,7 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
                 f32::INFINITY
             };
 
-            let mut child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
-            // Propagate measurement context (e.g., ContentMeasure for scrollables)
-            child_limits.context = limits.context;
+            let child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
             let child_layout = self.child.widget().layout(&child_limits);
             let child_size = child_layout.size();
 
@@ -311,6 +309,29 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
                 None
             }
         }
+    }
+
+    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
+        let width = max_width.get().min(400.0); // Default width cap
+
+        if self.is_collapsed {
+            // Only header
+            ConcreteSizeXY::from_f32(width, self.header_height)
+        } else {
+            // Header + content
+            let child_max = ConcreteSize::new_unchecked((width - self.padding * 2.0).max(0.0));
+            let child_size = self.child.widget().natural_size(child_max);
+
+            ConcreteSizeXY::from_f32(
+                width,
+                self.header_height + child_size.height.get() + self.padding * 2.0,
+            )
+        }
+    }
+
+    fn minimum_size(&self) -> ConcreteSizeXY {
+        // Collapsible can shrink to just header
+        ConcreteSizeXY::from_f32(100.0, self.header_height)
     }
 }
 
