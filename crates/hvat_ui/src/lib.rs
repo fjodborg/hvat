@@ -28,7 +28,7 @@ pub use application::{run, Application, Settings};
 pub use element::{Element, WidgetId};
 pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
 pub use image::{ImageHandle, HyperspectralImageHandle};
-pub use layout::{Layout, Limits, Point, Rectangle, Size};
+pub use layout::{Layout, Limits, MeasureContext, Point, Rectangle, Size, SizingMode};
 pub use length::Length;
 pub use renderer::{Color, Renderer};
 pub use hvat_gpu::{ImageAdjustments, BandSelectionUniform};

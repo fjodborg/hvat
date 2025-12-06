@@ -1,6 +1,6 @@
 //! Interactive image widget with pan and zoom support.
 
-use crate::{Color, Event, ImageAdjustments, ImageHandle, Key, Layout, Length, Limits, MouseButton, Overlay, OverlayShape, Rectangle, Renderer, Widget};
+use crate::{Color, Event, ImageAdjustments, ImageHandle, Key, Layout, Length, Limits, MeasureContext, MouseButton, Overlay, OverlayShape, Rectangle, Renderer, Widget};
 
 /// An interactive image widget that supports panning and zooming.
 pub struct PanZoomImage<Message> {
@@ -337,13 +337,29 @@ impl<Message: Clone> Widget<Message> for PanZoomImage<Message> {
             400.0 // Default height when unbounded
         };
 
+        // In ContentMeasure mode, report intrinsic size (not fill behavior)
+        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
+
         let width = self.width.resolve(available_width, available_width);
         let height = self.height.resolve(available_height, available_height);
 
         let size = limits.resolve(width, height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
 
-        Layout::new(bounds)
+        // Report fill intent based on Length (only when NOT in ContentMeasure mode)
+        if is_content_measure {
+            Layout::new(bounds)
+        } else {
+            let fills_width = matches!(self.width, Length::Fill);
+            let fills_height = matches!(self.height, Length::Fill);
+
+            match (fills_width, fills_height) {
+                (true, true) => Layout::fill_both(bounds),
+                (true, false) => Layout::fill_width(bounds),
+                (false, true) => Layout::fill_height(bounds),
+                (false, false) => Layout::new(bounds),
+            }
+        }
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {

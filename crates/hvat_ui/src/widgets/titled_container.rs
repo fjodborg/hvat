@@ -1,6 +1,6 @@
 //! A container widget with a small title bar in the corner.
 
-use crate::{Color, Element, Event, Layout, Limits, Rectangle, Renderer, Widget};
+use crate::{Color, Element, Event, Layout, Limits, MeasureContext, Rectangle, Renderer, Widget};
 
 /// Position of the title bar (left or right).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -190,9 +190,10 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
             TitleStyle::Inside | TitleStyle::None => 0.0,
         };
 
-        // Measure header if present
+        // Measure header if present (propagate context)
         let header_h = if let Some(ref header) = self.header {
-            let header_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
+            let mut header_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
+            header_limits.context = limits.context;
             let header_layout = header.widget().layout(&header_limits);
             header_layout.size().height
         } else {
@@ -200,9 +201,10 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
         };
         self.header_height.set(header_h);
 
-        // Measure footer if present
+        // Measure footer if present (propagate context)
         let footer_h = if let Some(ref footer) = self.footer {
-            let footer_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
+            let mut footer_limits = Limits::with_range(0.0, content_max_width, 0.0, f32::INFINITY);
+            footer_limits.context = limits.context;
             let footer_layout = footer.widget().layout(&footer_limits);
             footer_layout.size().height
         } else {
@@ -217,22 +219,28 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
             f32::INFINITY
         };
 
-        let child_limits = Limits::with_range(0.0, content_max_width, 0.0, child_max_height);
+        // Propagate measurement context to child
+        let mut child_limits = Limits::with_range(0.0, content_max_width, 0.0, child_max_height);
+        child_limits.context = limits.context;
+
         let child_layout = self.child.widget().layout(&child_limits);
         let child_size = child_layout.size();
 
-        // Container size depends on fill mode
-        let (width, height) = if self.fill {
-            // Fill mode: use all available space (up to limits)
+        // In ContentMeasure mode, always report natural size (ignore fill)
+        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
+
+        // Container size depends on fill mode (but not in ContentMeasure)
+        let (width, height) = if self.fill && !is_content_measure {
+            // Fill mode: use all available space (up to limits), fallback to content size
             let w = if limits.max_width.is_finite() {
                 limits.max_width
             } else {
-                0.0
+                child_size.width + self.content_padding * 2.0
             };
             let h = if limits.max_height.is_finite() {
                 limits.max_height
             } else {
-                0.0
+                child_size.height + title_h + header_h + footer_h + self.content_padding * 2.0
             };
             (w, h)
         } else {
@@ -243,7 +251,14 @@ impl<'a, Message> Widget<Message> for TitledContainer<'a, Message> {
             (w, h)
         };
 
-        Layout::new(Rectangle::new(0.0, 0.0, width, height))
+        let bounds = Rectangle::new(0.0, 0.0, width, height);
+
+        // Report fill intent (only when NOT in ContentMeasure mode)
+        if self.fill && !is_content_measure {
+            Layout::fill_both(bounds)
+        } else {
+            Layout::new(bounds)
+        }
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {

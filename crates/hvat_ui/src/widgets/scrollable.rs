@@ -361,57 +361,60 @@ impl<'a, Message> Scrollable<'a, Message> {
         let thumb_bounds = Rectangle::new(thumb_x, scrollbar_y, thumb_width, config.width);
         renderer.fill_rect(thumb_bounds, thumb_color);
     }
+
+    /// Measure child content using ContentMeasure context.
+    /// This tells children to report natural size, not fill.
+    fn measure_content(&self, viewport_width: f32, _viewport_height: f32) -> crate::Size {
+        // Use ContentMeasure context so children report natural size
+        let content_limits = Limits::for_content_measure(viewport_width, f32::INFINITY);
+        let content_layout = self.child.widget().layout(&content_limits);
+        content_layout.size()
+    }
 }
 
 impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
     fn layout(&self, limits: &Limits) -> Layout {
-        // Use specified dimensions or limits
-        // For height: if not specified, report 0 to indicate "fill remaining space"
-        // The parent container will give us actual height during draw()
-        let viewport_height = self.height.unwrap_or(0.0);
-        let viewport_width = self.width.unwrap_or(limits.max_width);
+        // Viewport size: use specified dimensions or available space
+        let viewport_width = self.width.unwrap_or_else(|| {
+            if limits.max_width.is_finite() {
+                limits.max_width
+            } else {
+                300.0 // reasonable default
+            }
+        });
 
-        // Include scrollbar area in our dimensions
+        // For height: if not specified, we want to fill available space
+        let viewport_height = self.height.unwrap_or(0.0);
+
         let bounds = Rectangle::new(0.0, 0.0, viewport_width, viewport_height);
-        Layout::new(bounds)
+
+        // If height is not specified, we want to fill vertically
+        if self.height.is_none() {
+            Layout::fill_height(bounds)
+        } else {
+            Layout::new(bounds)
+        }
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
         let bounds = layout.bounds();
         let scrollbar_area = self.scrollbar_area();
 
-        log::debug!(
+        log::trace!(
             "📜 Scrollable draw: bounds={{x:{:.1}, y:{:.1}, w:{:.1}, h:{:.1}}}, scroll=({:.1}, {:.1}), dir={:?}",
             bounds.x, bounds.y, bounds.width, bounds.height, self.scroll_offset_x, self.scroll_offset_y, self.direction
         );
 
-        // Determine which scrollbars are needed
-        let (needs_v_scrollbar, needs_h_scrollbar) = {
-            // First pass: check with no scrollbars
-            let content_limits = Limits::with_range(0.0, bounds.width, 0.0, 100000.0);
-            let content_layout = self.child.widget().layout(&content_limits);
-            let content_size = content_layout.size();
+        // Measure content to determine scrollbar needs
+        let content_size = self.measure_content(bounds.width, bounds.height);
 
-            let needs_v = self.direction.has_vertical() && content_size.height > bounds.height;
-            let needs_h = self.direction.has_horizontal() && content_size.width > bounds.width;
+        log::trace!(
+            "📜 Scrollable content_size: w={:.1}, h={:.1}, viewport_h={:.1}, needs_scroll={}",
+            content_size.width, content_size.height, bounds.height, content_size.height > bounds.height
+        );
 
-            // Second pass: if we need one scrollbar, check if we now need the other
-            if needs_v && !needs_h && self.direction.has_horizontal() {
-                let adjusted_width = bounds.width - scrollbar_area;
-                let content_limits = Limits::with_range(0.0, adjusted_width, 0.0, 100000.0);
-                let content_layout = self.child.widget().layout(&content_limits);
-                let needs_h_now = content_layout.size().width > adjusted_width;
-                (needs_v, needs_h_now)
-            } else if needs_h && !needs_v && self.direction.has_vertical() {
-                let adjusted_height = bounds.height - scrollbar_area;
-                let content_limits = Limits::with_range(0.0, bounds.width, 0.0, 100000.0);
-                let content_layout = self.child.widget().layout(&content_limits);
-                let needs_v_now = content_layout.size().height > adjusted_height;
-                (needs_v_now, needs_h)
-            } else {
-                (needs_v, needs_h)
-            }
-        };
+        let needs_v_scrollbar = self.direction.has_vertical() && content_size.height > bounds.height;
+        let needs_h_scrollbar = self.direction.has_horizontal() && content_size.width > bounds.width;
 
         // Calculate content area (exclude scrollbar areas)
         let content_width = if needs_v_scrollbar {
@@ -425,50 +428,35 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
             bounds.height
         };
 
-        // Get the content size
-        // For scrollables:
-        // - Vertical only: constrain width to viewport (no horizontal overflow)
-        // - Horizontal only: constrain height to viewport (no vertical overflow)
-        // - Both: allow overflow in both directions
-        // If fill_viewport is enabled, also use viewport as minimum for fill behavior
-        let (min_w, max_w) = if self.fill_viewport {
-            (content_width, 100000.0)
-        } else if !self.direction.has_horizontal() {
-            // Vertical-only scrollable: constrain width to viewport
-            (0.0, content_width)
+        // Re-measure with adjusted width if vertical scrollbar present
+        let final_content_size = if needs_v_scrollbar && content_width != bounds.width {
+            self.measure_content(content_width, bounds.height)
         } else {
-            (0.0, 100000.0)
+            content_size
         };
-        let (min_h, max_h) = if self.fill_viewport {
-            (content_height, 100000.0)
-        } else if !self.direction.has_vertical() {
-            // Horizontal-only scrollable: constrain height to viewport
-            (0.0, content_height)
-        } else {
-            (0.0, 100000.0)
-        };
-        let content_limits = Limits::with_range(min_w, max_w, min_h, max_h);
-        let content_layout = self.child.widget().layout(&content_limits);
-        let content_size = content_layout.size();
 
         // Child size - if fill_viewport, ensure at least viewport size
         let child_width = if self.fill_viewport {
-            content_size.width.max(content_width)
+            final_content_size.width.max(content_width)
         } else {
-            content_size.width
+            final_content_size.width
         };
         let child_height = if self.fill_viewport {
-            content_size.height.max(content_height)
+            final_content_size.height.max(content_height)
         } else {
-            content_size.height
+            final_content_size.height
         };
 
         // Calculate max scroll and clamp current offsets
-        // This handles the case where window is resized and scroll would be out of bounds
         let max_scroll_y = (child_height - content_height).max(0.0);
         let max_scroll_x = (child_width - content_width).max(0.0);
         let clamped_scroll_y = self.scroll_offset_y.clamp(0.0, max_scroll_y);
         let clamped_scroll_x = self.scroll_offset_x.clamp(0.0, max_scroll_x);
+
+        log::trace!(
+            "📜 Scrollable scroll: child_h={:.1}, content_h={:.1}, max_scroll_y={:.1}, scroll_offset={:.1}, clamped={:.1}",
+            child_height, content_height, max_scroll_y, self.scroll_offset_y, clamped_scroll_y
+        );
 
         // Push clip and scroll offsets (using clamped values)
         let clip_bounds = Rectangle::new(bounds.x, bounds.y, content_width, content_height);
@@ -476,7 +464,7 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         renderer.push_scroll_offset_y(clamped_scroll_y);
         renderer.push_scroll_offset_x(clamped_scroll_x);
 
-        // Draw child with minimum viewport size
+        // Draw child with its natural size (capped to viewport for non-scrolling dimensions)
         let child_bounds = Rectangle::new(bounds.x, bounds.y, child_width, child_height);
         let child_layout = Layout::new(child_bounds);
         self.child.widget().draw(renderer, &child_layout);
@@ -486,7 +474,7 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         renderer.pop_scroll_offset_y();
         renderer.pop_clip();
 
-        // Draw scrollbars if needed (use child_height/width which includes fill minimum)
+        // Draw scrollbars if needed
         if needs_v_scrollbar {
             self.draw_scrollbar_y(renderer, &bounds, child_height, needs_h_scrollbar);
         }
@@ -499,60 +487,46 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
         let bounds = layout.bounds();
         let scrollbar_area = self.scrollbar_area();
 
-        // Determine scrollbar needs first (without minimum)
-        let prelim_limits = Limits::with_range(0.0, 100000.0, 0.0, 100000.0);
-        let prelim_layout = self.child.widget().layout(&prelim_limits);
-        let prelim_size = prelim_layout.size();
+        // Measure content
+        let content_size = self.measure_content(bounds.width, bounds.height);
 
-        let needs_v_scrollbar = self.direction.has_vertical() && prelim_size.height > bounds.height;
-        let needs_h_scrollbar = self.direction.has_horizontal() && prelim_size.width > bounds.width;
+        let needs_v_scrollbar = self.direction.has_vertical() && content_size.height > bounds.height;
+        let needs_h_scrollbar = self.direction.has_horizontal() && content_size.width > bounds.width;
 
         let content_width = if needs_v_scrollbar { bounds.width - scrollbar_area } else { bounds.width };
         let content_height = if needs_h_scrollbar { bounds.height - scrollbar_area } else { bounds.height };
 
-        // Calculate content dimensions
-        // For scrollables:
-        // - Vertical only: constrain width to viewport (no horizontal overflow)
-        // - Horizontal only: constrain height to viewport (no vertical overflow)
-        // - Both: allow overflow in both directions
-        // If fill_viewport is enabled, also use viewport as minimum for fill behavior
-        let (min_w, max_w) = if self.fill_viewport {
-            (content_width, 100000.0)
-        } else if !self.direction.has_horizontal() {
-            // Vertical-only scrollable: constrain width to viewport
-            (0.0, content_width)
+        // Re-measure with adjusted width if vertical scrollbar present
+        let final_content_size = if needs_v_scrollbar && content_width != bounds.width {
+            self.measure_content(content_width, bounds.height)
         } else {
-            (0.0, 100000.0)
+            content_size
         };
-        let (min_h, max_h) = if self.fill_viewport {
-            (content_height, 100000.0)
-        } else if !self.direction.has_vertical() {
-            // Horizontal-only scrollable: constrain height to viewport
-            (0.0, content_height)
-        } else {
-            (0.0, 100000.0)
-        };
-        let content_limits = Limits::with_range(min_w, max_w, min_h, max_h);
-        let content_layout = self.child.widget().layout(&content_limits);
-        let content_size = content_layout.size();
 
         // Child size - if fill_viewport, ensure at least viewport size
         let child_width = if self.fill_viewport {
-            content_size.width.max(content_width)
+            final_content_size.width.max(content_width)
         } else {
-            content_size.width
+            final_content_size.width
         };
         let child_height = if self.fill_viewport {
-            content_size.height.max(content_height)
+            final_content_size.height.max(content_height)
         } else {
-            content_size.height
+            final_content_size.height
         };
 
         let max_scroll_y = (child_height - content_height).max(0.0);
         let max_scroll_x = (child_width - content_width).max(0.0);
 
+        // Log for debugging
+        if needs_v_scrollbar {
+            log::trace!(
+                "📜 Scrollable on_event: child_h={:.1}, content_h={:.1}, max_scroll_y={:.1}, current_offset={:.1}",
+                child_height, content_height, max_scroll_y, self.scroll_offset_y
+            );
+        }
+
         // Check if scroll offset needs clamping (e.g., after window resize)
-        // Emit a scroll message to update the offset if it's out of bounds
         if self.scroll_offset_y > max_scroll_y {
             if let Some(ref on_scroll_y) = self.on_scroll_y {
                 return Some(on_scroll_y(max_scroll_y));
@@ -574,7 +548,7 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
 
         match event {
             Event::MousePressed { button: MouseButton::Left, position } => {
-                // Check vertical scrollbar - clicking anywhere on scrollbar starts drag without jumping
+                // Check vertical scrollbar
                 if needs_v_scrollbar && scrollbar_hit_y.contains(*position) {
                     log::debug!("📜 Vertical scrollbar click - start drag at y={:.1}", position.y);
                     if let Some(ref on_drag_start_y) = self.on_drag_start_y {
@@ -583,7 +557,7 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
                     return None;
                 }
 
-                // Check horizontal scrollbar - clicking anywhere on scrollbar starts drag without jumping
+                // Check horizontal scrollbar
                 if needs_h_scrollbar && scrollbar_hit_x.contains(*position) {
                     log::debug!("📜 Horizontal scrollbar click - start drag at x={:.1}", position.x);
                     if let Some(ref on_drag_start_x) = self.on_drag_start_x {
@@ -639,33 +613,34 @@ impl<'a, Message: Clone> Widget<Message> for Scrollable<'a, Message> {
                 self.child.widget_mut().on_event(&transformed, &make_child_layout())
             }
             Event::MouseMoved { position } => {
-                // Handle vertical scrollbar drag with relative movement
+                // Handle vertical scrollbar drag
                 if self.is_dragging_y && needs_v_scrollbar {
                     if let (Some(start_mouse_y), Some(start_scroll_y)) = (self.drag_start_mouse_y, self.drag_start_scroll_y) {
                         let track_height = if needs_h_scrollbar { bounds.height - scrollbar_area } else { bounds.height };
-                        let thumb_height = self.thumb_height(track_height, content_size.height);
+                        let thumb_height = self.thumb_height(track_height, final_content_size.height);
                         let track_range = track_height - thumb_height;
 
-                        // Calculate scroll change from mouse delta
                         let mouse_delta = position.y - start_mouse_y;
                         let scroll_per_pixel = if track_range > 0.0 { max_scroll_y / track_range } else { 0.0 };
                         let new_offset = (start_scroll_y + mouse_delta * scroll_per_pixel).clamp(0.0, max_scroll_y);
 
-                        log::trace!("📜 Vertical drag: delta={:.1}, offset={:.1}/{:.1}", mouse_delta, new_offset, max_scroll_y);
+                        log::debug!(
+                            "📜 Drag: delta={:.1}, new_offset={:.1}, max={:.1}, track_h={:.1}, thumb_h={:.1}, child_h={:.1}, content_h={:.1}",
+                            mouse_delta, new_offset, max_scroll_y, track_height, thumb_height, child_height, content_height
+                        );
                         if let Some(ref on_scroll_y) = self.on_scroll_y {
                             return Some(on_scroll_y(new_offset));
                         }
                     }
                 }
 
-                // Handle horizontal scrollbar drag with relative movement
+                // Handle horizontal scrollbar drag
                 if self.is_dragging_x && needs_h_scrollbar {
                     if let (Some(start_mouse_x), Some(start_scroll_x)) = (self.drag_start_mouse_x, self.drag_start_scroll_x) {
                         let track_width = if needs_v_scrollbar { bounds.width - scrollbar_area } else { bounds.width };
-                        let thumb_width = self.thumb_width(track_width, content_size.width);
+                        let thumb_width = self.thumb_width(track_width, final_content_size.width);
                         let track_range = track_width - thumb_width;
 
-                        // Calculate scroll change from mouse delta
                         let mouse_delta = position.x - start_mouse_x;
                         let scroll_per_pixel = if track_range > 0.0 { max_scroll_x / track_range } else { 0.0 };
                         let new_offset = (start_scroll_x + mouse_delta * scroll_per_pixel).clamp(0.0, max_scroll_x);

@@ -1,6 +1,6 @@
 //! A slider widget for selecting values within a range.
 
-use crate::{Color, Event, Layout, Length, Limits, MouseButton, Rectangle, Renderer, Widget};
+use crate::{Color, Event, Layout, Length, Limits, MeasureContext, MouseButton, Rectangle, Renderer, Widget};
 
 /// Identifies which slider is being interacted with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -172,7 +172,17 @@ impl<Message: Clone> Widget<Message> for Slider<Message> {
     fn layout(&self, limits: &Limits) -> Layout {
         let width = self.width.resolve(limits.max_width, 200.0);
         let size = limits.resolve(width, Self::HEIGHT);
-        Layout::new(Rectangle::new(0.0, 0.0, size.width, size.height))
+        let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
+
+        // In ContentMeasure mode, report fixed size (not fill)
+        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
+
+        // Report fill intent based on Length (only when NOT in ContentMeasure mode)
+        if !is_content_measure && matches!(self.width, Length::Fill) {
+            Layout::fill_width(bounds)
+        } else {
+            Layout::new(bounds)
+        }
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {

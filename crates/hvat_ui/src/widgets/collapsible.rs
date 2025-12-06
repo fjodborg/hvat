@@ -139,7 +139,9 @@ impl<'a, Message> Widget<Message> for Collapsible<'a, Message> {
                 f32::INFINITY
             };
 
-            let child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
+            let mut child_limits = Limits::with_range(0.0, child_max_width, 0.0, child_max_height);
+            // Propagate measurement context (e.g., ContentMeasure for scrollables)
+            child_limits.context = limits.context;
             let child_layout = self.child.widget().layout(&child_limits);
             let child_size = child_layout.size();
 

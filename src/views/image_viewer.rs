@@ -1033,6 +1033,7 @@ pub fn view_image_viewer<'a>(
     }
 
     let left_sidebar = container(Element::new(left_sidebar_scrollable))
+        .fill()
         .border(colors::BORDER);
 
     // === CENTER PANEL: Image with header (zoom toolbar) and footer (status bar) ===
@@ -1094,6 +1095,7 @@ pub fn view_image_viewer<'a>(
     }
 
     let right_sidebar_container = container(Element::new(right_sidebar_scrollable))
+        .fill()
         .border(colors::BORDER);
 
     // === MAIN LAYOUT: left sidebar | center (image+footer) | right sidebar ===

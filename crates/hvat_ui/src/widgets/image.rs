@@ -1,4 +1,4 @@
-use crate::{Event, ImageHandle, Layout, Length, Limits, Rectangle, Renderer, Widget};
+use crate::{Event, ImageHandle, Layout, Length, Limits, MeasureContext, Rectangle, Renderer, Widget};
 
 /// An image widget that displays a texture.
 pub struct Image {
@@ -36,6 +36,9 @@ impl<Message> Widget<Message> for Image {
         let intrinsic_width = self.handle.width() as f32;
         let intrinsic_height = self.handle.height() as f32;
 
+        // In ContentMeasure mode, report intrinsic size (not fill behavior)
+        let is_content_measure = limits.context == MeasureContext::ContentMeasure;
+
         // Resolve width and height based on length specifications
         let width = self.width.resolve(limits.max_width, intrinsic_width);
         let height = self.height.resolve(limits.max_height, intrinsic_height);
@@ -68,7 +71,20 @@ impl<Message> Widget<Message> for Image {
         let size = limits.resolve(final_width, final_height);
         let bounds = Rectangle::new(0.0, 0.0, size.width, size.height);
 
-        Layout::new(bounds)
+        // Report fill intent based on Length (only when NOT in ContentMeasure mode)
+        if is_content_measure {
+            Layout::new(bounds)
+        } else {
+            let fills_width = matches!(self.width, Length::Fill);
+            let fills_height = matches!(self.height, Length::Fill);
+
+            match (fills_width, fills_height) {
+                (true, true) => Layout::fill_both(bounds),
+                (true, false) => Layout::fill_width(bounds),
+                (false, true) => Layout::fill_height(bounds),
+                (false, false) => Layout::new(bounds),
+            }
+        }
     }
 
     fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
