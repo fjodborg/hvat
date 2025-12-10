@@ -2,10 +2,10 @@
 
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
-use crate::renderer::{Color, Renderer};
+use crate::renderer::{Color, Renderer, TextureId};
 use crate::state::{FitMode, ImageViewerState};
 use crate::widget::Widget;
-use hvat_gpu::{Texture, TransformUniform};
+use hvat_gpu::TransformUniform;
 use std::marker::PhantomData;
 
 /// Zoom factor per scroll notch
@@ -25,12 +25,12 @@ const CONTROL_SPACING: f32 = 4.0;
 
 /// An image viewer widget with pan and zoom capabilities
 pub struct ImageViewer<M> {
+    /// Texture ID (registered with renderer)
+    texture_id: Option<TextureId>,
     /// Texture width
     texture_width: u32,
     /// Texture height
     texture_height: u32,
-    /// Registered texture ID (set during draw)
-    texture_id: Option<usize>,
     /// Current state
     state: ImageViewerState,
     /// Change handler
@@ -45,29 +45,17 @@ pub struct ImageViewer<M> {
     width: Length,
     /// Height
     height: Length,
-    /// Whether we need to register the texture
-    needs_texture_registration: bool,
-    /// Stored texture reference for registration
-    texture_data: Option<TextureInfo>,
     /// Phantom data for message type
     _phantom: PhantomData<M>,
 }
 
-/// Info needed to register a texture
-struct TextureInfo {
-    bind_group_creator: Box<dyn Fn(&mut Renderer) -> usize>,
-}
-
 impl<M> ImageViewer<M> {
-    /// Create a new image viewer for the given texture
-    pub fn new(texture: &Texture) -> Self {
-        let width = texture.width;
-        let height = texture.height;
-
+    /// Create a new image viewer with the given texture ID and dimensions
+    pub fn new(texture_id: TextureId, width: u32, height: u32) -> Self {
         Self {
+            texture_id: Some(texture_id),
             texture_width: width,
             texture_height: height,
-            texture_id: None,
             state: ImageViewerState::default(),
             on_change: None,
             pannable: true,
@@ -75,10 +63,33 @@ impl<M> ImageViewer<M> {
             show_controls: true,
             width: Length::fill(),
             height: Length::fill(),
-            needs_texture_registration: true,
-            texture_data: None,
             _phantom: PhantomData,
         }
+    }
+
+    /// Create an empty image viewer (no texture)
+    pub fn empty() -> Self {
+        Self {
+            texture_id: None,
+            texture_width: 0,
+            texture_height: 0,
+            state: ImageViewerState::default(),
+            on_change: None,
+            pannable: true,
+            zoomable: true,
+            show_controls: true,
+            width: Length::fill(),
+            height: Length::fill(),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Set the texture
+    pub fn texture(mut self, texture_id: TextureId, width: u32, height: u32) -> Self {
+        self.texture_id = Some(texture_id);
+        self.texture_width = width;
+        self.texture_height = height;
+        self
     }
 
     /// Set the viewer state
@@ -128,33 +139,45 @@ impl<M> ImageViewer<M> {
 
     /// Calculate the transform uniform based on current state and bounds
     fn calculate_transform(&self, bounds: &Bounds) -> TransformUniform {
+        if self.texture_width == 0 || self.texture_height == 0 {
+            return TransformUniform::new();
+        }
+
         let image_aspect = self.texture_width as f32 / self.texture_height as f32;
         let view_aspect = bounds.width / bounds.height;
 
-        // Calculate base zoom to fit image in view
-        let base_zoom = match self.state.fit_mode {
-            FitMode::FitToView => {
+        // Calculate aspect ratio correction
+        // The quad is a square (-1 to 1), we need to scale it to match image aspect
+        // relative to the view aspect
+        let (aspect_scale_x, aspect_scale_y) = if image_aspect > view_aspect {
+            // Image is wider than view - fit to width, scale down height
+            (1.0, view_aspect / image_aspect)
+        } else {
+            // Image is taller than view - fit to height, scale down width
+            (image_aspect / view_aspect, 1.0)
+        };
+
+        // Calculate zoom factor based on fit mode
+        let zoom = match self.state.fit_mode {
+            FitMode::FitToView => 1.0,
+            FitMode::OneToOne => {
+                // 1:1 pixel mapping - calculate zoom to show actual pixels
+                // At zoom=1, the image fills the view. For 1:1, we need to
+                // scale so that 1 image pixel = 1 screen pixel
                 if image_aspect > view_aspect {
-                    // Image is wider than view - fit to width
-                    1.0
+                    bounds.width / self.texture_width as f32
                 } else {
-                    // Image is taller than view - fit to height
-                    view_aspect / image_aspect
+                    bounds.height / self.texture_height as f32
                 }
             }
-            FitMode::OneToOne => {
-                // 1:1 pixel mapping
-                bounds.width / self.texture_width as f32
-            }
             FitMode::Manual => self.state.zoom,
         };
 
-        let final_zoom = match self.state.fit_mode {
-            FitMode::Manual => self.state.zoom,
-            _ => base_zoom,
-        };
+        // Apply zoom to aspect-corrected scale
+        let scale_x = aspect_scale_x * zoom;
+        let scale_y = aspect_scale_y * zoom;
 
-        TransformUniform::from_transform(self.state.pan.0, self.state.pan.1, final_zoom)
+        TransformUniform::from_transform_xy(self.state.pan.0, self.state.pan.1, scale_x, scale_y)
     }
 
     /// Convert screen position to clip space relative to widget bounds
@@ -168,7 +191,9 @@ impl<M> ImageViewer<M> {
 
     /// Get the bounds for a control button
     fn control_button_bounds(&self, index: usize, widget_bounds: &Bounds) -> Bounds {
-        let x = widget_bounds.x + CONTROL_PADDING + (CONTROL_BUTTON_SIZE + CONTROL_SPACING) * index as f32;
+        let x = widget_bounds.x
+            + CONTROL_PADDING
+            + (CONTROL_BUTTON_SIZE + CONTROL_SPACING) * index as f32;
         let y = widget_bounds.y + CONTROL_PADDING;
         Bounds::new(x, y, CONTROL_BUTTON_SIZE, CONTROL_BUTTON_SIZE)
     }
@@ -222,20 +247,33 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Draw background
         renderer.fill_rect(bounds, Color::rgb(0.1, 0.1, 0.12));
 
-        // TODO: Draw the actual texture
-        // This requires the texture to be registered with the renderer
-        // For now, draw a placeholder
-        let transform = self.calculate_transform(&bounds);
+        // Draw the texture if we have one
+        if let Some(texture_id) = self.texture_id {
+            let transform = self.calculate_transform(&bounds);
+            renderer.texture(texture_id, bounds, transform);
+        } else {
+            // Draw a placeholder if no texture
+            let placeholder_color = Color::rgba(0.2, 0.3, 0.4, 0.5);
+            let img_bounds = Bounds::new(
+                bounds.x + bounds.width * 0.1,
+                bounds.y + bounds.height * 0.1,
+                bounds.width * 0.8,
+                bounds.height * 0.8,
+            );
+            renderer.fill_rect(img_bounds, placeholder_color);
 
-        // Draw a placeholder rectangle showing where the image would be
-        let placeholder_color = Color::rgba(0.2, 0.3, 0.4, 0.5);
-        let img_bounds = Bounds::new(
-            bounds.x + bounds.width * 0.1,
-            bounds.y + bounds.height * 0.1,
-            bounds.width * 0.8,
-            bounds.height * 0.8,
-        );
-        renderer.fill_rect(img_bounds, placeholder_color);
+            // "No Image" text
+            renderer.text(
+                "No Image",
+                bounds.x + bounds.width / 2.0 - 30.0,
+                bounds.y + bounds.height / 2.0 - 7.0,
+                14.0,
+                Color::TEXT_SECONDARY,
+            );
+        }
+
+        // Switch to overlay layer for controls (rendered after textures)
+        renderer.begin_overlay();
 
         // Draw zoom info
         let zoom_text = format!("{:.0}%", self.state.zoom * 100.0);
@@ -272,6 +310,8 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
 
         // Draw border around the viewer
         renderer.stroke_rect(bounds, Color::BORDER, 1.0);
+
+        renderer.end_overlay();
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
@@ -312,6 +352,8 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 if self.pannable {
                     self.state.dragging = true;
                     self.state.last_drag_pos = Some(*position);
+                    // Emit change to persist dragging state
+                    return self.emit_change();
                 }
                 None
             }
@@ -323,6 +365,8 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 if self.state.dragging {
                     self.state.dragging = false;
                     self.state.last_drag_pos = None;
+                    // Emit change to persist state
+                    return self.emit_change();
                 }
                 None
             }

@@ -110,22 +110,12 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         // Draw border
         renderer.stroke_rect(bounds, Color::BORDER, 1.0);
 
-        // Draw label placeholder - a centered horizontal line representing text
+        // Draw centered label
         let content = self.content_size();
         let text_x = bounds.x + (bounds.width - content.width) / 2.0;
-        let text_y = bounds.y + bounds.height / 2.0;
+        // Center vertically, accounting for text baseline
+        let text_y = bounds.y + (bounds.height - content.height) / 2.0;
 
-        // Draw a line to represent where text would be
-        renderer.line(
-            text_x,
-            text_y,
-            text_x + content.width,
-            text_y,
-            Color::TEXT_PRIMARY,
-            2.0,
-        );
-
-        // Log what text would be drawn
         renderer.text(&self.label, text_x, text_y, DEFAULT_FONT_SIZE, Color::TEXT_PRIMARY);
     }
 

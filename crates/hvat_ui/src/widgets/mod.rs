@@ -13,6 +13,7 @@ pub use row::Row;
 pub use text::Text;
 
 use crate::element::Element;
+use crate::renderer::TextureId;
 use crate::Context;
 
 /// Create a column of widgets using a builder function
@@ -44,7 +45,7 @@ pub fn button<M: 'static>(label: impl Into<String>) -> Button<M> {
     Button::new(label)
 }
 
-/// Create an image viewer widget
-pub fn image_viewer<M: 'static>(texture: &hvat_gpu::Texture) -> ImageViewer<M> {
-    ImageViewer::new(texture)
+/// Create an image viewer widget with a texture
+pub fn image_viewer<M: 'static>(texture_id: TextureId, width: u32, height: u32) -> ImageViewer<M> {
+    ImageViewer::new(texture_id, width, height)
 }

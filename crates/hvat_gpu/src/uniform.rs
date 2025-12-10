@@ -32,6 +32,18 @@ impl TransformUniform {
             ],
         }
     }
+
+    /// Create transform with separate X and Y scale (for aspect ratio correction).
+    pub fn from_transform_xy(offset_x: f32, offset_y: f32, scale_x: f32, scale_y: f32) -> Self {
+        Self {
+            matrix: [
+                [scale_x, 0.0, 0.0, 0.0],
+                [0.0, scale_y, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [offset_x, offset_y, 0.0, 1.0],
+            ],
+        }
+    }
 }
 
 impl Default for TransformUniform {

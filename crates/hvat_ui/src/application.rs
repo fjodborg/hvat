@@ -3,8 +3,8 @@
 use crate::element::Element;
 use crate::event::{Event, KeyCode, KeyModifiers, MouseButton};
 use crate::layout::{Bounds, Size};
-use crate::renderer::Renderer;
-use hvat_gpu::{ClearColor, GpuContext};
+use crate::renderer::{Renderer, TextureId};
+use hvat_gpu::{ClearColor, GpuContext, Texture};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
@@ -62,6 +62,29 @@ impl Settings {
     }
 }
 
+/// Resources provided to the application for GPU operations
+pub struct Resources<'a> {
+    gpu_ctx: &'a GpuContext,
+    renderer: &'a mut Renderer,
+}
+
+impl<'a> Resources<'a> {
+    /// Register a texture and return its ID for use in ImageViewer
+    pub fn register_texture(&mut self, texture: &Texture) -> TextureId {
+        self.renderer.register_texture(self.gpu_ctx, texture)
+    }
+
+    /// Unregister a texture
+    pub fn unregister_texture(&mut self, id: TextureId) {
+        self.renderer.unregister_texture(id);
+    }
+
+    /// Get the GPU context for creating textures
+    pub fn gpu_context(&self) -> &GpuContext {
+        self.gpu_ctx
+    }
+}
+
 /// The main application trait that users implement
 pub trait Application: Sized {
     /// The message type for this application
@@ -73,7 +96,11 @@ pub trait Application: Sized {
     /// Handle a message and update state
     fn update(&mut self, message: Self::Message);
 
-    /// Called on application startup
+    /// Called on application startup with access to GPU resources.
+    /// Use this to load textures and other GPU assets.
+    fn setup(&mut self, _resources: &mut Resources) {}
+
+    /// Called on application startup (legacy, prefer setup())
     fn init(&mut self) {}
 
     /// Called each frame before rendering
@@ -98,10 +125,20 @@ impl<A: Application> AppState<A> {
             .await
             .expect("Failed to create GPU context");
 
-        let renderer = Renderer::new(&gpu_ctx);
+        let mut renderer = Renderer::new(&gpu_ctx);
         let window_size = (gpu_ctx.width(), gpu_ctx.height());
 
+        // Call legacy init first
         app.init();
+
+        // Call setup with GPU resources
+        {
+            let mut resources = Resources {
+                gpu_ctx: &gpu_ctx,
+                renderer: &mut renderer,
+            };
+            app.setup(&mut resources);
+        }
 
         Self {
             app,

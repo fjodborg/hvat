@@ -10,9 +10,9 @@ pub struct ImageViewerState {
     /// Current fit mode
     pub fit_mode: FitMode,
     /// Whether the widget is currently being dragged
-    pub(crate) dragging: bool,
+    pub dragging: bool,
     /// Last mouse position during drag (screen space)
-    pub(crate) last_drag_pos: Option<(f32, f32)>,
+    pub last_drag_pos: Option<(f32, f32)>,
 }
 
 impl Default for ImageViewerState {

@@ -12,12 +12,12 @@ mod state;
 mod widget;
 mod widgets;
 
-pub use application::{Application, Settings};
+pub use application::{Application, Resources, Settings};
 pub use context::Context;
 pub use element::Element;
 pub use event::{Event, KeyCode, KeyModifiers, MouseButton};
 pub use layout::{Bounds, Length, Padding, Size};
-pub use renderer::Renderer;
+pub use renderer::{Color, Renderer, TextureId};
 pub use state::*;
 pub use widget::Widget;
 
@@ -29,11 +29,12 @@ pub use hvat_gpu::{ClearColor, GpuContext, ImageAdjustments, Texture, TransformU
 
 /// Prelude module for convenient imports
 pub mod prelude {
-    pub use crate::application::{Application, Settings};
+    pub use crate::application::{Application, Resources, Settings};
     pub use crate::context::Context;
     pub use crate::element::Element;
     pub use crate::event::{Event, KeyCode, KeyModifiers, MouseButton};
     pub use crate::layout::{Bounds, Length, Padding, Size};
+    pub use crate::renderer::TextureId;
     pub use crate::state::*;
     pub use crate::widgets::{button, col, column, image_viewer, row, text};
     pub use crate::{ClearColor, Texture};

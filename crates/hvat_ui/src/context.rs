@@ -2,8 +2,8 @@
 
 use crate::element::Element;
 use crate::layout::Length;
+use crate::renderer::TextureId;
 use crate::widgets::{Button, Column, ImageViewer, Row, Text};
-use hvat_gpu::Texture;
 
 /// Context for building widget trees using a closure-based API
 ///
@@ -56,11 +56,24 @@ impl<M: 'static> Context<M> {
         self
     }
 
-    /// Add an image viewer widget
-    pub fn image_viewer(&mut self, texture: &Texture) -> ImageViewerBuilder<M> {
+    /// Add an image viewer widget with a texture
+    pub fn image_viewer(
+        &mut self,
+        texture_id: TextureId,
+        width: u32,
+        height: u32,
+    ) -> ImageViewerBuilder<M> {
         ImageViewerBuilder {
             ctx: self,
-            viewer: ImageViewer::new(texture),
+            viewer: ImageViewer::new(texture_id, width, height),
+        }
+    }
+
+    /// Add an empty image viewer (no texture yet)
+    pub fn image_viewer_empty(&mut self) -> ImageViewerBuilder<M> {
+        ImageViewerBuilder {
+            ctx: self,
+            viewer: ImageViewer::empty(),
         }
     }
 

@@ -68,24 +68,9 @@ impl<M> Widget<M> for Text {
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
-        log::debug!("Text draw: '{}' at {:?}", self.content, bounds);
+        log::trace!("Text draw: '{}' at {:?}", self.content, bounds);
 
-        // Draw a subtle background so text bounds are visible
-        renderer.fill_rect(bounds, Color::rgba(0.2, 0.2, 0.25, 0.8));
-
-        // Draw text (placeholder - actual text rendering TBD)
-        // For now, just draw a horizontal line to indicate where text would be
-        let text_y = bounds.y + bounds.height / 2.0;
-        renderer.line(
-            bounds.x + 2.0,
-            text_y,
-            bounds.x + bounds.width - 2.0,
-            text_y,
-            self.color,
-            1.0
-        );
-
-        // Call renderer.text for the log message (it logs what text would be drawn)
+        // Draw text using glyphon
         renderer.text(&self.content, bounds.x, bounds.y, self.size, self.color);
     }
 
