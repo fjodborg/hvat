@@ -1,134 +1,171 @@
-//! Column layout widget that arranges children vertically.
+//! Column layout widget
 
-use std::marker::PhantomData;
-use crate::{Bounded, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, Renderer, Unbounded, Widget};
-use super::flex::{FlexDirection, FlexLayout};
+use crate::element::Element;
+use crate::event::Event;
+use crate::layout::{Alignment, Bounds, Length, Padding, Size};
+use crate::renderer::Renderer;
+use crate::widget::Widget;
 
-/// A column layout that arranges children vertically.
-///
-/// This is a convenience wrapper around `FlexLayout` with vertical direction.
-/// It supports fill-behavior where children with 0 height share remaining space.
-///
-/// # Context Type Parameter
-///
-/// The `Context` type parameter controls whether Fill children are allowed:
-/// - `Bounded` (default): Fill children allowed, use in normal layouts
-/// - `Unbounded`: Fill children NOT allowed, use inside scrollables
-pub struct Column<'a, Message, Context = Bounded> {
-    inner: FlexLayout<'a, Message, Context>,
-    _context: PhantomData<Context>,
+/// Default spacing between children
+const DEFAULT_SPACING: f32 = 8.0;
+
+/// A vertical column layout widget
+pub struct Column<M> {
+    children: Vec<Element<M>>,
+    spacing: f32,
+    padding: Padding,
+    width: Length,
+    height: Length,
+    align_x: Alignment,
+    /// Cached child bounds from layout
+    child_bounds: Vec<Bounds>,
 }
 
-// ============================================================================
-// Common methods for all contexts
-// ============================================================================
-
-impl<'a, Message, Context> Column<'a, Message, Context> {
-    /// Add a child element.
-    pub fn push(mut self, child: Element<'a, Message>) -> Self {
-        self.inner = self.inner.push(child);
-        self
+impl<M> Column<M> {
+    /// Create a new column with the given children
+    pub fn new(children: Vec<Element<M>>) -> Self {
+        Self {
+            children,
+            spacing: DEFAULT_SPACING,
+            padding: Padding::ZERO,
+            width: Length::Shrink,
+            height: Length::Shrink,
+            align_x: Alignment::Start,
+            child_bounds: Vec::new(),
+        }
     }
 
-    /// Set the spacing between children.
+    /// Set spacing between children
     pub fn spacing(mut self, spacing: f32) -> Self {
-        self.inner = self.inner.spacing(spacing);
+        self.spacing = spacing;
         self
     }
 
-    /// Get the number of children.
-    pub fn len(&self) -> usize {
-        self.inner.len()
+    /// Set padding around the column
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = padding.into();
+        self
     }
 
-    /// Check if the column has no children.
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+    /// Set the width
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
+        self
+    }
+
+    /// Set the height
+    pub fn height(mut self, height: impl Into<Length>) -> Self {
+        self.height = height.into();
+        self
+    }
+
+    /// Set horizontal alignment of children
+    pub fn align_x(mut self, align: Alignment) -> Self {
+        self.align_x = align;
+        self
     }
 }
 
-// ============================================================================
-// Bounded-only methods
-// ============================================================================
+impl<M: 'static> Widget<M> for Column<M> {
+    fn layout(&mut self, available: Size) -> Size {
+        log::debug!("Column layout: available={:?}", available);
 
-impl<'a, Message> Column<'a, Message, Bounded> {
-    /// Create a new column in bounded context.
-    pub fn new() -> Self {
-        Self {
-            inner: FlexLayout::new(FlexDirection::Vertical),
-            _context: PhantomData,
+        let inner_available = Size::new(
+            available.width - self.padding.horizontal(),
+            available.height - self.padding.vertical(),
+        );
+
+        // First pass: layout all children
+        let mut total_fixed_height = 0.0;
+        let mut max_width: f32 = 0.0;
+
+        for (i, child) in self.children.iter_mut().enumerate() {
+            let child_size = child.layout(Size::new(inner_available.width, inner_available.height));
+            log::debug!("  Column child {} layout: {:?}", i, child_size);
+            max_width = max_width.max(child_size.width);
+            total_fixed_height += child_size.height;
+        }
+
+        // Add spacing
+        if !self.children.is_empty() {
+            total_fixed_height += self.spacing * (self.children.len() - 1) as f32;
+        }
+
+        // Calculate fill space
+        let remaining_height = (inner_available.height - total_fixed_height).max(0.0);
+
+        // Second pass: calculate actual positions
+        self.child_bounds.clear();
+        let mut y = self.padding.top;
+
+        for (i, child) in self.children.iter().enumerate() {
+            let child_size = child.cached_size();
+            let child_height = child_size.height;
+
+            let x_offset = self.align_x.align(max_width, child_size.width);
+
+            let child_bounds = Bounds::new(
+                self.padding.left + x_offset,
+                y,
+                child_size.width,
+                child_height,
+            );
+            log::debug!("  Column child {} bounds: {:?}", i, child_bounds);
+            self.child_bounds.push(child_bounds);
+
+            y += child_height + self.spacing;
+        }
+
+        // Calculate total size
+        let content_height = if self.children.is_empty() {
+            0.0
+        } else {
+            y - self.spacing + self.padding.bottom - self.padding.top
+        };
+        let content_width = max_width + self.padding.horizontal();
+
+        Size::new(
+            self.width.resolve(available.width, content_width),
+            self.height.resolve(available.height, content_height + self.padding.vertical()),
+        )
+    }
+
+    fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
+        log::debug!("Column draw: bounds={:?}, {} children", bounds, self.children.len());
+        for (i, (child, child_bounds)) in self.children.iter().zip(&self.child_bounds).enumerate() {
+            let absolute_bounds = Bounds::new(
+                bounds.x + child_bounds.x,
+                bounds.y + child_bounds.y,
+                child_bounds.width,
+                child_bounds.height,
+            );
+            log::debug!("  Column draw child {}: {:?}", i, absolute_bounds);
+            child.draw(renderer, absolute_bounds);
         }
     }
 
-    /// Create a column with children in bounded context.
-    pub fn with_children(children: Vec<Element<'a, Message>>) -> Self {
-        Self {
-            inner: FlexLayout::with_children(FlexDirection::Vertical, children),
-            _context: PhantomData,
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+        // Check if event is within bounds
+        if let Some(pos) = event.position() {
+            if !bounds.contains(pos.0, pos.1) {
+                return None;
+            }
         }
-    }
 
-    /// Convert to unbounded context for use inside scrollables.
-    pub fn into_unbounded(self) -> Column<'a, Message, Unbounded> {
-        Column {
-            inner: self.inner.into_unbounded(),
-            _context: PhantomData,
+        // Dispatch to children
+        for (child, child_bounds) in self.children.iter_mut().zip(&self.child_bounds) {
+            let absolute_bounds = Bounds::new(
+                bounds.x + child_bounds.x,
+                bounds.y + child_bounds.y,
+                child_bounds.width,
+                child_bounds.height,
+            );
+
+            if let Some(msg) = child.on_event(event, absolute_bounds) {
+                return Some(msg);
+            }
         }
+
+        None
     }
-}
-
-impl<'a, Message> Default for Column<'a, Message, Bounded> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
-// Unbounded-only methods
-// ============================================================================
-
-impl<'a, Message> Column<'a, Message, Unbounded> {
-    /// Create a new column in unbounded context.
-    pub fn new_unbounded() -> Self {
-        Self {
-            inner: FlexLayout::column_unbounded(),
-            _context: PhantomData,
-        }
-    }
-}
-
-// ============================================================================
-// Widget implementation
-// ============================================================================
-
-impl<'a, Message, Context> Widget<Message> for Column<'a, Message, Context> {
-    fn layout(&self, limits: &Limits) -> Layout {
-        self.inner.layout(limits)
-    }
-
-    fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
-        self.inner.draw(renderer, layout)
-    }
-
-    fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
-        self.inner.on_event(event, layout)
-    }
-
-    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
-        self.inner.natural_size(max_width)
-    }
-
-    fn minimum_size(&self) -> ConcreteSizeXY {
-        self.inner.minimum_size()
-    }
-}
-
-/// Helper function to create a column in bounded context.
-pub fn column<'a, Message>() -> Column<'a, Message, Bounded> {
-    Column::new()
-}
-
-/// Helper function to create a column in unbounded context (for use inside scrollables).
-pub fn column_unbounded<'a, Message>() -> Column<'a, Message, Unbounded> {
-    Column::new_unbounded()
 }

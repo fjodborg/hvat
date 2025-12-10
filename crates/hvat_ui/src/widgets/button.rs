@@ -1,146 +1,179 @@
-use crate::{builder_option, Color, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, MouseButton, Point, Rectangle, Renderer, Widget};
-use crate::theme::colors;
-use super::tooltip::{Tooltip, TooltipPosition};
+//! Button widget
 
-/// A button widget that can be clicked.
-pub struct Button<Message> {
-    label: String,
-    on_press: Option<Message>,
-    width: Option<f32>,
-    height: Option<f32>,
-    bg_color: Option<Color>,
-    is_hovered: bool,
+use crate::event::{Event, MouseButton};
+use crate::layout::{Bounds, Length, Padding, Size};
+use crate::renderer::{Color, Renderer};
+use crate::widget::Widget;
+
+/// Default button padding
+const DEFAULT_PADDING: Padding = Padding {
+    top: 8.0,
+    right: 16.0,
+    bottom: 8.0,
+    left: 16.0,
+};
+
+/// Default font size
+const DEFAULT_FONT_SIZE: f32 = 14.0;
+
+/// Button state
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ButtonState {
+    #[default]
+    Normal,
+    Hovered,
+    Pressed,
 }
 
-impl<Message: Clone> Button<Message> {
-    /// Create a new button with a label.
+/// A clickable button widget
+pub struct Button<M> {
+    label: String,
+    on_click: Option<M>,
+    width: Length,
+    height: Length,
+    padding: Padding,
+    state: ButtonState,
+}
+
+impl<M> Button<M> {
+    /// Create a new button with the given label
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
-            on_press: None,
-            width: None,
-            height: None,
-            bg_color: None,
-            is_hovered: false,
+            on_click: None,
+            width: Length::Shrink,
+            height: Length::Shrink,
+            padding: DEFAULT_PADDING,
+            state: ButtonState::Normal,
         }
     }
 
-    /// Set the message to emit when the button is pressed.
-    pub fn on_press(mut self, message: Message) -> Self {
-        self.on_press = Some(message);
+    /// Set the click handler
+    pub fn on_click(mut self, message: M) -> Self {
+        self.on_click = Some(message);
         self
     }
 
-    // Builder methods using macros
-    builder_option!(width, f32);
-    builder_option!(height, f32);
-    builder_option!(bg_color, Color);
-
-    /// Wrap this button in a tooltip.
-    pub fn tooltip(self, text: impl Into<String>) -> Tooltip<'static, Message>
-    where
-        Message: 'static,
-    {
-        Tooltip::new(Element::new(self), text)
+    /// Set the width
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
+        self
     }
 
-    /// Wrap this button in a tooltip with custom position.
-    pub fn tooltip_with_position(
-        self,
-        text: impl Into<String>,
-        position: TooltipPosition,
-    ) -> Tooltip<'static, Message>
-    where
-        Message: 'static,
-    {
-        Tooltip::new(Element::new(self), text).position(position)
+    /// Set the height
+    pub fn height(mut self, height: impl Into<Length>) -> Self {
+        self.height = height.into();
+        self
+    }
+
+    /// Set the padding
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = padding.into();
+        self
+    }
+
+    /// Calculate content size
+    fn content_size(&self) -> Size {
+        // Approximate text size
+        let char_width = DEFAULT_FONT_SIZE * 0.6;
+        let text_width = self.label.len() as f32 * char_width;
+        let text_height = DEFAULT_FONT_SIZE * 1.2;
+        Size::new(text_width, text_height)
+    }
+
+    /// Get background color based on state
+    fn background_color(&self) -> Color {
+        match self.state {
+            ButtonState::Normal => Color::BUTTON_BG,
+            ButtonState::Hovered => Color::BUTTON_HOVER,
+            ButtonState::Pressed => Color::BUTTON_ACTIVE,
+        }
     }
 }
 
-impl<Message: Clone> Widget<Message> for Button<Message> {
-    fn layout(&self, limits: &Limits) -> Layout {
-        let default_width = 120.0;
-        let default_height = 40.0;
+impl<M: Clone + 'static> Widget<M> for Button<M> {
+    fn layout(&mut self, available: Size) -> Size {
+        let content = self.content_size();
+        let min_width = content.width + self.padding.horizontal();
+        let min_height = content.height + self.padding.vertical();
 
-        let width = self.width.unwrap_or(default_width).max(limits.min_width).min(limits.max_width);
-        let height = self.height.unwrap_or(default_height).max(limits.min_height).min(limits.max_height);
-
-        Layout::new(Rectangle::new(0.0, 0.0, width, height))
+        Size::new(
+            self.width.resolve(available.width, min_width),
+            self.height.resolve(available.height, min_height),
+        )
     }
 
-    fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
-        let bounds = layout.bounds();
+    fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
+        // Draw background
+        renderer.fill_rect(bounds, self.background_color());
 
-        // Choose button color based on state and custom bg_color
-        let button_color = if let Some(custom_color) = self.bg_color {
-            if self.is_hovered {
-                // Lighten the custom color slightly when hovered
-                Color::new(
-                    (custom_color.r + 0.1).min(1.0),
-                    (custom_color.g + 0.1).min(1.0),
-                    (custom_color.b + 0.1).min(1.0),
-                    custom_color.a,
-                )
-            } else {
-                custom_color
-            }
-        } else if self.is_hovered {
-            colors::BUTTON_HOVER
-        } else {
-            colors::BUTTON_NORMAL
-        };
+        // Draw border
+        renderer.stroke_rect(bounds, Color::BORDER, 1.0);
 
-        renderer.fill_rect(bounds, button_color);
-        renderer.stroke_rect(bounds, Color::WHITE, 1.0);
+        // Draw label placeholder - a centered horizontal line representing text
+        let content = self.content_size();
+        let text_x = bounds.x + (bounds.width - content.width) / 2.0;
+        let text_y = bounds.y + bounds.height / 2.0;
 
-        // Draw button text (centered)
-        // Use char count for proper Unicode support (e.g., "✓" is 1 char, not 3 bytes)
-        let char_count = self.label.chars().count() as f32;
-        let font_size = 16.0;
-        let char_width = font_size * 0.6; // Approximate monospace char width
-        let text_width = char_count * char_width;
-        let text_position = Point::new(
-            bounds.x + (bounds.width - text_width) / 2.0,
-            bounds.y + (bounds.height - font_size) / 2.0,
+        // Draw a line to represent where text would be
+        renderer.line(
+            text_x,
+            text_y,
+            text_x + content.width,
+            text_y,
+            Color::TEXT_PRIMARY,
+            2.0,
         );
-        renderer.draw_text(&self.label, text_position, Color::WHITE, font_size);
+
+        // Log what text would be drawn
+        renderer.text(&self.label, text_x, text_y, DEFAULT_FONT_SIZE, Color::TEXT_PRIMARY);
     }
 
-    fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
-        let bounds = layout.bounds();
-
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
         match event {
-            Event::MouseMoved { position } => {
-                self.is_hovered = bounds.contains(*position);
+            Event::MouseMove { position, .. } => {
+                let inside = bounds.contains(position.0, position.1);
+                if inside && self.state != ButtonState::Pressed {
+                    self.state = ButtonState::Hovered;
+                } else if !inside && self.state == ButtonState::Hovered {
+                    self.state = ButtonState::Normal;
+                }
                 None
             }
-            Event::MousePressed { button: MouseButton::Left, position } => {
-                if bounds.contains(*position) && self.on_press.is_some() {
-                    self.on_press.clone()
+
+            Event::MousePress {
+                button: MouseButton::Left,
+                position,
+                ..
+            } => {
+                if bounds.contains(position.0, position.1) {
+                    self.state = ButtonState::Pressed;
+                }
+                None
+            }
+
+            Event::MouseRelease {
+                button: MouseButton::Left,
+                position,
+                ..
+            } => {
+                let was_pressed = self.state == ButtonState::Pressed;
+                let inside = bounds.contains(position.0, position.1);
+
+                self.state = if inside {
+                    ButtonState::Hovered
+                } else {
+                    ButtonState::Normal
+                };
+
+                if was_pressed && inside {
+                    self.on_click.clone()
                 } else {
                     None
                 }
             }
+
             _ => None,
         }
     }
-
-    fn natural_size(&self, _max_width: ConcreteSize) -> ConcreteSizeXY {
-        ConcreteSizeXY::from_f32(
-            self.width.unwrap_or(120.0),
-            self.height.unwrap_or(40.0),
-        )
-    }
-
-    fn minimum_size(&self) -> ConcreteSizeXY {
-        ConcreteSizeXY::from_f32(
-            self.width.unwrap_or(40.0),
-            self.height.unwrap_or(24.0),
-        )
-    }
-}
-
-/// Helper function to create a button.
-pub fn button<Message: Clone>(label: impl Into<String>) -> Button<Message> {
-    Button::new(label)
 }

@@ -1,287 +1,22 @@
-// ============================================================================
-// Type-Safe Size Types
-// ============================================================================
+//! Layout types for widget positioning and sizing
 
-/// A size value guaranteed to be finite and non-negative.
-/// Used for natural_size() returns - can NEVER be infinity.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct ConcreteSize(f32);
-
-impl ConcreteSize {
-    /// Zero size constant.
-    pub const ZERO: Self = Self(0.0);
-
-    /// Create a ConcreteSize if the value is finite and non-negative.
-    pub fn new(value: f32) -> Option<Self> {
-        if value.is_finite() && value >= 0.0 {
-            Some(Self(value))
-        } else {
-            None
-        }
-    }
-
-    /// Create a ConcreteSize without validation.
-    /// Panics in debug builds if the value is invalid.
-    pub fn new_unchecked(value: f32) -> Self {
-        debug_assert!(
-            value.is_finite() && value >= 0.0,
-            "ConcreteSize must be finite and non-negative, got {}",
-            value
-        );
-        // Clamp to valid range in release builds for safety
-        Self(if value.is_finite() && value >= 0.0 { value } else { 0.0 })
-    }
-
-    /// Get the inner value.
-    #[inline]
-    pub fn get(self) -> f32 {
-        self.0
-    }
-
-    /// Return the maximum of two sizes.
-    #[inline]
-    pub fn max(self, other: Self) -> Self {
-        Self(self.0.max(other.0))
-    }
-
-    /// Return the minimum of two sizes.
-    #[inline]
-    pub fn min(self, other: Self) -> Self {
-        Self(self.0.min(other.0))
-    }
+/// A rectangle defining position and size
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Bounds {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
-impl std::ops::Add for ConcreteSize {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl std::ops::AddAssign for ConcreteSize {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0 += rhs.0;
-    }
-}
-
-impl std::ops::Sub for ConcreteSize {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Self((self.0 - rhs.0).max(0.0))
-    }
-}
-
-impl Default for ConcreteSize {
-    fn default() -> Self {
-        Self::ZERO
-    }
-}
-
-/// A 2D size with guaranteed finite, non-negative dimensions.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct ConcreteSizeXY {
-    pub width: ConcreteSize,
-    pub height: ConcreteSize,
-}
-
-impl ConcreteSizeXY {
-    /// Zero size constant.
-    pub const ZERO: Self = Self {
-        width: ConcreteSize::ZERO,
-        height: ConcreteSize::ZERO,
+impl Bounds {
+    pub const ZERO: Bounds = Bounds {
+        x: 0.0,
+        y: 0.0,
+        width: 0.0,
+        height: 0.0,
     };
 
-    /// Create a new ConcreteSizeXY.
-    pub fn new(width: ConcreteSize, height: ConcreteSize) -> Self {
-        Self { width, height }
-    }
-
-    /// Create from raw f32 values (unchecked).
-    pub fn from_f32(width: f32, height: f32) -> Self {
-        Self {
-            width: ConcreteSize::new_unchecked(width),
-            height: ConcreteSize::new_unchecked(height),
-        }
-    }
-}
-
-// ============================================================================
-// Layout Context Markers
-// ============================================================================
-
-/// Marker type: layout context where Fill makes sense (bounded parent container).
-/// Used as a type parameter to enable/disable Fill methods at compile time.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Bounded;
-
-/// Marker type: layout context where Fill would be infinite (inside scrollable).
-/// Used as a type parameter to disable Fill methods at compile time.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Unbounded;
-
-// ============================================================================
-// Sizing Mode
-// ============================================================================
-
-/// Sizing mode for a single axis - indicates whether a widget has fixed size or wants to fill.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SizingMode {
-    /// Widget has a fixed/intrinsic size (the value in Layout bounds)
-    Fixed,
-    /// Widget wants to fill available space with relative weight (1.0 = equal share)
-    Fill(f32),
-}
-
-impl Default for SizingMode {
-    fn default() -> Self {
-        SizingMode::Fixed
-    }
-}
-
-/// Size constraints for widget layout.
-///
-/// Limits define the minimum and maximum size a widget can have.
-#[derive(Debug, Clone, Copy)]
-pub struct Limits {
-    pub min_width: f32,
-    pub max_width: f32,
-    pub min_height: f32,
-    pub max_height: f32,
-}
-
-impl Limits {
-    /// Create limits with fixed size.
-    pub fn new(width: f32, height: f32) -> Self {
-        Self {
-            min_width: width,
-            max_width: width,
-            min_height: height,
-            max_height: height,
-        }
-    }
-
-    /// Create limits with a range of sizes.
-    pub fn with_range(
-        min_width: f32,
-        max_width: f32,
-        min_height: f32,
-        max_height: f32,
-    ) -> Self {
-        Self {
-            min_width,
-            max_width,
-            min_height,
-            max_height,
-        }
-    }
-
-    /// Fill all available space.
-    pub fn fill() -> Self {
-        Self {
-            min_width: 0.0,
-            max_width: f32::INFINITY,
-            min_height: 0.0,
-            max_height: f32::INFINITY,
-        }
-    }
-
-    /// Get the width of these limits.
-    pub fn width(&self) -> f32 {
-        self.max_width
-    }
-
-    /// Get the height of these limits.
-    pub fn height(&self) -> f32 {
-        self.max_height
-    }
-
-    /// Resolve a size within these limits.
-    pub fn resolve(&self, width: f32, height: f32) -> Size {
-        Size {
-            width: width.max(self.min_width).min(self.max_width),
-            height: height.max(self.min_height).min(self.max_height),
-        }
-    }
-
-    /// Check if limits are valid (min <= max, all non-negative).
-    pub fn is_valid(&self) -> bool {
-        self.min_width >= 0.0
-            && self.min_height >= 0.0
-            && self.min_width <= self.max_width
-            && self.min_height <= self.max_height
-    }
-
-    /// Create validated limits, clamping invalid values.
-    pub fn validated(mut self) -> Self {
-        self.min_width = self.min_width.max(0.0);
-        self.min_height = self.min_height.max(0.0);
-        if self.max_width < self.min_width {
-            self.max_width = self.min_width;
-        }
-        if self.max_height < self.min_height {
-            self.max_height = self.min_height;
-        }
-        self
-    }
-
-    /// Check if width is bounded (finite max_width).
-    pub fn is_width_bounded(&self) -> bool {
-        self.max_width.is_finite()
-    }
-
-    /// Check if height is bounded (finite max_height).
-    pub fn is_height_bounded(&self) -> bool {
-        self.max_height.is_finite()
-    }
-}
-
-/// A 2D size.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Size {
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Size {
-    pub fn new(width: f32, height: f32) -> Self {
-        Self { width, height }
-    }
-
-    pub fn zero() -> Self {
-        Self {
-            width: 0.0,
-            height: 0.0,
-        }
-    }
-}
-
-/// A 2D point.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Point {
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-
-    pub fn zero() -> Self {
-        Self { x: 0.0, y: 0.0 }
-    }
-}
-
-/// A rectangle defined by position and size.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rectangle {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rectangle {
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
@@ -291,160 +26,250 @@ impl Rectangle {
         }
     }
 
-    pub fn contains(&self, point: Point) -> bool {
-        point.x >= self.x
-            && point.x <= self.x + self.width
-            && point.y >= self.y
-            && point.y <= self.y + self.height
+    pub fn from_size(size: Size) -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: size.width,
+            height: size.height,
+        }
     }
 
-    pub fn position(&self) -> Point {
-        Point::new(self.x, self.y)
+    /// Check if a point is inside these bounds
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
     }
 
+    /// Get the right edge x coordinate
+    pub fn right(&self) -> f32 {
+        self.x + self.width
+    }
+
+    /// Get the bottom edge y coordinate
+    pub fn bottom(&self) -> f32 {
+        self.y + self.height
+    }
+
+    /// Get the center point
+    pub fn center(&self) -> (f32, f32) {
+        (self.x + self.width / 2.0, self.y + self.height / 2.0)
+    }
+
+    /// Get the size as a Size struct
     pub fn size(&self) -> Size {
         Size::new(self.width, self.height)
     }
 
-    /// Create a new rectangle with padding applied (inset from all sides).
-    /// Returns a smaller rectangle inside this one.
-    pub fn with_padding(&self, padding: f32) -> Rectangle {
-        Rectangle::new(
-            self.x + padding,
-            self.y + padding,
-            (self.width - padding * 2.0).max(0.0),
-            (self.height - padding * 2.0).max(0.0),
-        )
+    /// Shrink bounds by padding
+    pub fn shrink(&self, padding: Padding) -> Self {
+        Self {
+            x: self.x + padding.left,
+            y: self.y + padding.top,
+            width: (self.width - padding.left - padding.right).max(0.0),
+            height: (self.height - padding.top - padding.bottom).max(0.0),
+        }
     }
 
-    /// Get the center point of this rectangle.
-    pub fn center(&self) -> Point {
-        Point::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
+    /// Expand bounds by padding
+    pub fn expand(&self, padding: Padding) -> Self {
+        Self {
+            x: self.x - padding.left,
+            y: self.y - padding.top,
+            width: self.width + padding.left + padding.right,
+            height: self.height + padding.top + padding.bottom,
+        }
     }
 
-    /// Compute the intersection of two rectangles.
-    /// Returns a rectangle representing the overlapping area.
-    /// If there's no overlap, returns a zero-sized rectangle at the origin.
-    pub fn intersect(&self, other: &Rectangle) -> Rectangle {
-        let x1 = self.x.max(other.x);
-        let y1 = self.y.max(other.y);
-        let x2 = (self.x + self.width).min(other.x + other.width);
-        let y2 = (self.y + self.height).min(other.y + other.height);
+    /// Intersect with another bounds
+    pub fn intersect(&self, other: &Bounds) -> Option<Bounds> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self.right().min(other.right());
+        let bottom = self.bottom().min(other.bottom());
 
-        let width = (x2 - x1).max(0.0);
-        let height = (y2 - y1).max(0.0);
-
-        Rectangle::new(x1, y1, width, height)
+        if right > x && bottom > y {
+            Some(Bounds::new(x, y, right - x, bottom - y))
+        } else {
+            None
+        }
     }
 }
 
-/// The layout of a widget - its position, size, and sizing intent.
-#[derive(Debug, Clone)]
-pub struct Layout {
-    bounds: Rectangle,
-    /// How this widget wants to be sized horizontally
-    width_mode: SizingMode,
-    /// How this widget wants to be sized vertically
-    height_mode: SizingMode,
+/// A size without position
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Size {
+    pub width: f32,
+    pub height: f32,
 }
 
-impl Layout {
-    /// Create a new layout with the given bounds (defaults to Fixed sizing).
-    pub fn new(bounds: Rectangle) -> Self {
+impl Size {
+    pub const ZERO: Size = Size {
+        width: 0.0,
+        height: 0.0,
+    };
+
+    pub fn new(width: f32, height: f32) -> Self {
+        Self { width, height }
+    }
+
+    /// Create a square size
+    pub fn square(size: f32) -> Self {
         Self {
-            bounds,
-            width_mode: SizingMode::Fixed,
-            height_mode: SizingMode::Fixed,
+            width: size,
+            height: size,
+        }
+    }
+}
+
+/// Length specification for widget dimensions
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Length {
+    /// Fixed pixel size
+    Fixed(f32),
+    /// Fill available space with optional weight (default 1.0)
+    Fill(f32),
+    /// Shrink to fit content
+    Shrink,
+}
+
+impl Length {
+    /// Fill with default weight of 1.0
+    pub fn fill() -> Self {
+        Length::Fill(1.0)
+    }
+
+    /// Fill with specific weight
+    pub fn fill_weighted(weight: f32) -> Self {
+        Length::Fill(weight)
+    }
+
+    /// Resolve length given available space and content size
+    pub fn resolve(&self, available: f32, content: f32) -> f32 {
+        match self {
+            Length::Fixed(px) => *px,
+            Length::Fill(_) => available,
+            Length::Shrink => content.min(available),
         }
     }
 
-    /// Create a layout that fills horizontally with fixed height.
-    pub fn fill_width(bounds: Rectangle) -> Self {
+    /// Check if this is a fill length
+    pub fn is_fill(&self) -> bool {
+        matches!(self, Length::Fill(_))
+    }
+
+    /// Get the fill weight, or 0 if not fill
+    pub fn fill_weight(&self) -> f32 {
+        match self {
+            Length::Fill(w) => *w,
+            _ => 0.0,
+        }
+    }
+}
+
+impl Default for Length {
+    fn default() -> Self {
+        Length::Shrink
+    }
+}
+
+impl From<f32> for Length {
+    fn from(px: f32) -> Self {
+        Length::Fixed(px)
+    }
+}
+
+/// Padding around a widget
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Padding {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
+impl Padding {
+    pub const ZERO: Padding = Padding {
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+    };
+
+    /// Create uniform padding on all sides
+    pub fn all(value: f32) -> Self {
         Self {
-            bounds,
-            width_mode: SizingMode::Fill(1.0),
-            height_mode: SizingMode::Fixed,
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
         }
     }
 
-    /// Create a layout that fills vertically with fixed width.
-    pub fn fill_height(bounds: Rectangle) -> Self {
+    /// Create padding with horizontal and vertical values
+    pub fn axes(horizontal: f32, vertical: f32) -> Self {
         Self {
-            bounds,
-            width_mode: SizingMode::Fixed,
-            height_mode: SizingMode::Fill(1.0),
+            top: vertical,
+            right: horizontal,
+            bottom: vertical,
+            left: horizontal,
         }
     }
 
-    /// Create a layout that fills both dimensions.
-    pub fn fill_both(bounds: Rectangle) -> Self {
+    /// Create padding with individual values
+    pub fn new(top: f32, right: f32, bottom: f32, left: f32) -> Self {
         Self {
-            bounds,
-            width_mode: SizingMode::Fill(1.0),
-            height_mode: SizingMode::Fill(1.0),
+            top,
+            right,
+            bottom,
+            left,
         }
     }
 
-    /// Builder: set width mode.
-    pub fn with_width_mode(mut self, mode: SizingMode) -> Self {
-        self.width_mode = mode;
-        self
+    /// Total horizontal padding
+    pub fn horizontal(&self) -> f32 {
+        self.left + self.right
     }
 
-    /// Builder: set height mode.
-    pub fn with_height_mode(mut self, mode: SizingMode) -> Self {
-        self.height_mode = mode;
-        self
+    /// Total vertical padding
+    pub fn vertical(&self) -> f32 {
+        self.top + self.bottom
     }
+}
 
-    /// Get the bounds of this layout.
-    pub fn bounds(&self) -> Rectangle {
-        self.bounds
+impl From<f32> for Padding {
+    fn from(value: f32) -> Self {
+        Padding::all(value)
     }
+}
 
-    /// Get the position of this layout.
-    pub fn position(&self) -> Point {
-        self.bounds.position()
+impl From<[f32; 2]> for Padding {
+    fn from([h, v]: [f32; 2]) -> Self {
+        Padding::axes(h, v)
     }
+}
 
-    /// Get the size of this layout.
-    pub fn size(&self) -> Size {
-        self.bounds.size()
+impl From<[f32; 4]> for Padding {
+    fn from([top, right, bottom, left]: [f32; 4]) -> Self {
+        Padding::new(top, right, bottom, left)
     }
+}
 
-    /// Check if this layout wants to fill horizontally.
-    pub fn fills_width(&self) -> bool {
-        matches!(self.width_mode, SizingMode::Fill(_))
-    }
+/// Alignment options for positioning children
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Alignment {
+    #[default]
+    Start,
+    Center,
+    End,
+}
 
-    /// Check if this layout wants to fill vertically.
-    pub fn fills_height(&self) -> bool {
-        matches!(self.height_mode, SizingMode::Fill(_))
-    }
-
-    /// Get the fill weight for width (returns 0 if not filling).
-    pub fn width_fill_weight(&self) -> f32 {
-        match self.width_mode {
-            SizingMode::Fill(w) => w,
-            SizingMode::Fixed => 0.0,
+impl Alignment {
+    /// Calculate offset for aligning content within available space
+    pub fn align(&self, available: f32, content: f32) -> f32 {
+        match self {
+            Alignment::Start => 0.0,
+            Alignment::Center => (available - content) / 2.0,
+            Alignment::End => available - content,
         }
-    }
-
-    /// Get the fill weight for height (returns 0 if not filling).
-    pub fn height_fill_weight(&self) -> f32 {
-        match self.height_mode {
-            SizingMode::Fill(w) => w,
-            SizingMode::Fixed => 0.0,
-        }
-    }
-
-    /// Get the width sizing mode.
-    pub fn width_mode(&self) -> SizingMode {
-        self.width_mode
-    }
-
-    /// Get the height sizing mode.
-    pub fn height_mode(&self) -> SizingMode {
-        self.height_mode
     }
 }

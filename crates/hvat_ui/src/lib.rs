@@ -1,45 +1,53 @@
-//! hvat_ui - A GPU-accelerated immediate-mode UI framework
+//! hvat_ui - A simple, ergonomic UI framework built on wgpu
 //!
-//! This crate provides a simple, immediate-mode UI framework built on top of wgpu.
-//! It follows the Elm Architecture pattern with Applications, Messages, and Views.
+//! This crate provides a callback-based widget system with a clean builder API.
 
-// Re-export hvat_gpu for convenience
-pub use hvat_gpu;
-
-// Core modules
 mod application;
+mod context;
 mod element;
 mod event;
-pub mod icon;
-mod image;
 mod layout;
-mod layout_cache;
-mod length;
-#[macro_use]
-mod macros;
-mod overlay;
 mod renderer;
-mod text_metrics;
-pub mod theme;
+mod state;
 mod widget;
+mod widgets;
 
-// Widget implementations
-pub mod widgets;
-
-// Public API
-pub use application::{run, Application, Settings};
-pub use element::{Element, WidgetId};
-pub use event::{Event, EventResult, Key, Modifiers, MouseButton};
-pub use image::{ImageHandle, HyperspectralImageHandle};
-pub use layout::{
-    Layout, Limits, Point, Rectangle, Size, SizingMode,
-    // Type-safe sizing types
-    ConcreteSize, ConcreteSizeXY, Bounded, Unbounded,
-};
-pub use length::Length;
-pub use renderer::{Color, Renderer};
-pub use hvat_gpu::{ImageAdjustments, BandSelectionUniform};
+pub use application::{Application, Settings};
+pub use context::Context;
+pub use element::Element;
+pub use event::{Event, KeyCode, KeyModifiers, MouseButton};
+pub use layout::{Bounds, Length, Padding, Size};
+pub use renderer::Renderer;
+pub use state::*;
 pub use widget::Widget;
-pub use text_metrics::{TextMetrics, measure_text, line_height};
-pub use layout_cache::{LayoutCache, LayoutKey, LayoutPath, LayoutContext, CacheStats};
-pub use overlay::{Overlay, OverlayItem, OverlayShape};
+
+// Re-export widgets
+pub use widgets::{button, col, column, image_viewer, row, text, Column, Row, Text};
+
+// Re-export hvat_gpu types that users need
+pub use hvat_gpu::{ClearColor, GpuContext, ImageAdjustments, Texture, TransformUniform};
+
+/// Prelude module for convenient imports
+pub mod prelude {
+    pub use crate::application::{Application, Settings};
+    pub use crate::context::Context;
+    pub use crate::element::Element;
+    pub use crate::event::{Event, KeyCode, KeyModifiers, MouseButton};
+    pub use crate::layout::{Bounds, Length, Padding, Size};
+    pub use crate::state::*;
+    pub use crate::widgets::{button, col, column, image_viewer, row, text};
+    pub use crate::{ClearColor, Texture};
+}
+
+/// Run an application with default settings
+pub fn run<A: Application + 'static>(app: A) -> Result<(), Box<dyn std::error::Error>> {
+    application::run(app, Settings::default())
+}
+
+/// Run an application with custom settings
+pub fn run_with_settings<A: Application + 'static>(
+    app: A,
+    settings: Settings,
+) -> Result<(), Box<dyn std::error::Error>> {
+    application::run(app, settings)
+}

@@ -1,183 +1,52 @@
-use crate::{ConcreteSize, ConcreteSizeXY, Layout, Widget};
+//! Type-erased widget wrapper
 
-/// A unique identifier for a widget in the UI tree.
-///
-/// Widget IDs are used for:
-/// - Tracking which widget is being dragged
-/// - Identifying widgets for focus management
-/// - Correlating widgets with external state
-/// - Supporting drag-and-drop panel rearrangement
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WidgetId(String);
+use crate::event::Event;
+use crate::layout::{Bounds, Size};
+use crate::renderer::Renderer;
+use crate::widget::Widget;
 
-impl WidgetId {
-    /// Create a new widget ID from a string.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+/// A type-erased widget that can hold any widget type
+pub struct Element<M> {
+    widget: Box<dyn Widget<M>>,
+    /// Cached layout size from last layout pass
+    cached_size: Size,
+}
+
+impl<M> Element<M> {
+    /// Create a new element from a widget
+    pub fn new<W: Widget<M> + 'static>(widget: W) -> Self {
+        Self {
+            widget: Box::new(widget),
+            cached_size: Size::ZERO,
+        }
     }
 
-    /// Get the ID as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
+    /// Calculate layout and cache the result
+    pub fn layout(&mut self, available: Size) -> Size {
+        self.cached_size = self.widget.layout(available);
+        self.cached_size
+    }
+
+    /// Get the cached size from last layout
+    pub fn cached_size(&self) -> Size {
+        self.cached_size
+    }
+
+    /// Draw the widget
+    pub fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
+        self.widget.draw(renderer, bounds);
+    }
+
+    /// Handle an event
+    pub fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+        self.widget.on_event(event, bounds)
     }
 }
 
-impl<S: Into<String>> From<S> for WidgetId {
-    fn from(s: S) -> Self {
-        Self::new(s)
-    }
-}
-
-impl std::fmt::Display for WidgetId {
+impl<M> std::fmt::Debug for Element<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// An Element is a type-erased widget that can contain any widget type.
-///
-/// This is the main building block of the UI tree. Elements wrap widgets
-/// and handle message type conversion through the Widget trait.
-///
-/// Elements can optionally have an ID for tracking and identification.
-pub struct Element<'a, Message> {
-    widget: Box<dyn Widget<Message> + 'a>,
-    id: Option<WidgetId>,
-}
-
-impl<'a, Message> Element<'a, Message> {
-    /// Create a new element from a widget.
-    pub fn new(widget: impl Widget<Message> + 'a) -> Self {
-        Self {
-            widget: Box::new(widget),
-            id: None,
-        }
-    }
-
-    /// Create a new element with an ID.
-    pub fn with_id(widget: impl Widget<Message> + 'a, id: impl Into<WidgetId>) -> Self {
-        Self {
-            widget: Box::new(widget),
-            id: Some(id.into()),
-        }
-    }
-
-    /// Set the ID of this element.
-    pub fn id(mut self, id: impl Into<WidgetId>) -> Self {
-        self.id = Some(id.into());
-        self
-    }
-
-    /// Get the ID of this element, if any.
-    pub fn get_id(&self) -> Option<&WidgetId> {
-        self.id.as_ref()
-    }
-
-    /// Check if this element has a specific ID.
-    pub fn has_id(&self, id: &str) -> bool {
-        self.id.as_ref().map(|i| i.as_str() == id).unwrap_or(false)
-    }
-
-    /// Map the message type of this element to a different type.
-    /// Preserves the element's ID if set.
-    pub fn map<B>(self, f: impl Fn(Message) -> B + 'static) -> Element<'a, B>
-    where
-        Message: 'static,
-        B: 'static,
-    {
-        let id = self.id.clone();
-        let mut mapped = Element::new(Map {
-            element: self,
-            mapper: Box::new(f),
-        });
-        mapped.id = id;
-        mapped
-    }
-
-    /// Get the widget for layout calculation.
-    pub fn widget(&self) -> &dyn Widget<Message> {
-        &*self.widget
-    }
-
-    /// Get the mutable widget for event handling.
-    pub fn widget_mut(&mut self) -> &mut dyn Widget<Message> {
-        &mut *self.widget
-    }
-}
-
-/// A widget that maps messages from one type to another.
-struct Map<'a, A, B> {
-    element: Element<'a, A>,
-    mapper: Box<dyn Fn(A) -> B>,
-}
-
-impl<'a, A, B> Widget<B> for Map<'a, A, B>
-where
-    A: 'static,
-    B: 'static,
-{
-    fn layout(&self, limits: &crate::Limits) -> crate::Layout {
-        self.element.widget().layout(limits)
-    }
-
-    fn draw(&self, renderer: &mut crate::Renderer, layout: &Layout) {
-        self.element.widget().draw(renderer, layout);
-    }
-
-    fn on_event(
-        &mut self,
-        event: &crate::Event,
-        layout: &Layout,
-    ) -> Option<B> {
-        self.element
-            .widget_mut()
-            .on_event(event, layout)
-            .map(&self.mapper)
-    }
-
-    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
-        self.element.widget().natural_size(max_width)
-    }
-
-    fn minimum_size(&self) -> ConcreteSizeXY {
-        self.element.widget().minimum_size()
-    }
-
-    fn is_shrinkable(&self) -> bool {
-        self.element.widget().is_shrinkable()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_widget_id_creation() {
-        let id1 = WidgetId::new("test-button");
-        let id2 = WidgetId::from("test-button");
-        let id3: WidgetId = "test-button".into();
-
-        assert_eq!(id1, id2);
-        assert_eq!(id2, id3);
-        assert_eq!(id1.as_str(), "test-button");
-    }
-
-    #[test]
-    fn test_widget_id_display() {
-        let id = WidgetId::new("my-widget");
-        assert_eq!(format!("{}", id), "my-widget");
-    }
-
-    #[test]
-    fn test_widget_id_hash() {
-        use std::collections::HashSet;
-
-        let mut set = HashSet::new();
-        set.insert(WidgetId::new("a"));
-        set.insert(WidgetId::new("b"));
-        set.insert(WidgetId::new("a")); // duplicate
-
-        assert_eq!(set.len(), 2);
+        f.debug_struct("Element")
+            .field("cached_size", &self.cached_size)
+            .finish_non_exhaustive()
     }
 }

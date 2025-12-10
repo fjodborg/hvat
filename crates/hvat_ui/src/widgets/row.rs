@@ -1,139 +1,172 @@
-//! Row layout widget that arranges children horizontally.
+//! Row layout widget
 
-use std::marker::PhantomData;
-use crate::{Bounded, ConcreteSize, ConcreteSizeXY, Element, Event, Layout, Limits, Renderer, Unbounded, Widget};
-use super::flex::{FlexDirection, FlexLayout};
+use crate::element::Element;
+use crate::event::Event;
+use crate::layout::{Alignment, Bounds, Length, Padding, Size};
+use crate::renderer::Renderer;
+use crate::widget::Widget;
 
-/// A row layout that arranges children horizontally.
-///
-/// This is a convenience wrapper around `FlexLayout` with horizontal direction.
-///
-/// # Context Type Parameter
-///
-/// The `Context` type parameter controls whether Fill children are allowed:
-/// - `Bounded` (default): Fill children allowed, use in normal layouts
-/// - `Unbounded`: Fill children NOT allowed, use inside scrollables
-pub struct Row<'a, Message, Context = Bounded> {
-    inner: FlexLayout<'a, Message, Context>,
-    _context: PhantomData<Context>,
+/// Default spacing between children
+const DEFAULT_SPACING: f32 = 8.0;
+
+/// A horizontal row layout widget
+pub struct Row<M> {
+    children: Vec<Element<M>>,
+    spacing: f32,
+    padding: Padding,
+    width: Length,
+    height: Length,
+    align_y: Alignment,
+    /// Cached child bounds from layout
+    child_bounds: Vec<Bounds>,
 }
 
-// ============================================================================
-// Common methods for all contexts
-// ============================================================================
-
-impl<'a, Message, Context> Row<'a, Message, Context> {
-    /// Add a child element.
-    pub fn push(mut self, child: Element<'a, Message>) -> Self {
-        self.inner = self.inner.push(child);
-        self
+impl<M> Row<M> {
+    /// Create a new row with the given children
+    pub fn new(children: Vec<Element<M>>) -> Self {
+        Self {
+            children,
+            spacing: DEFAULT_SPACING,
+            padding: Padding::ZERO,
+            width: Length::Shrink,
+            height: Length::Shrink,
+            align_y: Alignment::Start,
+            child_bounds: Vec::new(),
+        }
     }
 
-    /// Set the spacing between children.
+    /// Set spacing between children
     pub fn spacing(mut self, spacing: f32) -> Self {
-        self.inner = self.inner.spacing(spacing);
+        self.spacing = spacing;
         self
     }
 
-    /// Enable wrap mode - children wrap to the next line when they exceed available width.
-    pub fn wrap(mut self) -> Self {
-        self.inner = self.inner.wrap();
+    /// Set padding around the row
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = padding.into();
         self
     }
 
-    /// Get the number of children.
-    pub fn len(&self) -> usize {
-        self.inner.len()
+    /// Set the width
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
+        self
     }
 
-    /// Check if the row has no children.
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+    /// Set the height
+    pub fn height(mut self, height: impl Into<Length>) -> Self {
+        self.height = height.into();
+        self
+    }
+
+    /// Set vertical alignment of children
+    pub fn align_y(mut self, align: Alignment) -> Self {
+        self.align_y = align;
+        self
     }
 }
 
-// ============================================================================
-// Bounded-only methods
-// ============================================================================
+impl<M: 'static> Widget<M> for Row<M> {
+    fn layout(&mut self, available: Size) -> Size {
+        log::debug!("Row layout: available={:?}", available);
 
-impl<'a, Message> Row<'a, Message, Bounded> {
-    /// Create a new row in bounded context.
-    pub fn new() -> Self {
-        Self {
-            inner: FlexLayout::new(FlexDirection::Horizontal),
-            _context: PhantomData,
+        let inner_available = Size::new(
+            available.width - self.padding.horizontal(),
+            available.height - self.padding.vertical(),
+        );
+
+        // First pass: layout non-fill children to get their sizes
+        let mut total_fixed_width = 0.0;
+        let mut max_height: f32 = 0.0;
+
+        for (i, child) in self.children.iter_mut().enumerate() {
+            // Layout with full height, shrink width for now
+            let child_size = child.layout(Size::new(inner_available.width, inner_available.height));
+            log::debug!("  Row child {} layout: {:?}", i, child_size);
+            max_height = max_height.max(child_size.height);
+            total_fixed_width += child_size.width;
+        }
+
+        // Add spacing
+        if !self.children.is_empty() {
+            total_fixed_width += self.spacing * (self.children.len() - 1) as f32;
+        }
+
+        // Calculate fill space
+        let remaining_width = (inner_available.width - total_fixed_width).max(0.0);
+
+        // Second pass: calculate actual positions
+        self.child_bounds.clear();
+        let mut x = self.padding.left;
+
+        for (i, child) in self.children.iter().enumerate() {
+            let child_size = child.cached_size();
+            let child_width = child_size.width;
+
+            let y_offset = self.align_y.align(max_height, child_size.height);
+
+            let child_bounds = Bounds::new(
+                x,
+                self.padding.top + y_offset,
+                child_width,
+                child_size.height,
+            );
+            log::debug!("  Row child {} bounds: {:?}", i, child_bounds);
+            self.child_bounds.push(child_bounds);
+
+            x += child_width + self.spacing;
+        }
+
+        // Calculate total size
+        let content_width = if self.children.is_empty() {
+            0.0
+        } else {
+            x - self.spacing + self.padding.right - self.padding.left
+        };
+        let content_height = max_height + self.padding.vertical();
+
+        Size::new(
+            self.width.resolve(available.width, content_width + self.padding.horizontal()),
+            self.height.resolve(available.height, content_height),
+        )
+    }
+
+    fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
+        log::debug!("Row draw: bounds={:?}, {} children", bounds, self.children.len());
+        for (i, (child, child_bounds)) in self.children.iter().zip(&self.child_bounds).enumerate() {
+            let absolute_bounds = Bounds::new(
+                bounds.x + child_bounds.x,
+                bounds.y + child_bounds.y,
+                child_bounds.width,
+                child_bounds.height,
+            );
+            log::debug!("  Row draw child {}: {:?}", i, absolute_bounds);
+            child.draw(renderer, absolute_bounds);
         }
     }
 
-    /// Create a row with children in bounded context.
-    pub fn with_children(children: Vec<Element<'a, Message>>) -> Self {
-        Self {
-            inner: FlexLayout::with_children(FlexDirection::Horizontal, children),
-            _context: PhantomData,
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+        // Check if event is within bounds
+        if let Some(pos) = event.position() {
+            if !bounds.contains(pos.0, pos.1) {
+                return None;
+            }
         }
-    }
 
-    /// Convert to unbounded context for use inside scrollables.
-    pub fn into_unbounded(self) -> Row<'a, Message, Unbounded> {
-        Row {
-            inner: self.inner.into_unbounded(),
-            _context: PhantomData,
+        // Dispatch to children
+        for (child, child_bounds) in self.children.iter_mut().zip(&self.child_bounds) {
+            let absolute_bounds = Bounds::new(
+                bounds.x + child_bounds.x,
+                bounds.y + child_bounds.y,
+                child_bounds.width,
+                child_bounds.height,
+            );
+
+            if let Some(msg) = child.on_event(event, absolute_bounds) {
+                return Some(msg);
+            }
         }
+
+        None
     }
-}
-
-impl<'a, Message> Default for Row<'a, Message, Bounded> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
-// Unbounded-only methods
-// ============================================================================
-
-impl<'a, Message> Row<'a, Message, Unbounded> {
-    /// Create a new row in unbounded context.
-    pub fn new_unbounded() -> Self {
-        Self {
-            inner: FlexLayout::row_unbounded(),
-            _context: PhantomData,
-        }
-    }
-}
-
-// ============================================================================
-// Widget implementation
-// ============================================================================
-
-impl<'a, Message, Context> Widget<Message> for Row<'a, Message, Context> {
-    fn layout(&self, limits: &Limits) -> Layout {
-        self.inner.layout(limits)
-    }
-
-    fn draw(&self, renderer: &mut Renderer, layout: &Layout) {
-        self.inner.draw(renderer, layout)
-    }
-
-    fn on_event(&mut self, event: &Event, layout: &Layout) -> Option<Message> {
-        self.inner.on_event(event, layout)
-    }
-
-    fn natural_size(&self, max_width: ConcreteSize) -> ConcreteSizeXY {
-        self.inner.natural_size(max_width)
-    }
-
-    fn minimum_size(&self) -> ConcreteSizeXY {
-        self.inner.minimum_size()
-    }
-}
-
-/// Helper function to create a row in bounded context.
-pub fn row<'a, Message>() -> Row<'a, Message, Bounded> {
-    Row::new()
-}
-
-/// Helper function to create a row in unbounded context (for use inside scrollables).
-pub fn row_unbounded<'a, Message>() -> Row<'a, Message, Unbounded> {
-    Row::new_unbounded()
 }
