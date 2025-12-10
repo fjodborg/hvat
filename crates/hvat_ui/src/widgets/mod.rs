@@ -1,6 +1,7 @@
 //! Widget implementations
 
 mod button;
+mod collapsible;
 mod column;
 mod container_helpers;
 mod dropdown;
@@ -10,6 +11,7 @@ mod scrollable;
 mod text;
 
 pub use button::Button;
+pub use collapsible::{Collapsible, CollapsibleConfig};
 pub use column::Column;
 pub use dropdown::{Dropdown, DropdownConfig};
 pub use image_viewer::ImageViewer;
@@ -71,4 +73,11 @@ pub fn scrollable<M: 'static>(builder: impl FnOnce(&mut Context<M>)) -> Scrollab
 /// The dropdown takes options and emits selection via on_select callback.
 pub fn dropdown<M: 'static>() -> Dropdown<M> {
     Dropdown::new()
+}
+
+/// Create a collapsible section widget
+///
+/// The collapsible takes a header text and content built via closure.
+pub fn collapsible<M: 'static>(header: impl Into<String>) -> Collapsible<M> {
+    Collapsible::new(header)
 }
