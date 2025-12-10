@@ -121,6 +121,8 @@ pub struct ScrollState {
     pub(crate) velocity: (f32, f32),
     /// Whether currently being dragged
     pub(crate) dragging: bool,
+    /// Offset within thumb where drag started
+    pub(crate) drag_start_offset: Option<f32>,
 }
 
 impl ScrollState {
@@ -149,6 +151,8 @@ pub struct DropdownState {
     pub search_text: String,
     /// Currently highlighted option index
     pub highlighted: Option<usize>,
+    /// Scroll offset for the popup list (in number of items)
+    pub scroll_offset: usize,
 }
 
 impl DropdownState {
@@ -159,11 +163,13 @@ impl DropdownState {
     pub fn open(&mut self) {
         self.is_open = true;
         self.highlighted = Some(0);
+        self.scroll_offset = 0;
     }
 
     pub fn close(&mut self) {
         self.is_open = false;
         self.search_text.clear();
+        self.scroll_offset = 0;
     }
 
     pub fn toggle(&mut self) {
@@ -171,6 +177,32 @@ impl DropdownState {
             self.close();
         } else {
             self.open();
+        }
+    }
+
+    /// Scroll the dropdown list by a delta (positive = down, negative = up)
+    pub fn scroll_by(&mut self, delta: isize, max_items: usize, visible_items: usize) {
+        if max_items <= visible_items {
+            self.scroll_offset = 0;
+            return;
+        }
+
+        let max_scroll = max_items.saturating_sub(visible_items);
+        let new_offset = (self.scroll_offset as isize + delta).clamp(0, max_scroll as isize) as usize;
+        self.scroll_offset = new_offset;
+    }
+
+    /// Ensure the highlighted item is visible within the scroll view
+    pub fn ensure_highlighted_visible(&mut self, visible_items: usize) {
+        if let Some(highlighted) = self.highlighted {
+            // If highlighted is above visible area, scroll up
+            if highlighted < self.scroll_offset {
+                self.scroll_offset = highlighted;
+            }
+            // If highlighted is below visible area, scroll down
+            else if highlighted >= self.scroll_offset + visible_items {
+                self.scroll_offset = highlighted.saturating_sub(visible_items.saturating_sub(1));
+            }
         }
     }
 }

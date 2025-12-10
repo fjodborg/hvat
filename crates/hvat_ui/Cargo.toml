@@ -11,6 +11,14 @@ path = "src/main.rs"
 name = "image_viewer"
 path = "examples/image_viewer.rs"
 
+[[example]]
+name = "scrollable"
+path = "examples/scrollable.rs"
+
+[[example]]
+name = "dropdown"
+path = "examples/dropdown.rs"
+
 [dependencies]
 hvat_gpu = { path = "../hvat_gpu" }
 winit = "0.30"

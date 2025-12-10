@@ -22,7 +22,10 @@ pub use state::*;
 pub use widget::Widget;
 
 // Re-export widgets
-pub use widgets::{button, col, column, image_viewer, row, text, Column, Row, Text};
+pub use widgets::{
+    button, col, column, dropdown, image_viewer, row, scrollable, text, Column, Dropdown,
+    DropdownConfig, Row, Scrollable, ScrollDirection, ScrollbarConfig, ScrollbarVisibility, Text,
+};
 
 // Re-export hvat_gpu types that users need
 pub use hvat_gpu::{ClearColor, GpuContext, ImageAdjustments, Texture, TransformUniform};
@@ -36,7 +39,10 @@ pub mod prelude {
     pub use crate::layout::{Bounds, Length, Padding, Size};
     pub use crate::renderer::TextureId;
     pub use crate::state::*;
-    pub use crate::widgets::{button, col, column, image_viewer, row, text};
+    pub use crate::widgets::{
+        button, col, column, dropdown, image_viewer, row, scrollable, text, ScrollDirection,
+        ScrollbarVisibility,
+    };
     pub use crate::{ClearColor, Texture};
 }
 

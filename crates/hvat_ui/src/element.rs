@@ -41,6 +41,11 @@ impl<M> Element<M> {
     pub fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
         self.widget.on_event(event, bounds)
     }
+
+    /// Check if this widget has an active overlay
+    pub fn has_active_overlay(&self) -> bool {
+        self.widget.has_active_overlay()
+    }
 }
 
 impl<M> std::fmt::Debug for Element<M> {

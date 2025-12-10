@@ -6,6 +6,8 @@ use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::Renderer;
 use crate::widget::Widget;
 
+use super::container_helpers;
+
 /// Default spacing between children
 const DEFAULT_SPACING: f32 = 8.0;
 
@@ -67,6 +69,10 @@ impl<M> Column<M> {
 }
 
 impl<M: 'static> Widget<M> for Column<M> {
+    fn has_active_overlay(&self) -> bool {
+        self.children.iter().any(|c| c.has_active_overlay())
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         log::debug!("Column layout: available={:?}", available);
 
@@ -132,40 +138,15 @@ impl<M: 'static> Widget<M> for Column<M> {
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
         log::debug!("Column draw: bounds={:?}, {} children", bounds, self.children.len());
-        for (i, (child, child_bounds)) in self.children.iter().zip(&self.child_bounds).enumerate() {
-            let absolute_bounds = Bounds::new(
-                bounds.x + child_bounds.x,
-                bounds.y + child_bounds.y,
-                child_bounds.width,
-                child_bounds.height,
-            );
-            log::debug!("  Column draw child {}: {:?}", i, absolute_bounds);
-            child.draw(renderer, absolute_bounds);
-        }
+        container_helpers::draw_children(&self.children, &self.child_bounds, renderer, bounds);
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
-        // Check if event is within bounds
-        if let Some(pos) = event.position() {
-            if !bounds.contains(pos.0, pos.1) {
-                return None;
-            }
-        }
-
-        // Dispatch to children
-        for (child, child_bounds) in self.children.iter_mut().zip(&self.child_bounds) {
-            let absolute_bounds = Bounds::new(
-                bounds.x + child_bounds.x,
-                bounds.y + child_bounds.y,
-                child_bounds.width,
-                child_bounds.height,
-            );
-
-            if let Some(msg) = child.on_event(event, absolute_bounds) {
-                return Some(msg);
-            }
-        }
-
-        None
+        container_helpers::dispatch_event_to_children(
+            &mut self.children,
+            &self.child_bounds,
+            event,
+            bounds,
+        )
     }
 }

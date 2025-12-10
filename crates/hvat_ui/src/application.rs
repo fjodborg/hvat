@@ -158,6 +158,9 @@ impl<A: Application> AppState<A> {
             self.renderer.resize(width, height);
             self.window_size = (width, height);
             log::debug!("Resized to {}x{}", width, height);
+            // Rebuild layout on resize
+            self.rebuild_view();
+            self.layout();
         }
     }
 
@@ -192,9 +195,11 @@ impl<A: Application> AppState<A> {
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.app.tick();
 
-        // Rebuild view each frame (immediate mode style)
-        self.rebuild_view();
-        self.layout();
+        // Only build view if not yet built (view is rebuilt on message handling)
+        if self.root.is_none() {
+            self.rebuild_view();
+            self.layout();
+        }
 
         let output = self.gpu_ctx.surface.get_current_texture()?;
         let view = output
@@ -392,6 +397,19 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
                         }
                     };
                     state.handle_event(ui_event);
+                }
+
+                // Generate TextInput event for text input (on key press only)
+                if event.state == ElementState::Pressed {
+                    if let Some(text) = &event.text {
+                        let text_str = text.as_str();
+                        // Filter out control characters (but allow space)
+                        if !text_str.is_empty() && text_str.chars().all(|c| !c.is_control() || c == ' ') {
+                            state.handle_event(Event::TextInput {
+                                text: text_str.to_string(),
+                            });
+                        }
+                    }
                 }
             }
 

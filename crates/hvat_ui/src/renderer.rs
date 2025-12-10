@@ -73,6 +73,7 @@ struct TextRequest {
     size: f32,
     color: Color,
     clip: Option<Bounds>,
+    is_overlay: bool,
 }
 
 /// Texture draw request stored for batch rendering
@@ -112,14 +113,20 @@ pub struct Renderer {
     /// Glyphon cache
     #[allow(dead_code)]
     glyphon_cache: Cache,
-    /// Text atlas for GPU glyph cache
+    /// Text atlas for GPU glyph cache (normal text)
     text_atlas: TextAtlas,
-    /// Glyphon text renderer
+    /// Glyphon text renderer (normal text)
     text_renderer: TextRenderer,
+    /// Text atlas for overlay text
+    overlay_text_atlas: TextAtlas,
+    /// Glyphon text renderer for overlay text
+    overlay_text_renderer: TextRenderer,
     /// Glyphon viewport
     viewport: Viewport,
-    /// Queued text requests
+    /// Queued text requests (non-overlay)
     text_requests: Vec<TextRequest>,
+    /// Queued overlay text requests
+    overlay_text_requests: Vec<TextRequest>,
     /// Queued texture requests
     texture_requests: Vec<TextureRequest>,
     /// Registered texture bind groups
@@ -152,6 +159,21 @@ impl Renderer {
             wgpu::MultisampleState::default(),
             None,
         );
+
+        // Create separate atlas and renderer for overlay text
+        let mut overlay_text_atlas = TextAtlas::new(
+            &gpu_ctx.device,
+            &gpu_ctx.queue,
+            &glyphon_cache,
+            gpu_ctx.surface_config.format,
+        );
+        let overlay_text_renderer = TextRenderer::new(
+            &mut overlay_text_atlas,
+            &gpu_ctx.device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
+
         let viewport = Viewport::new(&gpu_ctx.device, &glyphon_cache);
 
         Self {
@@ -168,8 +190,11 @@ impl Renderer {
             glyphon_cache,
             text_atlas,
             text_renderer,
+            overlay_text_atlas,
+            overlay_text_renderer,
             viewport,
             text_requests: Vec::new(),
+            overlay_text_requests: Vec::new(),
             texture_requests: Vec::new(),
             texture_bind_groups: HashMap::new(),
             next_texture_id: 0,
@@ -195,6 +220,7 @@ impl Renderer {
         self.overlay_indices.clear();
         self.drawing_overlay = false;
         self.text_requests.clear();
+        self.overlay_text_requests.clear();
         self.texture_requests.clear();
     }
 
@@ -289,14 +315,21 @@ impl Renderer {
     /// Queue text for rendering
     pub fn text(&mut self, text: &str, x: f32, y: f32, size: f32, color: Color) {
         let clip = self.clip_stack.last().cloned();
-        self.text_requests.push(TextRequest {
+        let request = TextRequest {
             text: text.to_string(),
             x,
             y,
             size,
             color,
             clip,
-        });
+            is_overlay: self.drawing_overlay,
+        };
+        // Add to appropriate list based on overlay state
+        if self.drawing_overlay {
+            self.overlay_text_requests.push(request);
+        } else {
+            self.text_requests.push(request);
+        }
     }
 
     /// Push a clip rectangle
@@ -403,12 +436,17 @@ impl Renderer {
             render_pass.draw_indexed(0..self.color_indices.len() as u32, 0, 0..1);
         }
 
+        // Render normal text (before textures and overlays)
+        if !self.text_requests.is_empty() {
+            self.render_text(gpu_ctx, encoder, view, false);
+        }
+
         // Render textures
         if !self.texture_requests.is_empty() {
             self.render_textures(gpu_ctx, encoder, view);
         }
 
-        // Render overlay (on top of textures)
+        // Render overlay shapes (on top of textures)
         if !self.overlay_vertices.is_empty() {
             let vertex_buffer =
                 gpu_ctx
@@ -449,9 +487,9 @@ impl Renderer {
             render_pass.draw_indexed(0..self.overlay_indices.len() as u32, 0, 0..1);
         }
 
-        // Render text
-        if !self.text_requests.is_empty() {
-            self.render_text(gpu_ctx, encoder, view);
+        // Render overlay text (on top of overlay shapes)
+        if !self.overlay_text_requests.is_empty() {
+            self.render_text(gpu_ctx, encoder, view, true);
         }
 
         // Clear for next frame
@@ -540,14 +578,27 @@ impl Renderer {
         }
     }
 
-    /// Render all queued text
+    /// Render text requests (either normal or overlay)
+    /// Uses separate atlas/renderer for each to allow two-pass rendering
     fn render_text(
         &mut self,
         gpu_ctx: &GpuContext,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        is_overlay: bool,
     ) {
         let (width, height) = self.window_size;
+
+        // Select the appropriate request list
+        let requests = if is_overlay {
+            &self.overlay_text_requests
+        } else {
+            &self.text_requests
+        };
+
+        if requests.is_empty() {
+            return;
+        }
 
         // Update viewport
         self.viewport.update(&gpu_ctx.queue, Resolution { width, height });
@@ -555,7 +606,7 @@ impl Renderer {
         // Create text buffers for each request
         let mut buffers: Vec<Buffer> = Vec::new();
 
-        for request in &self.text_requests {
+        for request in requests {
             let mut buffer =
                 Buffer::new(&mut self.font_system, Metrics::new(request.size, request.size * 1.2));
 
@@ -574,8 +625,7 @@ impl Renderer {
         }
 
         // Create text areas
-        let text_areas: Vec<TextArea> = self
-            .text_requests
+        let text_areas: Vec<TextArea> = requests
             .iter()
             .enumerate()
             .map(|(i, request)| {
@@ -607,12 +657,19 @@ impl Renderer {
             })
             .collect();
 
+        // Select appropriate renderer and atlas
+        let (text_renderer, text_atlas) = if is_overlay {
+            (&mut self.overlay_text_renderer, &mut self.overlay_text_atlas)
+        } else {
+            (&mut self.text_renderer, &mut self.text_atlas)
+        };
+
         // Prepare text renderer
-        if let Err(e) = self.text_renderer.prepare(
+        if let Err(e) = text_renderer.prepare(
             &gpu_ctx.device,
             &gpu_ctx.queue,
             &mut self.font_system,
-            &mut self.text_atlas,
+            text_atlas,
             &self.viewport,
             text_areas,
             &mut self.swash_cache,
@@ -623,8 +680,9 @@ impl Renderer {
 
         // Render text
         {
+            let label = if is_overlay { "Overlay Text Render Pass" } else { "Text Render Pass" };
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Text Render Pass"),
+                label: Some(label),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -639,7 +697,7 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            if let Err(e) = self.text_renderer.render(&self.text_atlas, &self.viewport, &mut render_pass) {
+            if let Err(e) = text_renderer.render(text_atlas, &self.viewport, &mut render_pass) {
                 log::error!("Failed to render text: {:?}", e);
             }
         }
