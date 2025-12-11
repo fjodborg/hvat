@@ -6,18 +6,24 @@ mod column;
 mod container_helpers;
 mod dropdown;
 mod image_viewer;
+mod number_input;
 mod row;
 mod scrollable;
+mod slider;
 mod text;
+mod text_input;
 
 pub use button::Button;
 pub use collapsible::{Collapsible, CollapsibleConfig};
 pub use column::Column;
 pub use dropdown::{Dropdown, DropdownConfig};
 pub use image_viewer::ImageViewer;
+pub use number_input::{NumberInput, NumberInputConfig};
 pub use row::Row;
 pub use scrollable::{Scrollable, ScrollDirection, ScrollbarVisibility, ScrollbarConfig};
+pub use slider::{Slider, SliderConfig};
 pub use text::Text;
+pub use text_input::{TextInput, TextInputConfig};
 
 use crate::element::Element;
 use crate::renderer::TextureId;
@@ -80,4 +86,27 @@ pub fn dropdown<M: 'static>() -> Dropdown<M> {
 /// The collapsible takes a header text and content built via closure.
 pub fn collapsible<M: 'static>(header: impl Into<String>) -> Collapsible<M> {
     Collapsible::new(header)
+}
+
+/// Create a slider widget with a range
+///
+/// The slider emits state changes via on_change callback.
+/// Use `.show_input(true)` to add an editable value field.
+pub fn slider<M: 'static>(min: f32, max: f32) -> Slider<M> {
+    Slider::new(min, max)
+}
+
+/// Create a text input widget
+///
+/// The text input emits changes via on_change callback.
+pub fn text_input<M: 'static>() -> TextInput<M> {
+    TextInput::new()
+}
+
+/// Create a number input widget
+///
+/// The number input emits value changes via on_change callback.
+/// Supports increment/decrement buttons and keyboard/scroll input.
+pub fn number_input<M: 'static>() -> NumberInput<M> {
+    NumberInput::new()
 }

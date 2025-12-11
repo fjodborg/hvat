@@ -285,6 +285,13 @@ pub enum Event {
 
     /// Widget lost focus
     FocusLost,
+
+    /// Global mouse press event - sent to all widgets regardless of bounds
+    /// Used to blur focused widgets when clicking elsewhere
+    GlobalMousePress {
+        button: MouseButton,
+        position: (f32, f32),
+    },
 }
 
 impl Event {
@@ -294,7 +301,8 @@ impl Event {
             Event::MousePress { position, .. }
             | Event::MouseRelease { position, .. }
             | Event::MouseMove { position, .. }
-            | Event::MouseScroll { position, .. } => Some(*position),
+            | Event::MouseScroll { position, .. }
+            | Event::GlobalMousePress { position, .. } => Some(*position),
             _ => None,
         }
     }

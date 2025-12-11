@@ -26,6 +26,32 @@ pub fn dispatch_event_to_children<M: 'static>(
     event: &Event,
     container_bounds: Bounds,
 ) -> Option<M> {
+    // GlobalMousePress is special: it must be sent to ALL children (for blur handling)
+    // and should not stop propagation on first handler
+    if matches!(event, Event::GlobalMousePress { .. }) {
+        let mut result: Option<M> = None;
+        for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
+            let absolute_bounds = translate_bounds(*bounds, container_bounds);
+            if let Some(msg) = child.on_event(event, absolute_bounds) {
+                // Keep the last message (or first, doesn't matter much for blur events)
+                result = Some(msg);
+            }
+        }
+        return result;
+    }
+
+    // FocusLost should also be sent to all children
+    if matches!(event, Event::FocusLost) {
+        let mut result: Option<M> = None;
+        for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
+            let absolute_bounds = translate_bounds(*bounds, container_bounds);
+            if let Some(msg) = child.on_event(event, absolute_bounds) {
+                result = Some(msg);
+            }
+        }
+        return result;
+    }
+
     // Check if any child has an active overlay
     let has_overlay = children.iter().any(|c| c.has_active_overlay());
 

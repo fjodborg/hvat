@@ -13,7 +13,9 @@ use hvat_ui::demos::{
     CollapsibleDemo, CollapsibleMessage,
     DropdownDemo, DropdownMessage,
     ImageViewerDemo, ImageViewerMessage,
+    InputWidgetsDemo, InputWidgetsMessage,
     ScrollableDemo, ScrollableMessage,
+    UndoDemo, UndoMessage,
 };
 use hvat_ui::prelude::*;
 
@@ -22,6 +24,8 @@ use hvat_ui::prelude::*;
 enum DemoTab {
     #[default]
     Basic,
+    InputWidgets,
+    Undo,
     Scrollable,
     Dropdown,
     Collapsible,
@@ -32,6 +36,8 @@ enum DemoTab {
 struct UnifiedDemo {
     active_tab: DemoTab,
     basic: BasicDemo,
+    input_widgets: InputWidgetsDemo,
+    undo: UndoDemo,
     scrollable: ScrollableDemo,
     dropdown: DropdownDemo,
     collapsible: CollapsibleDemo,
@@ -43,6 +49,8 @@ struct UnifiedDemo {
 enum Message {
     SwitchTab(DemoTab),
     Basic(BasicMessage),
+    InputWidgets(InputWidgetsMessage),
+    Undo(UndoMessage),
     Scrollable(ScrollableMessage),
     Dropdown(DropdownMessage),
     Collapsible(CollapsibleMessage),
@@ -54,6 +62,8 @@ impl Default for UnifiedDemo {
         Self {
             active_tab: DemoTab::Basic,
             basic: BasicDemo::new(),
+            input_widgets: InputWidgetsDemo::new(),
+            undo: UndoDemo::new(),
             scrollable: ScrollableDemo::new(),
             dropdown: DropdownDemo::new(),
             collapsible: CollapsibleDemo::new(),
@@ -70,14 +80,29 @@ impl Application for UnifiedDemo {
         self.image_viewer.setup(resources);
     }
 
+    fn on_event(&mut self, event: &hvat_ui::Event) -> Option<Message> {
+        // Handle global keyboard shortcuts when Undo tab is active
+        if self.active_tab == DemoTab::Undo {
+            if let Some(msg) = UndoDemo::handle_key_event(event) {
+                return Some(Message::Undo(msg));
+            }
+        }
+        None
+    }
+
     fn view(&self) -> Element<Message> {
         col(|c| {
             c.text("hvat_ui Demo Gallery");
 
-            // Tab buttons
+            // Tab buttons - first row
             c.row(|r| {
                 r.button("Basic").on_click(Message::SwitchTab(DemoTab::Basic));
+                r.button("Input").on_click(Message::SwitchTab(DemoTab::InputWidgets));
+                r.button("Undo").on_click(Message::SwitchTab(DemoTab::Undo));
                 r.button("Scrollable").on_click(Message::SwitchTab(DemoTab::Scrollable));
+            });
+            // Tab buttons - second row
+            c.row(|r| {
                 r.button("Dropdown").on_click(Message::SwitchTab(DemoTab::Dropdown));
                 r.button("Collapsible").on_click(Message::SwitchTab(DemoTab::Collapsible));
                 r.button("ImageViewer").on_click(Message::SwitchTab(DemoTab::ImageViewer));
@@ -87,6 +112,8 @@ impl Application for UnifiedDemo {
             c.row(|r| {
                 let tab_name = match self.active_tab {
                     DemoTab::Basic => "Basic",
+                    DemoTab::InputWidgets => "Input Widgets",
+                    DemoTab::Undo => "Undo/Redo",
                     DemoTab::Scrollable => "Scrollable",
                     DemoTab::Dropdown => "Dropdown",
                     DemoTab::Collapsible => "Collapsible",
@@ -100,6 +127,8 @@ impl Application for UnifiedDemo {
             // Active demo content
             let demo_content = match self.active_tab {
                 DemoTab::Basic => self.basic.view(Message::Basic),
+                DemoTab::InputWidgets => self.input_widgets.view(Message::InputWidgets),
+                DemoTab::Undo => self.undo.view(Message::Undo),
                 DemoTab::Scrollable => self.scrollable.view(Message::Scrollable),
                 DemoTab::Dropdown => self.dropdown.view(Message::Dropdown),
                 DemoTab::Collapsible => self.collapsible.view(Message::Collapsible),
@@ -116,6 +145,8 @@ impl Application for UnifiedDemo {
                 self.active_tab = tab;
             }
             Message::Basic(msg) => self.basic.update(msg),
+            Message::InputWidgets(msg) => self.input_widgets.update(msg),
+            Message::Undo(msg) => self.undo.update(msg),
             Message::Scrollable(msg) => self.scrollable.update(msg),
             Message::Dropdown(msg) => self.dropdown.update(msg),
             Message::Collapsible(msg) => self.collapsible.update(msg),

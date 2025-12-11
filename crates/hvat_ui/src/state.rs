@@ -271,3 +271,226 @@ impl TextInputState {
         self.selection = None;
     }
 }
+
+/// A snapshot of text input state for undo
+#[derive(Debug, Clone)]
+pub struct TextSnapshot {
+    /// The text content
+    pub text: String,
+    /// Cursor position
+    pub cursor: usize,
+}
+
+/// State for slider widgets
+#[derive(Debug, Clone)]
+pub struct SliderState {
+    /// Current value
+    pub value: f32,
+    /// Whether currently being dragged
+    pub dragging: bool,
+    /// Input field focus state (when show_input is enabled)
+    pub input_focused: bool,
+    /// Input field text (when show_input is enabled)
+    pub input_text: String,
+    /// Input field cursor position
+    pub input_cursor: usize,
+    /// Input field selection range
+    pub input_selection: Option<(usize, usize)>,
+    /// Text undo stack (for Ctrl+Z in input field)
+    pub(crate) input_undo_stack: Vec<TextSnapshot>,
+    /// Text redo stack (for Ctrl+Y in input field)
+    pub(crate) input_redo_stack: Vec<TextSnapshot>,
+}
+
+impl Default for SliderState {
+    fn default() -> Self {
+        Self {
+            value: 0.0,
+            dragging: false,
+            input_focused: false,
+            input_text: String::new(),
+            input_cursor: 0,
+            input_selection: None,
+            input_undo_stack: Vec::new(),
+            input_redo_stack: Vec::new(),
+        }
+    }
+}
+
+impl SliderState {
+    pub fn new(value: f32) -> Self {
+        let text = Self::format_value(value);
+        let cursor = text.len();
+        Self {
+            value,
+            dragging: false,
+            input_focused: false,
+            input_text: text,
+            input_cursor: cursor,
+            input_selection: None,
+            input_undo_stack: Vec::new(),
+            input_redo_stack: Vec::new(),
+        }
+    }
+
+    /// Push current text state to undo stack (call before making changes)
+    pub fn push_text_undo(&mut self) {
+        self.input_undo_stack.push(TextSnapshot {
+            text: self.input_text.clone(),
+            cursor: self.input_cursor,
+        });
+        // Clear redo stack on new change
+        self.input_redo_stack.clear();
+        // Limit undo history to 50 entries
+        while self.input_undo_stack.len() > 50 {
+            self.input_undo_stack.remove(0);
+        }
+    }
+
+    /// Undo text change (Ctrl+Z)
+    pub fn text_undo(&mut self) -> bool {
+        if let Some(snapshot) = self.input_undo_stack.pop() {
+            // Save current state to redo stack
+            self.input_redo_stack.push(TextSnapshot {
+                text: self.input_text.clone(),
+                cursor: self.input_cursor,
+            });
+            self.input_text = snapshot.text;
+            self.input_cursor = snapshot.cursor;
+            self.input_selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo text change (Ctrl+Y or Ctrl+Shift+Z)
+    pub fn text_redo(&mut self) -> bool {
+        if let Some(snapshot) = self.input_redo_stack.pop() {
+            // Save current state to undo stack
+            self.input_undo_stack.push(TextSnapshot {
+                text: self.input_text.clone(),
+                cursor: self.input_cursor,
+            });
+            self.input_text = snapshot.text;
+            self.input_cursor = snapshot.cursor;
+            self.input_selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear text undo/redo history
+    pub fn clear_text_history(&mut self) {
+        self.input_undo_stack.clear();
+        self.input_redo_stack.clear();
+    }
+
+    /// Set the value
+    pub fn set_value(&mut self, value: f32) {
+        self.value = value;
+        if !self.input_focused {
+            self.input_text = Self::format_value(value);
+            self.input_cursor = self.input_text.len();
+        }
+    }
+
+    /// Format value for input field display
+    fn format_value(value: f32) -> String {
+        // If it's close to an integer, display as integer
+        if (value - value.round()).abs() < 0.0001 {
+            format!("{}", value.round() as i32)
+        } else {
+            // Otherwise display with up to 3 decimal places, trimming trailing zeros
+            let formatted = format!("{:.3}", value);
+            formatted.trim_end_matches('0').trim_end_matches('.').to_string()
+        }
+    }
+
+    /// Sync input text from value (call when not focused)
+    pub fn sync_input_from_value(&mut self) {
+        if !self.input_focused {
+            self.input_text = Self::format_value(self.value);
+            self.input_cursor = self.input_text.len();
+            self.input_selection = None;
+        }
+    }
+}
+
+/// State for number input fields
+#[derive(Debug, Clone)]
+pub struct NumberInputState {
+    /// The current text being edited
+    pub text: String,
+    /// Cursor position (character index)
+    pub cursor: usize,
+    /// Whether the input is focused
+    pub is_focused: bool,
+    /// Selection range (start, end) if any
+    pub selection: Option<(usize, usize)>,
+}
+
+impl Default for NumberInputState {
+    fn default() -> Self {
+        Self {
+            text: String::from("0"),
+            cursor: 1,
+            is_focused: false,
+            selection: None,
+        }
+    }
+}
+
+impl NumberInputState {
+    pub fn new(value: f32) -> Self {
+        let text = format_number(value);
+        let cursor = text.len();
+        Self {
+            text,
+            cursor,
+            is_focused: false,
+            selection: None,
+        }
+    }
+
+    /// Parse the current text as a number
+    pub fn value(&self) -> Option<f32> {
+        self.text.parse().ok()
+    }
+
+    /// Set the value (updates text)
+    pub fn set_value(&mut self, value: f32) {
+        self.text = format_number(value);
+        self.cursor = self.text.len();
+        self.selection = None;
+    }
+
+    /// Focus the input
+    pub fn focus(&mut self) {
+        self.is_focused = true;
+        // Select all text when focusing
+        if !self.text.is_empty() {
+            self.selection = Some((0, self.text.len()));
+            self.cursor = self.text.len();
+        }
+    }
+
+    /// Blur the input
+    pub fn blur(&mut self) {
+        self.is_focused = false;
+        self.selection = None;
+    }
+}
+
+/// Format a number for display, avoiding excessive decimal places
+fn format_number(value: f32) -> String {
+    // If it's close to an integer, display as integer
+    if (value - value.round()).abs() < 0.0001 {
+        format!("{}", value.round() as i32)
+    } else {
+        // Otherwise display with up to 3 decimal places, trimming trailing zeros
+        let formatted = format!("{:.3}", value);
+        formatted.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}

@@ -14,6 +14,7 @@ use crate::handlers::{
     handle_annotation, handle_band, handle_counter, handle_image_load, handle_image_settings,
     handle_image_view, handle_navigation, handle_ui, AnnotationState, ImageLoadState,
 };
+use crate::undo::UndoStack;
 use crate::hyperspectral::{generate_test_hyperspectral, BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
 use crate::message::{ExportFormat, Message, PersistenceMode, Tab};
@@ -92,6 +93,9 @@ pub struct HvatApp {
 
     // === Image tagging ===
     tagging: TaggingState,
+
+    // === Undo/Redo system ===
+    undo_stack: UndoStack,
 }
 
 /// Stored image manipulation settings for per-image persistence.
@@ -276,6 +280,7 @@ impl Application for HvatApp {
             persistence: PersistenceState::default(),
             export: ExportState::default(),
             tagging: TaggingState::default(),
+            undo_stack: UndoStack::new(),
         }
     }
 
@@ -472,6 +477,7 @@ impl Application for HvatApp {
                     export_format: &mut self.export.format,
                     widget_state: &mut self.widget_state,
                     image_cache: &self.image_cache,
+                    undo_stack: &mut self.undo_stack,
                 };
                 handle_annotation(msg, &mut state);
                 // Rebuild overlay if annotations changed

@@ -26,9 +26,10 @@ pub use widget::Widget;
 
 // Re-export widgets
 pub use widgets::{
-    button, col, collapsible, column, dropdown, image_viewer, row, scrollable, text, Collapsible,
-    CollapsibleConfig, Column, Dropdown, DropdownConfig, Row, Scrollable, ScrollDirection,
-    ScrollbarConfig, ScrollbarVisibility, Text,
+    button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
+    slider, text, text_input, Collapsible, CollapsibleConfig, Column, Dropdown, DropdownConfig,
+    NumberInput, NumberInputConfig, Row, Scrollable, ScrollDirection, ScrollbarConfig,
+    ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
 };
 
 // Re-export hvat_gpu types that users need
@@ -44,8 +45,8 @@ pub mod prelude {
     pub use crate::renderer::TextureId;
     pub use crate::state::*;
     pub use crate::widgets::{
-        button, col, collapsible, column, dropdown, image_viewer, row, scrollable, text,
-        ScrollDirection, ScrollbarVisibility,
+        button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
+        slider, text, text_input, ScrollDirection, ScrollbarVisibility,
     };
     pub use crate::{ClearColor, Texture};
 }

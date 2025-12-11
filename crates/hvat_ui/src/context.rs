@@ -3,7 +3,8 @@
 use crate::element::Element;
 use crate::layout::Length;
 use crate::renderer::TextureId;
-use crate::widgets::{Button, Column, ImageViewer, Row, Text};
+use crate::state::{NumberInputState, SliderState, TextInputState};
+use crate::widgets::{Button, Column, ImageViewer, NumberInput, Row, Slider, Text, TextInput};
 
 /// Context for building widget trees using a closure-based API
 ///
@@ -81,6 +82,30 @@ impl<M: 'static> Context<M> {
     pub fn add(&mut self, element: Element<M>) -> &mut Self {
         self.children.push(element);
         self
+    }
+
+    /// Add a slider widget
+    pub fn slider(&mut self, min: f32, max: f32) -> SliderBuilder<M> {
+        SliderBuilder {
+            ctx: self,
+            slider: Slider::new(min, max),
+        }
+    }
+
+    /// Add a text input widget
+    pub fn text_input(&mut self) -> TextInputBuilder<M> {
+        TextInputBuilder {
+            ctx: self,
+            input: TextInput::new(),
+        }
+    }
+
+    /// Add a number input widget
+    pub fn number_input(&mut self) -> NumberInputBuilder<M> {
+        NumberInputBuilder {
+            ctx: self,
+            input: NumberInput::new(),
+        }
     }
 
     /// Take the built children
@@ -187,6 +212,183 @@ impl<'a, M: 'static + Clone> ImageViewerBuilder<'a, M> {
     /// Finish building
     pub fn build(self) -> &'a mut Context<M> {
         self.ctx.children.push(Element::new(self.viewer));
+        self.ctx
+    }
+}
+
+/// Builder for slider widgets
+pub struct SliderBuilder<'a, M> {
+    ctx: &'a mut Context<M>,
+    slider: Slider<M>,
+}
+
+impl<'a, M: Clone + 'static> SliderBuilder<'a, M> {
+    /// Set the state
+    pub fn state(mut self, state: &SliderState) -> Self {
+        self.slider = self.slider.state(state);
+        self
+    }
+
+    /// Set the step size
+    pub fn step(mut self, step: f32) -> Self {
+        self.slider = self.slider.step(step);
+        self
+    }
+
+    /// Show value label above thumb
+    pub fn show_value(mut self, show: bool) -> Self {
+        self.slider = self.slider.show_value(show);
+        self
+    }
+
+    /// Show editable input field next to slider
+    pub fn show_input(mut self, show: bool) -> Self {
+        self.slider = self.slider.show_input(show);
+        self
+    }
+
+    /// Set width
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.slider = self.slider.width(width);
+        self
+    }
+
+    /// Set the change handler and finish building
+    pub fn on_change<F>(mut self, handler: F) -> &'a mut Context<M>
+    where
+        F: Fn(SliderState) -> M + 'static,
+    {
+        self.slider = self.slider.on_change(handler);
+        self.ctx.children.push(Element::new(self.slider));
+        self.ctx
+    }
+
+    /// Finish building without handler
+    pub fn build(self) -> &'a mut Context<M> {
+        self.ctx.children.push(Element::new(self.slider));
+        self.ctx
+    }
+}
+
+/// Builder for text input widgets
+pub struct TextInputBuilder<'a, M> {
+    ctx: &'a mut Context<M>,
+    input: TextInput<M>,
+}
+
+impl<'a, M: Clone + 'static> TextInputBuilder<'a, M> {
+    /// Set the current value
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.input = self.input.value(value);
+        self
+    }
+
+    /// Set the placeholder text
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.input = self.input.placeholder(placeholder);
+        self
+    }
+
+    /// Set the state
+    pub fn state(mut self, state: &TextInputState) -> Self {
+        self.input = self.input.state(state);
+        self
+    }
+
+    /// Set width
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.input = self.input.width(width);
+        self
+    }
+
+    /// Set the change handler and finish building
+    pub fn on_change<F>(mut self, handler: F) -> &'a mut Context<M>
+    where
+        F: Fn(String, TextInputState) -> M + 'static,
+    {
+        self.input = self.input.on_change(handler);
+        self.ctx.children.push(Element::new(self.input));
+        self.ctx
+    }
+
+    /// Set the submit handler
+    pub fn on_submit<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(String) -> M + 'static,
+    {
+        self.input = self.input.on_submit(handler);
+        self
+    }
+
+    /// Finish building without handler
+    pub fn build(self) -> &'a mut Context<M> {
+        self.ctx.children.push(Element::new(self.input));
+        self.ctx
+    }
+}
+
+/// Builder for number input widgets
+pub struct NumberInputBuilder<'a, M> {
+    ctx: &'a mut Context<M>,
+    input: NumberInput<M>,
+}
+
+impl<'a, M: Clone + 'static> NumberInputBuilder<'a, M> {
+    /// Set the state
+    pub fn state(mut self, state: &NumberInputState) -> Self {
+        self.input = self.input.state(state);
+        self
+    }
+
+    /// Set minimum value
+    pub fn min(mut self, min: f32) -> Self {
+        self.input = self.input.min(min);
+        self
+    }
+
+    /// Set maximum value
+    pub fn max(mut self, max: f32) -> Self {
+        self.input = self.input.max(max);
+        self
+    }
+
+    /// Set range (min and max)
+    pub fn range(mut self, min: f32, max: f32) -> Self {
+        self.input = self.input.range(min, max);
+        self
+    }
+
+    /// Set step size
+    pub fn step(mut self, step: f32) -> Self {
+        self.input = self.input.step(step);
+        self
+    }
+
+    /// Show/hide increment/decrement buttons
+    pub fn show_buttons(mut self, show: bool) -> Self {
+        self.input = self.input.show_buttons(show);
+        self
+    }
+
+    /// Set width
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.input = self.input.width(width);
+        self
+    }
+
+    /// Set the change handler and finish building
+    pub fn on_change<F>(mut self, handler: F) -> &'a mut Context<M>
+    where
+        F: Fn(f32, NumberInputState) -> M + 'static,
+    {
+        self.input = self.input.on_change(handler);
+        self.ctx.children.push(Element::new(self.input));
+        self.ctx
+    }
+
+    /// Finish building without handler
+    pub fn build(self) -> &'a mut Context<M> {
+        self.ctx.children.push(Element::new(self.input));
         self.ctx
     }
 }

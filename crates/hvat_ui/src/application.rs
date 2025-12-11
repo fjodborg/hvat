@@ -14,6 +14,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+#[cfg(not(target_arch = "wasm32"))]
+use winit::dpi::PhysicalPosition;
+
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
@@ -120,6 +123,14 @@ pub trait Application: Sized {
 
     /// Called each frame before rendering
     fn tick(&mut self) {}
+
+    /// Handle raw events before they're sent to widgets.
+    /// Return Some(message) to handle the event and prevent widget processing.
+    /// Return None to let widgets process the event normally.
+    /// This is useful for global keyboard shortcuts like Ctrl+Z for undo.
+    fn on_event(&mut self, _event: &Event) -> Option<Self::Message> {
+        None
+    }
 }
 
 /// Internal application state
@@ -218,6 +229,15 @@ impl<A: Application> AppState<A> {
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
+        // First, let the application handle the event (for global shortcuts)
+        if let Some(message) = self.app.on_event(&event) {
+            self.app.update(message);
+            self.needs_rebuild = true;
+            self.redraw_requested = true;
+            return true;
+        }
+
+        // Then, let widgets handle the event
         if let Some(root) = &mut self.root {
             let bounds = Bounds::new(
                 0.0,
@@ -360,6 +380,7 @@ impl<A: Application> WinitApp<A> {
 impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
+            // Use LogicalSize - this is what worked before and respects DPI scaling properly
             let window_attrs = WindowAttributes::default()
                 .with_title(&self.settings.title)
                 .with_inner_size(winit::dpi::LogicalSize::new(
@@ -372,12 +393,28 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
                     .create_window(window_attrs)
                     .expect("Failed to create window"),
             );
+
+            // Log window size info for debugging
+            let inner = window.inner_size();
+            let outer = window.outer_size();
+            let scale = window.scale_factor();
+            log::info!(
+                "Window created: requested_logical={}x{}, inner_physical={}x{}, outer_physical={}x{}, scale_factor={}",
+                self.settings.size.0, self.settings.size.1,
+                inner.width, inner.height,
+                outer.width, outer.height,
+                scale
+            );
+
             self.window = Some(window.clone());
 
             if let Some(app) = self.app.take() {
                 let settings = self.settings.clone();
-                let state = pollster::block_on(AppState::new(window, app, settings));
+                let state = pollster::block_on(AppState::new(window.clone(), app, settings));
                 self.state = Some(state);
+
+                // Request initial redraw
+                window.request_redraw();
             }
         }
     }
@@ -397,9 +434,10 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Only request redraw if there's pending work and FPS limit allows
+        // Always request redraw if there's pending work
+        // FPS limiting is handled in RedrawRequested, not here
         if let Some(state) = &self.state {
-            if state.redraw_requested && state.should_render() {
+            if state.redraw_requested {
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -485,10 +523,11 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Only request redraw if there's pending work and FPS limit allows
+        // Always request redraw if there's pending work
+        // FPS limiting is handled in RedrawRequested, not here
         let state_ref = self.state.borrow();
         if let Some(state) = state_ref.as_ref() {
-            if state.redraw_requested && state.should_render() {
+            if state.redraw_requested {
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -511,46 +550,64 @@ fn handle_window_event<A: Application>(
         }
 
         WindowEvent::Resized(size) => {
+            log::info!("Window resized to {}x{}", size.width, size.height);
             state.resize(size.width, size.height);
+            // Force layout recalculation on resize
+            state.needs_rebuild = true;
             // Request redraw after resize
             if let Some(w) = window {
                 w.request_redraw();
             }
         }
 
+        WindowEvent::ScaleFactorChanged { scale_factor, inner_size_writer: _ } => {
+            log::info!("Scale factor changed to {}", scale_factor);
+            // The window will send a Resized event after this, so we just log here
+        }
+
         WindowEvent::RedrawRequested => {
-            // Only render if FPS limit allows
-            if state.should_render() {
-                match state.render() {
-                    Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => {
-                        state.resize(state.window_size.0, state.window_size.1);
-                    }
-                    Err(wgpu::SurfaceError::OutOfMemory) => {
-                        log::error!("Out of memory");
-                        event_loop.exit();
-                    }
-                    Err(e) => {
-                        log::error!("Render error: {:?}", e);
-                    }
+            // Always render when requested - this is critical for Wayland where
+            // the window won't appear until it has rendered its first frame
+            match state.render() {
+                Ok(_) => {}
+                Err(wgpu::SurfaceError::Lost) => {
+                    state.resize(state.window_size.0, state.window_size.1);
+                }
+                Err(wgpu::SurfaceError::OutOfMemory) => {
+                    log::error!("Out of memory");
+                    event_loop.exit();
+                }
+                Err(e) => {
+                    log::error!("Render error: {:?}", e);
                 }
             }
         }
 
         WindowEvent::CursorMoved { position, .. } => {
             state.cursor_position = (position.x as f32, position.y as f32);
-            let handled = state.handle_event(Event::MouseMove {
+            state.handle_event(Event::MouseMove {
                 position: state.cursor_position,
                 modifiers: state.modifiers,
             });
-            // Always request redraw on mouse move for hover effects
-            if handled {
-                state.request_redraw();
+            // Always request redraw on mouse move for hover effects and drag operations
+            // Widgets may update internal state (e.g., scrollbar dragging) without producing messages
+            state.request_redraw();
+            if let Some(w) = window {
+                w.request_redraw();
             }
         }
 
         WindowEvent::MouseInput { state: btn_state, button, .. } => {
             let button = MouseButton::from_winit(button);
+
+            // On press, first send a global event to allow focused widgets to blur
+            if btn_state == ElementState::Pressed {
+                state.handle_event(Event::GlobalMousePress {
+                    button,
+                    position: state.cursor_position,
+                });
+            }
+
             let event = if btn_state == ElementState::Pressed {
                 Event::MousePress {
                     button,
@@ -577,6 +634,12 @@ fn handle_window_event<A: Application>(
                 position: state.cursor_position,
                 modifiers: state.modifiers,
             });
+            // Always request redraw for scroll events - widgets may update internal scroll state
+            // without producing a message (e.g., Scrollable, Collapsible with scroll)
+            state.request_redraw();
+            if let Some(w) = window {
+                w.request_redraw();
+            }
         }
 
         WindowEvent::KeyboardInput { event, .. } => {
@@ -612,6 +675,18 @@ fn handle_window_event<A: Application>(
 
         WindowEvent::ModifiersChanged(modifiers) => {
             state.modifiers = KeyModifiers::from_winit(modifiers);
+        }
+
+        WindowEvent::Focused(focused) => {
+            if !focused {
+                // Window lost focus - notify widgets to blur any focused inputs
+                log::debug!("Window lost focus");
+                state.handle_event(Event::FocusLost);
+                state.request_redraw();
+                if let Some(w) = window {
+                    w.request_redraw();
+                }
+            }
         }
 
         _ => {}

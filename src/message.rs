@@ -246,6 +246,11 @@ pub enum AnnotationMessage {
     ContinueDrag(f32, f32),
     /// Finish dragging
     FinishDrag,
+    // Undo/Redo
+    /// Undo the last annotation operation
+    Undo,
+    /// Redo the last undone operation
+    Redo,
     // Import/Export
     /// Open export dialog with format selection
     OpenExportDialog,
@@ -562,6 +567,12 @@ impl Message {
     }
     pub fn clear_annotations() -> Self {
         Message::Annotation(AnnotationMessage::ClearAll)
+    }
+    pub fn undo() -> Self {
+        Message::Annotation(AnnotationMessage::Undo)
+    }
+    pub fn redo() -> Self {
+        Message::Annotation(AnnotationMessage::Redo)
     }
 
     // Band selection shortcuts

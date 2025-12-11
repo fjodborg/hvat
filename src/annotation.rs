@@ -555,6 +555,22 @@ impl AnnotationStore {
         self.selected_id = None;
     }
 
+    /// Restore an annotation with its original ID.
+    /// Used by undo/redo to restore annotations exactly as they were.
+    pub fn restore(&mut self, annotation: Annotation) {
+        // Update next_id if necessary to avoid collisions
+        if annotation.id >= self.next_id {
+            self.next_id = annotation.id + 1;
+        }
+        self.annotations.insert(annotation.id, annotation);
+        self.mark_dirty();
+    }
+
+    /// Get all annotations as a vector (for undo/redo backup).
+    pub fn all_annotations(&self) -> Vec<Annotation> {
+        self.annotations.values().cloned().collect()
+    }
+
     /// Select an annotation.
     pub fn select(&mut self, id: Option<u64>) {
         if self.selected_id != id {

@@ -70,8 +70,8 @@ impl ImageViewerDemo {
 
     /// Setup the demo with a test texture. Call this in Application::setup()
     pub fn setup(&mut self, resources: &mut Resources) {
-        let width = 512;
-        let height = 512;
+        let width = 4096;
+        let height = 4096;
         let pattern = create_test_pattern(width, height);
 
         let gpu_ctx = resources.gpu_context();

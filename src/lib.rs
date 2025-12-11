@@ -25,6 +25,10 @@ pub use annotation::{
     DrawingState, Point, Polygon, Shape,
 };
 
+// Undo/Redo system for annotations
+mod undo;
+pub use undo::{Command, UndoConfig, UndoStack, record_command, redo_command, undo_command};
+
 // Hyperspectral image support
 mod hyperspectral;
 pub use hyperspectral::{

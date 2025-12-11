@@ -3,7 +3,7 @@
 //! Each handler processes a specific category of messages,
 //! keeping the main HvatApp update function clean and organized.
 
-use crate::annotation::{AnnotationStore, AnnotationTool, Category, DragHandle, DrawingState, Point, Shape};
+use crate::annotation::{Annotation, AnnotationStore, AnnotationTool, Category, DragHandle, DrawingState, Point, Shape};
 use crate::hyperspectral::{BandSelection, HyperspectralImage};
 use crate::image_cache::ImageCache;
 use crate::message::{
@@ -12,6 +12,7 @@ use crate::message::{
 };
 use crate::theme::Theme;
 use crate::ui_constants::{threshold, zoom as zoom_const};
+use crate::undo::{Command, UndoStack, redo_command, undo_command};
 use crate::widget_state::WidgetState;
 use hvat_ui::{HyperspectralImageHandle, ImageHandle};
 use std::collections::HashMap;
@@ -498,6 +499,7 @@ pub struct AnnotationState<'a> {
     pub export_format: &'a mut ExportFormat,
     pub widget_state: &'a mut WidgetState,
     pub image_cache: &'a ImageCache,
+    pub undo_stack: &'a mut UndoStack,
 }
 
 impl<'a> AnnotationState<'a> {
@@ -590,6 +592,14 @@ fn handle_start_drawing_point(state: &mut AnnotationState, x: f32, y: f32) {
     let id = state
         .annotations_mut()
         .add(category, Shape::Point(Point::new(x, y)));
+    // Record command for undo
+    if let Some(ann) = state.annotations().get(id).cloned() {
+        let cmd = Command::AddAnnotation {
+            image_key: state.image_key.clone(),
+            annotation: ann,
+        };
+        state.undo_stack.push(cmd);
+    }
     log::info!("✅ Created point annotation {} at ({:.1}, {:.1})", id, x, y);
 }
 
@@ -614,7 +624,15 @@ fn handle_start_drawing_polygon(state: &mut AnnotationState, x: f32, y: f32) -> 
                 // Close the polygon
                 let category = state.drawing_state.current_category;
                 if let Some(shape) = state.drawing_state.finish() {
-                    let id = state.annotations_mut().add(category, shape);
+                    let id = state.annotations_mut().add(category, shape.clone());
+                    // Record command for undo
+                    if let Some(ann) = state.annotations().get(id).cloned() {
+                        let cmd = Command::AddAnnotation {
+                            image_key: state.image_key.clone(),
+                            annotation: ann,
+                        };
+                        state.undo_stack.push(cmd);
+                    }
                     log::info!("✅ Closed polygon annotation {} (category={})", id, category);
                 }
                 return true;
@@ -680,10 +698,12 @@ fn handle_finish_drawing_drag(state: &mut AnnotationState) -> bool {
 
     let editing = &state.drawing_state.editing;
     let was_click = editing.was_click();
+    let has_moved = editing.has_moved();
     let was_body_drag = matches!(editing.handle(), Some(DragHandle::Body));
     let was_already_selected = editing.was_already_selected();
     let ann_id = editing.annotation_id();
     let drag_start = editing.drag_start();
+    let original_shape = editing.original_shape().cloned();
 
     // Check if this was a click (no movement) on the body of an already-selected annotation
     // If so, cycle to the next overlapping annotation
@@ -694,6 +714,22 @@ fn handle_finish_drawing_drag(state: &mut AnnotationState) -> bool {
                     state.annotations_mut().select(Some(next_id));
                     log::debug!("🔄 Cycled to annotation {} (click without drag)", next_id);
                 }
+            }
+        }
+    }
+
+    // If the shape was actually modified (has_moved), record the change for undo
+    if has_moved {
+        if let (Some(id), Some(old_shape)) = (ann_id, original_shape) {
+            if let Some(ann) = state.annotations().get(id) {
+                let cmd = Command::ModifyShape {
+                    image_key: state.image_key.clone(),
+                    annotation_id: id,
+                    old_shape,
+                    new_shape: ann.shape.clone(),
+                };
+                state.undo_stack.push(cmd);
+                log::debug!("📝 Recorded shape modification for undo (annotation {})", id);
             }
         }
     }
@@ -798,7 +834,15 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 AnnotationTool::BoundingBox => {
                     let category = state.drawing_state.current_category;
                     if let Some(shape) = state.drawing_state.finish() {
-                        let id = state.annotations_mut().add(category, shape);
+                        let id = state.annotations_mut().add(category, shape.clone());
+                        // Record command for undo
+                        if let Some(ann) = state.annotations().get(id).cloned() {
+                            let cmd = Command::AddAnnotation {
+                                image_key: state.image_key.clone(),
+                                annotation: ann,
+                            };
+                            state.undo_stack.push(cmd);
+                        }
                         log::info!("✅ Created bbox annotation {} (category={})", id, category);
                     }
                 }
@@ -819,7 +863,15 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 if state.drawing_state.points().len() >= 3 {
                     let category = state.drawing_state.current_category;
                     if let Some(shape) = state.drawing_state.finish() {
-                        let id = state.annotations_mut().add(category, shape);
+                        let id = state.annotations_mut().add(category, shape.clone());
+                        // Record command for undo
+                        if let Some(ann) = state.annotations().get(id).cloned() {
+                            let cmd = Command::AddAnnotation {
+                                image_key: state.image_key.clone(),
+                                annotation: ann,
+                            };
+                            state.undo_stack.push(cmd);
+                        }
                         log::info!("✅ Created polygon annotation {} (category={})", id, category);
                     }
                 } else {
@@ -840,6 +892,15 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
         }
         AnnotationMessage::DeleteSelected => {
             if let Some(id) = state.annotations().selected() {
+                // Get the annotation before removing for undo
+                if let Some(ann) = state.annotations().get(id).cloned() {
+                    // Record command for undo
+                    let cmd = Command::RemoveAnnotation {
+                        image_key: state.image_key.clone(),
+                        annotation: ann,
+                    };
+                    state.undo_stack.push(cmd);
+                }
                 state.annotations_mut().remove(id);
                 log::info!("🗑️ Deleted annotation {}", id);
             }
@@ -884,6 +945,14 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
                 }
                 '\x7f' => { // DEL
                     if let Some(id) = state.annotations().selected() {
+                        // Get the annotation before removing for undo
+                        if let Some(ann) = state.annotations().get(id).cloned() {
+                            let cmd = Command::RemoveAnnotation {
+                                image_key: state.image_key.clone(),
+                                annotation: ann,
+                            };
+                            state.undo_stack.push(cmd);
+                        }
                         state.annotations_mut().remove(id);
                         log::info!("🗑️ Deleted annotation {} (DEL key)", id);
                     }
@@ -995,9 +1064,43 @@ pub fn handle_annotation(msg: AnnotationMessage, state: &mut AnnotationState) {
         }
         AnnotationMessage::ClearAll => {
             let count = state.annotations().len();
-            state.annotations_mut().clear();
-            log::info!("🗑️ Cleared {} annotations", count);
-            *state.status_message = Some(format!("Cleared {} annotations", count));
+            if count > 0 {
+                // Record command for undo
+                let all_anns = state.annotations().all_annotations();
+                let cmd = Command::ClearAnnotations {
+                    image_key: state.image_key.clone(),
+                    annotations: all_anns,
+                };
+                state.undo_stack.push(cmd);
+
+                state.annotations_mut().clear();
+                log::info!("🗑️ Cleared {} annotations", count);
+                *state.status_message = Some(format!("Cleared {} annotations", count));
+            }
+        }
+        AnnotationMessage::Undo => {
+            if undo_command(state.undo_stack, state.annotations_map, state.categories) {
+                // Mark annotations as dirty so overlay rebuilds
+                if let Some(store) = state.annotations_map.get_mut(&state.image_key) {
+                    store.mark_dirty();
+                }
+                log::info!("⏪ Undo completed");
+                *state.status_message = Some("Undo".to_string());
+            } else {
+                log::debug!("⏪ Nothing to undo");
+            }
+        }
+        AnnotationMessage::Redo => {
+            if redo_command(state.undo_stack, state.annotations_map, state.categories) {
+                // Mark annotations as dirty so overlay rebuilds
+                if let Some(store) = state.annotations_map.get_mut(&state.image_key) {
+                    store.mark_dirty();
+                }
+                log::info!("⏩ Redo completed");
+                *state.status_message = Some("Redo".to_string());
+            } else {
+                log::debug!("⏩ Nothing to redo");
+            }
         }
     }
 }
