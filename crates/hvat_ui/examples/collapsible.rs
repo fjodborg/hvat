@@ -4,6 +4,7 @@
 //! - Basic collapsible sections
 //! - Nested collapsibles
 //! - Accordion mode (only one open at a time)
+//! - Scrollable content with max_height
 //! - Custom styling
 
 use hvat_ui::prelude::*;
@@ -19,6 +20,8 @@ struct CollapsibleDemo {
     /// Nested section state
     nested_outer: CollapsibleState,
     nested_inner: CollapsibleState,
+    /// Scrollable section state
+    scrollable_section: CollapsibleState,
     /// Click counter (for nested content demo)
     click_count: u32,
 }
@@ -38,6 +41,7 @@ impl CollapsibleDemo {
             ],
             nested_outer: CollapsibleState::expanded(),
             nested_inner: CollapsibleState::collapsed(),
+            scrollable_section: CollapsibleState::expanded(),
             click_count: 0,
         }
     }
@@ -54,6 +58,8 @@ enum Message {
     NestedOuterToggled(CollapsibleState),
     /// Inner nested section toggled
     NestedInnerToggled(CollapsibleState),
+    /// Scrollable section toggled
+    ScrollableSectionToggled(CollapsibleState),
     /// Button clicked inside content
     ButtonClicked,
 }
@@ -115,6 +121,23 @@ impl Application for CollapsibleDemo {
             }
 
             c.text("");
+            c.text("-- Scrollable Content (max_height = 120px) --");
+
+            // Scrollable collapsible section
+            c.add(Element::new(
+                collapsible("Scrollable Section - Use mouse wheel to scroll")
+                    .state(&self.scrollable_section)
+                    .header_color(Color::rgba(0.15, 0.25, 0.2, 1.0))
+                    .max_height(120.0)
+                    .on_toggle(Message::ScrollableSectionToggled)
+                    .content(|content| {
+                        for i in 1..=20 {
+                            content.text(format!("Line {} - This content scrolls when it exceeds max_height", i));
+                        }
+                    }),
+            ));
+
+            c.text("");
             c.text("-- Nested Collapsibles --");
 
             // Nested collapsibles
@@ -140,7 +163,7 @@ impl Application for CollapsibleDemo {
             ));
 
             c.text("");
-            c.text("Controls: Click header to toggle | Enter/Space when hovering");
+            c.text("Controls: Click header to toggle | Enter/Space when hovering | Mouse wheel to scroll");
         })
     }
 
@@ -178,6 +201,10 @@ impl Application for CollapsibleDemo {
             Message::NestedInnerToggled(state) => {
                 log::info!("Nested inner toggled: expanded={}", state.is_expanded);
                 self.nested_inner = state;
+            }
+            Message::ScrollableSectionToggled(state) => {
+                log::info!("Scrollable section toggled: expanded={}", state.is_expanded);
+                self.scrollable_section = state;
             }
             Message::ButtonClicked => {
                 self.click_count += 1;
