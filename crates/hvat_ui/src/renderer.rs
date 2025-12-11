@@ -76,6 +76,23 @@ struct TextRequest {
     is_overlay: bool,
 }
 
+/// Key for text buffer cache (text content + font size)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TextCacheKey {
+    text: String,
+    /// Font size in tenths of a point (to avoid float hashing issues)
+    size_tenths: u32,
+}
+
+impl TextCacheKey {
+    fn new(text: &str, size: f32) -> Self {
+        Self {
+            text: text.to_string(),
+            size_tenths: (size * 10.0) as u32,
+        }
+    }
+}
+
 /// Texture draw request stored for batch rendering
 struct TextureRequest {
     texture_id: TextureId,
@@ -135,6 +152,18 @@ pub struct Renderer {
     next_texture_id: usize,
     /// Current clip stack
     clip_stack: Vec<Bounds>,
+    /// Text buffer cache for reusing shaped text between frames
+    text_buffer_cache: HashMap<TextCacheKey, Buffer>,
+    /// Keys used this frame (for cache cleanup)
+    text_cache_used_keys: Vec<TextCacheKey>,
+    /// Pre-allocated vertex buffer for color shapes (reused each frame)
+    color_vertex_buffer: Option<wgpu::Buffer>,
+    /// Pre-allocated index buffer for color shapes (reused each frame)
+    color_index_buffer: Option<wgpu::Buffer>,
+    /// Capacity of pre-allocated vertex buffer
+    vertex_buffer_capacity: usize,
+    /// Capacity of pre-allocated index buffer
+    index_buffer_capacity: usize,
 }
 
 /// Embedded font for WASM compatibility (no system font access)
@@ -186,10 +215,10 @@ impl Renderer {
             color_pipeline,
             texture_pipeline,
             window_size: (gpu_ctx.width(), gpu_ctx.height()),
-            color_vertices: Vec::new(),
-            color_indices: Vec::new(),
-            overlay_vertices: Vec::new(),
-            overlay_indices: Vec::new(),
+            color_vertices: Vec::with_capacity(1024),
+            color_indices: Vec::with_capacity(2048),
+            overlay_vertices: Vec::with_capacity(256),
+            overlay_indices: Vec::with_capacity(512),
             drawing_overlay: false,
             font_system,
             swash_cache,
@@ -199,12 +228,18 @@ impl Renderer {
             overlay_text_atlas,
             overlay_text_renderer,
             viewport,
-            text_requests: Vec::new(),
-            overlay_text_requests: Vec::new(),
-            texture_requests: Vec::new(),
+            text_requests: Vec::with_capacity(64),
+            overlay_text_requests: Vec::with_capacity(16),
+            texture_requests: Vec::with_capacity(8),
             texture_bind_groups: HashMap::new(),
             next_texture_id: 0,
-            clip_stack: Vec::new(),
+            clip_stack: Vec::with_capacity(8),
+            text_buffer_cache: HashMap::with_capacity(128),
+            text_cache_used_keys: Vec::with_capacity(128),
+            color_vertex_buffer: None,
+            color_index_buffer: None,
+            vertex_buffer_capacity: 0,
+            index_buffer_capacity: 0,
         }
     }
 
@@ -228,6 +263,12 @@ impl Renderer {
         self.text_requests.clear();
         self.overlay_text_requests.clear();
         self.texture_requests.clear();
+
+        // Clean up unused text buffers from cache (remove entries not used this frame)
+        if !self.text_cache_used_keys.is_empty() {
+            self.text_buffer_cache.retain(|k, _| self.text_cache_used_keys.contains(k));
+            self.text_cache_used_keys.clear();
+        }
     }
 
     /// Start drawing to the overlay layer (rendered after textures)
@@ -394,6 +435,38 @@ impl Renderer {
         });
     }
 
+    /// Ensure vertex buffer has enough capacity, creating or resizing as needed
+    fn ensure_vertex_buffer(&mut self, gpu_ctx: &GpuContext, required_size: usize) {
+        if self.vertex_buffer_capacity < required_size || self.color_vertex_buffer.is_none() {
+            // Round up to next power of 2 for efficient resizing
+            let new_capacity = required_size.next_power_of_two().max(1024);
+            self.color_vertex_buffer = Some(gpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("UI Color Vertices (reusable)"),
+                size: (new_capacity * std::mem::size_of::<ColorVertex>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.vertex_buffer_capacity = new_capacity;
+            log::debug!("Resized vertex buffer to {} vertices", new_capacity);
+        }
+    }
+
+    /// Ensure index buffer has enough capacity, creating or resizing as needed
+    fn ensure_index_buffer(&mut self, gpu_ctx: &GpuContext, required_size: usize) {
+        if self.index_buffer_capacity < required_size || self.color_index_buffer.is_none() {
+            // Round up to next power of 2 for efficient resizing
+            let new_capacity = required_size.next_power_of_two().max(2048);
+            self.color_index_buffer = Some(gpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("UI Color Indices (reusable)"),
+                size: (new_capacity * std::mem::size_of::<u16>()) as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.index_buffer_capacity = new_capacity;
+            log::debug!("Resized index buffer to {} indices", new_capacity);
+        }
+    }
+
     /// Execute all draw commands
     pub fn render(
         &mut self,
@@ -403,22 +476,28 @@ impl Renderer {
     ) {
         // Render batched color primitives
         if !self.color_vertices.is_empty() {
-            let vertex_buffer =
-                gpu_ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("UI Color Vertices"),
-                        contents: bytemuck::cast_slice(&self.color_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-            let index_buffer =
-                gpu_ctx
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("UI Color Indices"),
-                        contents: bytemuck::cast_slice(&self.color_indices),
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
+            // Ensure buffers have enough capacity
+            self.ensure_vertex_buffer(gpu_ctx, self.color_vertices.len());
+            self.ensure_index_buffer(gpu_ctx, self.color_indices.len());
+
+            // Update buffer contents via queue.write_buffer (more efficient than recreating)
+            if let Some(vertex_buffer) = &self.color_vertex_buffer {
+                gpu_ctx.queue.write_buffer(
+                    vertex_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.color_vertices),
+                );
+            }
+            if let Some(index_buffer) = &self.color_index_buffer {
+                gpu_ctx.queue.write_buffer(
+                    index_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.color_indices),
+                );
+            }
+
+            let vertex_buffer = self.color_vertex_buffer.as_ref().unwrap();
+            let index_buffer = self.color_index_buffer.as_ref().unwrap();
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("UI Render Pass"),
@@ -609,32 +688,44 @@ impl Renderer {
         // Update viewport
         self.viewport.update(&gpu_ctx.queue, Resolution { width, height });
 
-        // Create text buffers for each request
-        let mut buffers: Vec<Buffer> = Vec::new();
-
+        // Ensure all text buffers are in cache (or create new ones)
         for request in requests {
-            let mut buffer =
-                Buffer::new(&mut self.font_system, Metrics::new(request.size, request.size * 1.2));
+            let key = TextCacheKey::new(&request.text, request.size);
 
-            buffer.set_size(&mut self.font_system, Some(width as f32), Some(height as f32));
+            // Track that this key is used this frame
+            if !self.text_cache_used_keys.contains(&key) {
+                self.text_cache_used_keys.push(key.clone());
+            }
 
-            buffer.set_text(
-                &mut self.font_system,
-                &request.text,
-                &Attrs::new().family(Family::SansSerif),
-                Shaping::Advanced,
-            );
+            // Create buffer if not in cache
+            if !self.text_buffer_cache.contains_key(&key) {
+                let mut buffer = Buffer::new(
+                    &mut self.font_system,
+                    Metrics::new(request.size, request.size * 1.2),
+                );
 
-            buffer.shape_until_scroll(&mut self.font_system, false);
+                buffer.set_size(&mut self.font_system, Some(width as f32), Some(height as f32));
 
-            buffers.push(buffer);
+                buffer.set_text(
+                    &mut self.font_system,
+                    &request.text,
+                    &Attrs::new().family(Family::SansSerif),
+                    Shaping::Advanced,
+                );
+
+                buffer.shape_until_scroll(&mut self.font_system, false);
+
+                self.text_buffer_cache.insert(key, buffer);
+            }
         }
 
-        // Create text areas
+        // Create text areas using cached buffers
         let text_areas: Vec<TextArea> = requests
             .iter()
-            .enumerate()
-            .map(|(i, request)| {
+            .filter_map(|request| {
+                let key = TextCacheKey::new(&request.text, request.size);
+                let buffer = self.text_buffer_cache.get(&key)?;
+
                 let bounds = if let Some(clip) = &request.clip {
                     TextBounds {
                         left: clip.x as i32,
@@ -651,15 +742,15 @@ impl Renderer {
                     }
                 };
 
-                TextArea {
-                    buffer: &buffers[i],
+                Some(TextArea {
+                    buffer,
                     left: request.x,
                     top: request.y,
                     scale: 1.0,
                     bounds,
                     default_color: request.color.to_glyphon(),
                     custom_glyphs: &[],
-                }
+                })
             })
             .collect();
 

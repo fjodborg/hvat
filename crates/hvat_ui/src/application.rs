@@ -4,8 +4,10 @@ use crate::element::Element;
 use crate::event::{Event, KeyCode, KeyModifiers, MouseButton};
 use crate::layout::{Bounds, Size};
 use crate::renderer::{Renderer, TextureId};
-use hvat_gpu::{ClearColor, GpuContext, Texture};
+use hvat_gpu::{ClearColor, GpuConfig, GpuContext, Texture};
 use std::sync::Arc;
+use std::time::Duration;
+use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -28,6 +30,8 @@ pub struct Settings {
     pub background: ClearColor,
     /// Whether to enable VSync
     pub vsync: bool,
+    /// Target frames per second (0 = unlimited, respects vsync)
+    pub target_fps: u32,
 }
 
 impl Default for Settings {
@@ -37,6 +41,7 @@ impl Default for Settings {
             size: (1024, 768),
             background: ClearColor::DARK_GRAY,
             vsync: true,
+            target_fps: 60,
         }
     }
 }
@@ -63,6 +68,11 @@ impl Settings {
 
     pub fn vsync(mut self, enabled: bool) -> Self {
         self.vsync = enabled;
+        self
+    }
+
+    pub fn target_fps(mut self, fps: u32) -> Self {
+        self.target_fps = fps;
         self
     }
 }
@@ -122,11 +132,26 @@ struct AppState<A: Application> {
     cursor_position: (f32, f32),
     modifiers: KeyModifiers,
     settings: Settings,
+    /// Whether view needs to be rebuilt (dirty flag)
+    needs_rebuild: bool,
+    /// Last frame time for FPS limiting
+    last_frame_time: Instant,
+    /// Minimum frame duration based on target FPS
+    frame_duration: Duration,
+    /// Whether a redraw was requested (by user interaction)
+    redraw_requested: bool,
 }
 
 impl<A: Application> AppState<A> {
     async fn new(window: Arc<Window>, mut app: A, settings: Settings) -> Self {
-        let gpu_ctx = GpuContext::new(window.clone())
+        // Configure GPU with vsync setting
+        let gpu_config = if settings.vsync {
+            GpuConfig::default() // Uses Fifo (vsync on)
+        } else {
+            GpuConfig::low_latency() // Uses Mailbox (vsync off)
+        };
+
+        let gpu_ctx = GpuContext::with_config(window.clone(), gpu_config)
             .await
             .expect("Failed to create GPU context");
 
@@ -145,6 +170,13 @@ impl<A: Application> AppState<A> {
             app.setup(&mut resources);
         }
 
+        // Calculate frame duration from target FPS
+        let frame_duration = if settings.target_fps > 0 {
+            Duration::from_secs_f64(1.0 / settings.target_fps as f64)
+        } else {
+            Duration::ZERO
+        };
+
         Self {
             app,
             gpu_ctx,
@@ -154,6 +186,10 @@ impl<A: Application> AppState<A> {
             cursor_position: (0.0, 0.0),
             modifiers: KeyModifiers::default(),
             settings,
+            needs_rebuild: true, // Initial build needed
+            last_frame_time: Instant::now(),
+            frame_duration,
+            redraw_requested: true, // Initial redraw needed
         }
     }
 
@@ -163,14 +199,15 @@ impl<A: Application> AppState<A> {
             self.renderer.resize(width, height);
             self.window_size = (width, height);
             log::debug!("Resized to {}x{}", width, height);
-            // Rebuild layout on resize
-            self.rebuild_view();
-            self.layout();
+            // Mark for rebuild on resize
+            self.needs_rebuild = true;
+            self.redraw_requested = true;
         }
     }
 
     fn rebuild_view(&mut self) {
         self.root = Some(self.app.view());
+        self.needs_rebuild = false;
     }
 
     fn layout(&mut self) {
@@ -180,7 +217,7 @@ impl<A: Application> AppState<A> {
         }
     }
 
-    fn handle_event(&mut self, event: Event) {
+    fn handle_event(&mut self, event: Event) -> bool {
         if let Some(root) = &mut self.root {
             let bounds = Bounds::new(
                 0.0,
@@ -191,17 +228,36 @@ impl<A: Application> AppState<A> {
 
             if let Some(message) = root.on_event(&event, bounds) {
                 self.app.update(message);
-                self.rebuild_view();
-                self.layout();
+                self.needs_rebuild = true;
+                self.redraw_requested = true;
+                return true;
             }
         }
+        false
+    }
+
+    /// Check if enough time has passed for next frame (FPS limiting)
+    fn should_render(&self) -> bool {
+        if self.frame_duration.is_zero() {
+            return true;
+        }
+        self.last_frame_time.elapsed() >= self.frame_duration
+    }
+
+    /// Request a redraw for next frame
+    fn request_redraw(&mut self) {
+        self.redraw_requested = true;
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.app.tick();
 
-        // Only build view if not yet built (view is rebuilt on message handling)
-        if self.root.is_none() {
+        // Update frame timing
+        self.last_frame_time = Instant::now();
+        self.redraw_requested = false;
+
+        // Only rebuild view if needed (dirty flag)
+        if self.needs_rebuild || self.root.is_none() {
             self.rebuild_view();
             self.layout();
         }
@@ -336,12 +392,18 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
             return;
         };
 
-        handle_window_event(state, event_loop, event);
+        let window = self.window.clone();
+        handle_window_event(state, event_loop, event, window.as_ref());
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        // Only request redraw if there's pending work and FPS limit allows
+        if let Some(state) = &self.state {
+            if state.redraw_requested && state.should_render() {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
         }
     }
 }
@@ -418,12 +480,19 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
             return;
         };
 
-        handle_window_event(state, event_loop, event);
+        let window = self.window.clone();
+        handle_window_event(state, event_loop, event, window.as_ref());
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
+        // Only request redraw if there's pending work and FPS limit allows
+        let state_ref = self.state.borrow();
+        if let Some(state) = state_ref.as_ref() {
+            if state.redraw_requested && state.should_render() {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
         }
     }
 }
@@ -433,6 +502,7 @@ fn handle_window_event<A: Application>(
     state: &mut AppState<A>,
     event_loop: &ActiveEventLoop,
     event: WindowEvent,
+    window: Option<&Arc<Window>>,
 ) {
     match event {
         WindowEvent::CloseRequested => {
@@ -442,30 +512,41 @@ fn handle_window_event<A: Application>(
 
         WindowEvent::Resized(size) => {
             state.resize(size.width, size.height);
+            // Request redraw after resize
+            if let Some(w) = window {
+                w.request_redraw();
+            }
         }
 
         WindowEvent::RedrawRequested => {
-            match state.render() {
-                Ok(_) => {}
-                Err(wgpu::SurfaceError::Lost) => {
-                    state.resize(state.window_size.0, state.window_size.1);
-                }
-                Err(wgpu::SurfaceError::OutOfMemory) => {
-                    log::error!("Out of memory");
-                    event_loop.exit();
-                }
-                Err(e) => {
-                    log::error!("Render error: {:?}", e);
+            // Only render if FPS limit allows
+            if state.should_render() {
+                match state.render() {
+                    Ok(_) => {}
+                    Err(wgpu::SurfaceError::Lost) => {
+                        state.resize(state.window_size.0, state.window_size.1);
+                    }
+                    Err(wgpu::SurfaceError::OutOfMemory) => {
+                        log::error!("Out of memory");
+                        event_loop.exit();
+                    }
+                    Err(e) => {
+                        log::error!("Render error: {:?}", e);
+                    }
                 }
             }
         }
 
         WindowEvent::CursorMoved { position, .. } => {
             state.cursor_position = (position.x as f32, position.y as f32);
-            state.handle_event(Event::MouseMove {
+            let handled = state.handle_event(Event::MouseMove {
                 position: state.cursor_position,
                 modifiers: state.modifiers,
             });
+            // Always request redraw on mouse move for hover effects
+            if handled {
+                state.request_redraw();
+            }
         }
 
         WindowEvent::MouseInput { state: btn_state, button, .. } => {
@@ -555,7 +636,9 @@ pub fn run<A: Application + 'static>(
     log::info!("Starting hvat_ui application: {}", settings.title);
 
     let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
+    // Use Wait for event-driven rendering (saves CPU/battery)
+    // The about_to_wait handler will request redraws when needed
+    event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut winit_app = WinitApp::new(app, settings);
     event_loop.run_app(&mut winit_app)?;

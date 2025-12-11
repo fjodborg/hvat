@@ -97,6 +97,9 @@ pub struct Dropdown<M> {
     hover_button: bool,
     /// Internal: hover index in options
     hover_option: Option<usize>,
+    /// Cached filtered options (original_index, text_ref_index)
+    /// Invalidated when search_text changes
+    filtered_cache: Option<(String, Vec<usize>)>,
 }
 
 impl<M: 'static> Dropdown<M> {
@@ -115,6 +118,7 @@ impl<M: 'static> Dropdown<M> {
             button_bounds: Bounds::ZERO,
             hover_button: false,
             hover_option: None,
+            filtered_cache: None,
         }
     }
 
@@ -182,8 +186,44 @@ impl<M: 'static> Dropdown<M> {
         self
     }
 
-    /// Get filtered options based on search text
+    /// Get filtered option indices based on search text (uses cache when possible)
+    fn get_filtered_indices(&mut self) -> &[usize] {
+        // Check if cache is valid
+        let cache_valid = self.filtered_cache.as_ref()
+            .map(|(cached_search, _)| cached_search == &self.state.search_text)
+            .unwrap_or(false);
+
+        if !cache_valid {
+            // Rebuild cache
+            let indices: Vec<usize> = if !self.searchable || self.state.search_text.is_empty() {
+                (0..self.options.len()).collect()
+            } else {
+                let search = self.state.search_text.to_lowercase();
+                self.options
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, opt)| opt.to_lowercase().contains(&search))
+                    .map(|(idx, _)| idx)
+                    .collect()
+            };
+            self.filtered_cache = Some((self.state.search_text.clone(), indices));
+        }
+
+        &self.filtered_cache.as_ref().unwrap().1
+    }
+
+    /// Get filtered options based on search text (read-only version for drawing)
     fn filtered_options(&self) -> Vec<(usize, &String)> {
+        // Use cached indices if available and valid
+        if let Some((cached_search, indices)) = &self.filtered_cache {
+            if cached_search == &self.state.search_text {
+                return indices.iter()
+                    .filter_map(|&idx| self.options.get(idx).map(|s| (idx, s)))
+                    .collect();
+            }
+        }
+
+        // Fallback to computing on the fly
         if !self.searchable || self.state.search_text.is_empty() {
             self.options.iter().enumerate().collect()
         } else {
@@ -193,6 +233,25 @@ impl<M: 'static> Dropdown<M> {
                 .enumerate()
                 .filter(|(_, opt)| opt.to_lowercase().contains(&search))
                 .collect()
+        }
+    }
+
+    /// Get count of filtered options (uses cache)
+    fn filtered_count(&self) -> usize {
+        if let Some((cached_search, indices)) = &self.filtered_cache {
+            if cached_search == &self.state.search_text {
+                return indices.len();
+            }
+        }
+        // Fallback
+        if !self.searchable || self.state.search_text.is_empty() {
+            self.options.len()
+        } else {
+            let search = self.state.search_text.to_lowercase();
+            self.options
+                .iter()
+                .filter(|opt| opt.to_lowercase().contains(&search))
+                .count()
         }
     }
 
@@ -288,6 +347,11 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
         let height = self.config.option_height;
 
         self.button_bounds = Bounds::new(0.0, 0.0, width, height);
+
+        // Pre-compute filtered indices during layout (caches the result)
+        if self.state.is_open {
+            let _ = self.get_filtered_indices();
+        }
 
         Size::new(width, height)
     }
