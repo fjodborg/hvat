@@ -137,6 +137,9 @@ pub struct Renderer {
     clip_stack: Vec<Bounds>,
 }
 
+/// Embedded font for WASM compatibility (no system font access)
+const EMBEDDED_FONT: &[u8] = include_bytes!("../assets/DejaVuSansMono.ttf");
+
 impl Renderer {
     /// Create a new renderer
     pub fn new(gpu_ctx: &GpuContext) -> Self {
@@ -144,7 +147,10 @@ impl Renderer {
         let texture_pipeline = TexturePipeline::new(gpu_ctx);
 
         // Initialize glyphon text rendering
-        let font_system = FontSystem::new();
+        // Use embedded font for WASM compatibility
+        let mut font_system = FontSystem::new();
+        font_system.db_mut().load_font_data(EMBEDDED_FONT.to_vec());
+        log::info!("Loaded embedded font for text rendering");
         let swash_cache = SwashCache::new();
         let glyphon_cache = Cache::new(&gpu_ctx.device);
         let mut text_atlas = TextAtlas::new(

@@ -12,6 +12,9 @@ mod state;
 mod widget;
 mod widgets;
 
+/// Reusable demo components
+pub mod demos;
+
 pub use application::{Application, Resources, Settings};
 pub use context::Context;
 pub use element::Element;

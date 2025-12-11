@@ -12,6 +12,11 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
+
 /// Application settings
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -253,6 +258,7 @@ impl<A: Application> AppState<A> {
 }
 
 /// Winit application handler wrapper
+#[cfg(not(target_arch = "wasm32"))]
 struct WinitApp<A: Application> {
     window: Option<Arc<Window>>,
     state: Option<AppState<A>>,
@@ -260,6 +266,7 @@ struct WinitApp<A: Application> {
     settings: Settings,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<A: Application> WinitApp<A> {
     fn new(app: A, settings: Settings) -> Self {
         Self {
@@ -271,6 +278,29 @@ impl<A: Application> WinitApp<A> {
     }
 }
 
+/// WASM version uses Rc<RefCell<>> for async state initialization
+#[cfg(target_arch = "wasm32")]
+struct WinitApp<A: Application> {
+    window: Option<Arc<Window>>,
+    state: Rc<RefCell<Option<AppState<A>>>>,
+    app: Option<A>,
+    settings: Settings,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<A: Application> WinitApp<A> {
+    fn new(app: A, settings: Settings) -> Self {
+        Self {
+            window: None,
+            state: Rc::new(RefCell::new(None)),
+            app: Some(app),
+            settings,
+        }
+    }
+}
+
+// Native implementation
+#[cfg(not(target_arch = "wasm32"))]
 impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
@@ -288,22 +318,10 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
             );
             self.window = Some(window.clone());
 
-            // Initialize state
             if let Some(app) = self.app.take() {
                 let settings = self.settings.clone();
-
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let state = pollster::block_on(AppState::new(window, app, settings));
-                    self.state = Some(state);
-                }
-
-                #[cfg(target_arch = "wasm32")]
-                {
-                    // For WASM, we need to handle async differently
-                    // This is a simplified version - real WASM support would need more work
-                    log::warn!("WASM initialization - async handling simplified");
-                }
+                let state = pollster::block_on(AppState::new(window, app, settings));
+                self.state = Some(state);
             }
         }
     }
@@ -318,113 +336,204 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
             return;
         };
 
-        match event {
-            WindowEvent::CloseRequested => {
-                log::info!("Close requested");
-                event_loop.exit();
-            }
-
-            WindowEvent::Resized(size) => {
-                state.resize(size.width, size.height);
-            }
-
-            WindowEvent::RedrawRequested => {
-                match state.render() {
-                    Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => {
-                        state.resize(state.window_size.0, state.window_size.1);
-                    }
-                    Err(wgpu::SurfaceError::OutOfMemory) => {
-                        log::error!("Out of memory");
-                        event_loop.exit();
-                    }
-                    Err(e) => {
-                        log::error!("Render error: {:?}", e);
-                    }
-                }
-            }
-
-            WindowEvent::CursorMoved { position, .. } => {
-                state.cursor_position = (position.x as f32, position.y as f32);
-                state.handle_event(Event::MouseMove {
-                    position: state.cursor_position,
-                    modifiers: state.modifiers,
-                });
-            }
-
-            WindowEvent::MouseInput { state: btn_state, button, .. } => {
-                let button = MouseButton::from_winit(button);
-                let event = if btn_state == ElementState::Pressed {
-                    Event::MousePress {
-                        button,
-                        position: state.cursor_position,
-                        modifiers: state.modifiers,
-                    }
-                } else {
-                    Event::MouseRelease {
-                        button,
-                        position: state.cursor_position,
-                        modifiers: state.modifiers,
-                    }
-                };
-                state.handle_event(event);
-            }
-
-            WindowEvent::MouseWheel { delta, .. } => {
-                let delta = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
-                };
-                state.handle_event(Event::MouseScroll {
-                    delta,
-                    position: state.cursor_position,
-                    modifiers: state.modifiers,
-                });
-            }
-
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(keycode) = event.physical_key {
-                    let key = KeyCode::from_winit(keycode);
-                    let ui_event = if event.state == ElementState::Pressed {
-                        Event::KeyPress {
-                            key,
-                            modifiers: state.modifiers,
-                        }
-                    } else {
-                        Event::KeyRelease {
-                            key,
-                            modifiers: state.modifiers,
-                        }
-                    };
-                    state.handle_event(ui_event);
-                }
-
-                // Generate TextInput event for text input (on key press only)
-                if event.state == ElementState::Pressed {
-                    if let Some(text) = &event.text {
-                        let text_str = text.as_str();
-                        // Filter out control characters (but allow space)
-                        if !text_str.is_empty() && text_str.chars().all(|c| !c.is_control() || c == ' ') {
-                            state.handle_event(Event::TextInput {
-                                text: text_str.to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            WindowEvent::ModifiersChanged(modifiers) => {
-                state.modifiers = KeyModifiers::from_winit(modifiers);
-            }
-
-            _ => {}
-        }
+        handle_window_event(state, event_loop, event);
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+}
+
+// WASM implementation
+#[cfg(target_arch = "wasm32")]
+impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_none() {
+            use winit::platform::web::WindowAttributesExtWebSys;
+            use wasm_bindgen::JsCast;
+
+            let mut window_attrs = WindowAttributes::default()
+                .with_title(&self.settings.title)
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    self.settings.size.0,
+                    self.settings.size.1,
+                ));
+
+            // Attach to canvas element
+            let canvas = web_sys::window()
+                .and_then(|win| win.document())
+                .and_then(|doc| {
+                    // Try to find existing canvas, or create one
+                    doc.get_element_by_id("canvas")
+                        .or_else(|| {
+                            let canvas = doc.create_element("canvas").ok()?;
+                            canvas.set_id("canvas");
+                            doc.body()?.append_child(&canvas).ok()?;
+                            Some(canvas)
+                        })
+                })
+                .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+
+            if let Some(canvas) = canvas {
+                log::info!("Attaching to canvas element");
+                window_attrs = window_attrs.with_canvas(Some(canvas));
+            } else {
+                log::error!("Failed to get or create canvas element");
+            }
+
+            let window = Arc::new(
+                event_loop
+                    .create_window(window_attrs)
+                    .expect("Failed to create window"),
+            );
+            self.window = Some(window.clone());
+
+            if let Some(app) = self.app.take() {
+                let settings = self.settings.clone();
+                let state_cell = self.state.clone();
+                let window_for_redraw = window.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    log::info!("Starting async WASM initialization");
+                    let state = AppState::new(window, app, settings).await;
+                    *state_cell.borrow_mut() = Some(state);
+                    log::info!("WASM initialization complete");
+                    // Request initial redraw now that state is ready
+                    window_for_redraw.request_redraw();
+                });
+            }
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        let mut state_ref = self.state.borrow_mut();
+        let Some(state) = state_ref.as_mut() else {
+            return;
+        };
+
+        handle_window_event(state, event_loop, event);
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+}
+
+/// Shared window event handling logic
+fn handle_window_event<A: Application>(
+    state: &mut AppState<A>,
+    event_loop: &ActiveEventLoop,
+    event: WindowEvent,
+) {
+    match event {
+        WindowEvent::CloseRequested => {
+            log::info!("Close requested");
+            event_loop.exit();
+        }
+
+        WindowEvent::Resized(size) => {
+            state.resize(size.width, size.height);
+        }
+
+        WindowEvent::RedrawRequested => {
+            match state.render() {
+                Ok(_) => {}
+                Err(wgpu::SurfaceError::Lost) => {
+                    state.resize(state.window_size.0, state.window_size.1);
+                }
+                Err(wgpu::SurfaceError::OutOfMemory) => {
+                    log::error!("Out of memory");
+                    event_loop.exit();
+                }
+                Err(e) => {
+                    log::error!("Render error: {:?}", e);
+                }
+            }
+        }
+
+        WindowEvent::CursorMoved { position, .. } => {
+            state.cursor_position = (position.x as f32, position.y as f32);
+            state.handle_event(Event::MouseMove {
+                position: state.cursor_position,
+                modifiers: state.modifiers,
+            });
+        }
+
+        WindowEvent::MouseInput { state: btn_state, button, .. } => {
+            let button = MouseButton::from_winit(button);
+            let event = if btn_state == ElementState::Pressed {
+                Event::MousePress {
+                    button,
+                    position: state.cursor_position,
+                    modifiers: state.modifiers,
+                }
+            } else {
+                Event::MouseRelease {
+                    button,
+                    position: state.cursor_position,
+                    modifiers: state.modifiers,
+                }
+            };
+            state.handle_event(event);
+        }
+
+        WindowEvent::MouseWheel { delta, .. } => {
+            let delta = match delta {
+                MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
+                MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+            };
+            state.handle_event(Event::MouseScroll {
+                delta,
+                position: state.cursor_position,
+                modifiers: state.modifiers,
+            });
+        }
+
+        WindowEvent::KeyboardInput { event, .. } => {
+            if let PhysicalKey::Code(keycode) = event.physical_key {
+                let key = KeyCode::from_winit(keycode);
+                let ui_event = if event.state == ElementState::Pressed {
+                    Event::KeyPress {
+                        key,
+                        modifiers: state.modifiers,
+                    }
+                } else {
+                    Event::KeyRelease {
+                        key,
+                        modifiers: state.modifiers,
+                    }
+                };
+                state.handle_event(ui_event);
+            }
+
+            // Generate TextInput event for text input (on key press only)
+            if event.state == ElementState::Pressed {
+                if let Some(text) = &event.text {
+                    let text_str = text.as_str();
+                    // Filter out control characters (but allow space)
+                    if !text_str.is_empty() && text_str.chars().all(|c| !c.is_control() || c == ' ') {
+                        state.handle_event(Event::TextInput {
+                            text: text_str.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        WindowEvent::ModifiersChanged(modifiers) => {
+            state.modifiers = KeyModifiers::from_winit(modifiers);
+        }
+
+        _ => {}
     }
 }
 

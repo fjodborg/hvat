@@ -8,16 +8,20 @@ name = "hvat_ui_example"
 path = "src/main.rs"
 
 [[example]]
-name = "image_viewer"
-path = "examples/image_viewer.rs"
-
-[[example]]
 name = "scrollable"
 path = "examples/scrollable.rs"
 
 [[example]]
 name = "dropdown"
 path = "examples/dropdown.rs"
+
+[[example]]
+name = "collapsible"
+path = "examples/collapsible.rs"
+
+[[example]]
+name = "image_viewer"
+path = "examples/image_viewer.rs"
 
 [dependencies]
 hvat_gpu = { path = "../hvat_gpu" }
