@@ -52,19 +52,22 @@ pub fn dispatch_event_to_children<M: 'static>(
         return result;
     }
 
-    // Check if any child has an active overlay
+    // Check if any child has an active overlay or active drag
     let has_overlay = children.iter().any(|c| c.has_active_overlay());
+    let has_drag = children.iter().any(|c| c.has_active_drag());
 
     // Don't filter by bounds for MouseRelease - children may need to handle
     // release events even if mouse moved outside (e.g., buttons)
-    let should_filter = !matches!(event, Event::MouseRelease { .. });
+    // Also don't filter MouseMove when a child is being dragged
+    let should_filter = !matches!(event, Event::MouseRelease { .. })
+        && !(matches!(event, Event::MouseMove { .. }) && has_drag);
 
     if should_filter {
         if let Some(pos) = event.position() {
             if !container_bounds.contains(pos.0, pos.1) {
-                // Even if outside bounds, check if any child has an active overlay
-                // Overlays (like dropdown popups) need to receive events outside their layout bounds
-                if !has_overlay {
+                // Even if outside bounds, check if any child has an active overlay or drag
+                // Overlays (like dropdown popups) and drags need to receive events outside their layout bounds
+                if !has_overlay && !has_drag {
                     return None;
                 }
             }

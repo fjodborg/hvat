@@ -1,7 +1,7 @@
-//! Demo showcasing undo/redo functionality with a simple counter example
+//! Demo showcasing undo/redo functionality with counter, slider, and text input
 
 use crate::event::{Event, KeyCode};
-use crate::state::SliderState;
+use crate::state::{SliderState, TextInputState};
 use crate::{col, Element, Length};
 
 /// A simple generic undo stack
@@ -90,6 +90,7 @@ impl<T: Clone> SimpleUndoStack<T> {
 struct DemoSnapshot {
     counter: i32,
     slider_value: f32,
+    text_value: String,
 }
 
 /// Undo demo state
@@ -98,12 +99,18 @@ pub struct UndoDemo {
     pub counter: i32,
     /// Current slider value
     pub slider_state: SliderState,
+    /// Text input value
+    pub text_value: String,
+    /// Text input state
+    pub text_input_state: TextInputState,
     /// Global undo stack (for entire demo state)
     global_undo: SimpleUndoStack<DemoSnapshot>,
     /// Whether slider drag is in progress (don't record each frame)
     slider_dragging: bool,
     /// Whether slider input field is focused (for tracking edit start)
-    input_was_focused: bool,
+    slider_input_was_focused: bool,
+    /// Whether text input is focused (for tracking edit start)
+    text_input_was_focused: bool,
     /// Snapshot at start of drag or input focus
     drag_start_snapshot: Option<DemoSnapshot>,
 }
@@ -114,6 +121,7 @@ pub enum UndoMessage {
     Increment,
     Decrement,
     SliderChanged(SliderState),
+    TextInputChanged(String, TextInputState),
     /// Global undo (Ctrl+Z)
     Undo,
     /// Global redo (Ctrl+Y or Ctrl+Shift+Z)
@@ -132,9 +140,12 @@ impl UndoDemo {
         Self {
             counter: 0,
             slider_state: SliderState::new(50.0),
+            text_value: String::new(),
+            text_input_state: TextInputState::new(),
             global_undo: SimpleUndoStack::new(50),
             slider_dragging: false,
-            input_was_focused: false,
+            slider_input_was_focused: false,
+            text_input_was_focused: false,
             drag_start_snapshot: None,
         }
     }
@@ -144,6 +155,7 @@ impl UndoDemo {
         DemoSnapshot {
             counter: self.counter,
             slider_value: self.slider_state.value,
+            text_value: self.text_value.clone(),
         }
     }
 
@@ -151,6 +163,10 @@ impl UndoDemo {
     fn restore(&mut self, snapshot: &DemoSnapshot) {
         self.counter = snapshot.counter;
         self.slider_state.set_value(snapshot.slider_value);
+        self.text_value = snapshot.text_value.clone();
+        // Reset cursor to end of text
+        self.text_input_state.cursor = self.text_value.len();
+        self.text_input_state.selection = None;
     }
 
     /// Handle keyboard events for undo/redo shortcuts
@@ -187,6 +203,7 @@ impl UndoDemo {
     ) -> Element<M> {
         let counter = self.counter;
         let slider_value = self.slider_state.value;
+        let text_value = self.text_value.clone();
         let can_undo = self.global_undo.can_undo();
         let can_redo = self.global_undo.can_redo();
         let undo_count = self.global_undo.undo_count();
@@ -198,6 +215,7 @@ impl UndoDemo {
         let wrap4 = wrap.clone();
         let wrap5 = wrap.clone();
         let wrap6 = wrap.clone();
+        let wrap7 = wrap.clone();
 
         col(move |c| {
             c.text("Undo/Redo Demo (Global)");
@@ -232,6 +250,22 @@ impl UndoDemo {
             });
             c.text("");
 
+            // Text input section
+            c.text("Text Input (records on blur):");
+            c.row(|r| {
+                r.text_input()
+                    .value(&self.text_value)
+                    .placeholder("Type something...")
+                    .state(&self.text_input_state)
+                    .width(Length::Fixed(300.0))
+                    .on_change({
+                        let w = wrap7.clone();
+                        move |s, state| w(UndoMessage::TextInputChanged(s, state))
+                    });
+            });
+            c.text(format!("Text: \"{}\"", text_value));
+            c.text("");
+
             // Undo/Redo controls
             c.text("Global Undo/Redo:");
             c.row(|r| {
@@ -258,9 +292,10 @@ impl UndoDemo {
 
             // Instructions
             c.text_sized("How it works:", 14.0);
-            c.text_sized("• Global undo tracks entire demo state (counter + slider)", 11.0);
+            c.text_sized("• Global undo tracks entire demo state (counter + slider + text)", 11.0);
             c.text_sized("• Counter changes are recorded immediately", 11.0);
             c.text_sized("• Slider changes are recorded when you release the mouse", 11.0);
+            c.text_sized("• Text changes are recorded when you click outside (blur)", 11.0);
             c.text_sized("• Undo/Redo restores the full state snapshot", 11.0);
             c.text("");
             c.text_sized("Keyboard shortcuts:", 14.0);
@@ -289,8 +324,8 @@ impl UndoDemo {
                 self.slider_dragging = state.dragging;
 
                 // Track input field focus state
-                let was_input_focused = self.input_was_focused;
-                self.input_was_focused = state.input_focused;
+                let was_input_focused = self.slider_input_was_focused;
+                self.slider_input_was_focused = state.input_focused;
 
                 // Handle drag start/end
                 if !was_dragging && state.dragging {
@@ -322,18 +357,44 @@ impl UndoDemo {
 
                 self.slider_state = state;
             }
+            UndoMessage::TextInputChanged(text, state) => {
+                // Track focus state to record on blur
+                let was_focused = self.text_input_was_focused;
+                self.text_input_was_focused = state.is_focused;
+
+                // Handle focus start
+                if !was_focused && state.is_focused {
+                    // Just focused - save snapshot
+                    self.drag_start_snapshot = Some(self.snapshot());
+                }
+                // Handle blur (focus end)
+                else if was_focused && !state.is_focused {
+                    // Just blurred - record to undo if text changed
+                    if let Some(snapshot) = self.drag_start_snapshot.take() {
+                        if snapshot.text_value != text {
+                            self.global_undo.push(snapshot);
+                            log::info!("Recorded text change to '{}'", text);
+                        }
+                    }
+                }
+
+                self.text_value = text;
+                self.text_input_state = state;
+            }
             UndoMessage::Undo => {
                 let current = self.snapshot();
                 if let Some(prev) = self.global_undo.undo(current) {
                     self.restore(&prev);
-                    log::info!("Undo: counter={}, slider={:.1}", self.counter, self.slider_state.value);
+                    log::info!("Undo: counter={}, slider={:.1}, text='{}'",
+                        self.counter, self.slider_state.value, self.text_value);
                 }
             }
             UndoMessage::Redo => {
                 let current = self.snapshot();
                 if let Some(next) = self.global_undo.redo(current) {
                     self.restore(&next);
-                    log::info!("Redo: counter={}, slider={:.1}", self.counter, self.slider_state.value);
+                    log::info!("Redo: counter={}, slider={:.1}, text='{}'",
+                        self.counter, self.slider_state.value, self.text_value);
                 }
             }
             UndoMessage::ClearHistory => {

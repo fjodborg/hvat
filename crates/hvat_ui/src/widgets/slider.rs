@@ -946,4 +946,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
             _ => None,
         }
     }
+
+    fn has_active_drag(&self) -> bool {
+        self.state.dragging
+    }
 }

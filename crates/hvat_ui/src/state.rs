@@ -272,7 +272,7 @@ impl TextInputState {
     }
 }
 
-/// A snapshot of text input state for undo
+/// A snapshot of text input state for undo (used externally by demos)
 #[derive(Debug, Clone)]
 pub struct TextSnapshot {
     /// The text content

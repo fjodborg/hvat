@@ -528,6 +528,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 // Check button clicks
                 if let Some(inc_bounds) = self.increment_bounds(bounds) {
                     if inc_bounds.contains(x, y) {
+                        // Blur input when clicking button
+                        self.state.is_focused = false;
+                        self.state.selection = None;
                         if self.increment() {
                             log::debug!("NumberInput: increment, value = {}", self.state.text);
                             if let Some(ref on_change) = self.on_change {
@@ -542,6 +545,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
                 if let Some(dec_bounds) = self.decrement_bounds(bounds) {
                     if dec_bounds.contains(x, y) {
+                        // Blur input when clicking button
+                        self.state.is_focused = false;
+                        self.state.selection = None;
                         if self.decrement() {
                             log::debug!("NumberInput: decrement, value = {}", self.state.text);
                             if let Some(ref on_change) = self.on_change {
@@ -761,6 +767,39 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     }
                     if let Some(ref on_change) = self.on_change {
                         if let Some(value) = self.state.value() {
+                            return Some(on_change(value, self.state.clone()));
+                        }
+                    }
+                }
+                None
+            }
+
+            Event::GlobalMousePress { position, .. } => {
+                // Blur when clicking outside (but not inside - that's handled by MousePress)
+                if self.state.is_focused {
+                    let (x, y) = *position;
+                    if !bounds.contains(x, y) {
+                        self.state.is_focused = false;
+                        self.state.selection = None;
+                        log::debug!("NumberInput: GlobalMousePress outside, blurred");
+                        if let Some(value) = self.validate_value() {
+                            if let Some(ref on_change) = self.on_change {
+                                return Some(on_change(value, self.state.clone()));
+                            }
+                        }
+                    }
+                }
+                None
+            }
+
+            Event::FocusLost => {
+                // Blur when window loses focus
+                if self.state.is_focused {
+                    self.state.is_focused = false;
+                    self.state.selection = None;
+                    log::debug!("NumberInput: FocusLost, blurred");
+                    if let Some(value) = self.validate_value() {
+                        if let Some(ref on_change) = self.on_change {
                             return Some(on_change(value, self.state.clone()));
                         }
                     }

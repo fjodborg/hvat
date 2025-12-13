@@ -73,6 +73,10 @@ impl<M: 'static> Widget<M> for Column<M> {
         self.children.iter().any(|c| c.has_active_overlay())
     }
 
+    fn has_active_drag(&self) -> bool {
+        self.children.iter().any(|c| c.has_active_drag())
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         log::debug!("Column layout: available={:?}", available);
 

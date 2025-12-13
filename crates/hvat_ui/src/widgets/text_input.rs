@@ -192,20 +192,6 @@ impl<M> TextInput<M> {
         content_x + self.state.cursor as f32 * self.char_width()
     }
 
-    /// Handle character insertion
-    fn insert_char(&mut self, c: char) {
-        // If there's a selection, delete it first
-        if let Some((start, end)) = self.state.selection {
-            let (start, end) = (start.min(end), start.max(end));
-            self.value.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-        }
-
-        self.value.insert(self.state.cursor, c);
-        self.state.cursor += 1;
-    }
-
     /// Handle text insertion
     fn insert_text(&mut self, text: &str) {
         // If there's a selection, delete it first
@@ -506,6 +492,35 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     _ => {}
                 }
 
+                None
+            }
+
+            Event::GlobalMousePress { position, .. } => {
+                // Blur when clicking outside (but not inside - that's handled by MousePress)
+                if self.state.is_focused {
+                    let (x, y) = *position;
+                    if !bounds.contains(x, y) {
+                        self.state.is_focused = false;
+                        self.state.selection = None;
+                        log::debug!("TextInput: GlobalMousePress outside, blurred");
+                        if let Some(ref on_change) = self.on_change {
+                            return Some(on_change(self.value.clone(), self.state.clone()));
+                        }
+                    }
+                }
+                None
+            }
+
+            Event::FocusLost => {
+                // Blur when window loses focus
+                if self.state.is_focused {
+                    self.state.is_focused = false;
+                    self.state.selection = None;
+                    log::debug!("TextInput: FocusLost, blurred");
+                    if let Some(ref on_change) = self.on_change {
+                        return Some(on_change(self.value.clone(), self.state.clone()));
+                    }
+                }
                 None
             }
 

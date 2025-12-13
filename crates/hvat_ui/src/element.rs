@@ -46,6 +46,11 @@ impl<M> Element<M> {
     pub fn has_active_overlay(&self) -> bool {
         self.widget.has_active_overlay()
     }
+
+    /// Check if this widget is currently being dragged
+    pub fn has_active_drag(&self) -> bool {
+        self.widget.has_active_drag()
+    }
 }
 
 impl<M> std::fmt::Debug for Element<M> {

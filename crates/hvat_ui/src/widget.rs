@@ -40,4 +40,10 @@ pub trait Widget<M> {
     fn has_active_overlay(&self) -> bool {
         false
     }
+
+    /// Whether this widget is currently being dragged.
+    /// When true, the widget will receive MouseMove events even outside its layout bounds.
+    fn has_active_drag(&self) -> bool {
+        false
+    }
 }

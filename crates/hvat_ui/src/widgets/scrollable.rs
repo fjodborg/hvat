@@ -290,6 +290,11 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
         self.content.has_active_overlay()
     }
 
+    fn has_active_drag(&self) -> bool {
+        // Either the scrollbar itself is being dragged, or a child widget is being dragged
+        self.state.dragging || self.content.has_active_drag()
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         log::debug!("Scrollable layout: available={:?}", available);
 

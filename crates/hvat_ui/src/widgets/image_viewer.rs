@@ -236,6 +236,10 @@ enum ControlButton {
 }
 
 impl<M: 'static> Widget<M> for ImageViewer<M> {
+    fn has_active_drag(&self) -> bool {
+        self.state.dragging
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         Size::new(
             self.width.resolve(available.width, available.width),
