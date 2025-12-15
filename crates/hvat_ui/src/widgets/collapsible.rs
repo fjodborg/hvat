@@ -423,6 +423,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             Event::MousePress {
                 button: MouseButton::Left,
                 position,
+                screen_position,
                 ..
             } => {
                 if header_bounds.contains(position.0, position.1) {
@@ -511,11 +512,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                                 *position
                             };
 
-                            // Create adjusted event
+                            // Create adjusted event, preserving original screen_position
                             let adjusted_event = Event::MousePress {
                                 button: MouseButton::Left,
                                 position: adjusted_pos,
                                 modifiers: event.modifiers(),
+                                screen_position: *screen_position,
                             };
 
                             return content.on_event(&adjusted_event, content_bounds);
@@ -606,27 +608,26 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         self.content_size.height,
                     );
 
-                    let in_overlay = self.content.as_ref().map_or(false, |c| {
-                        if c.has_active_overlay() {
-                            if let Some(cap) = c.capture_bounds(content_bounds) {
-                                // Translate to screen space
-                                let screen_cap = Bounds::new(
-                                    cap.x,
-                                    cap.y - self.scroll_state.offset.1,
-                                    cap.width,
-                                    cap.height,
-                                );
-                                screen_cap.contains(position.0, position.1)
-                            } else {
-                                false
-                            }
+                    let has_overlay = self.content.as_ref().map_or(false, |c| c.has_active_overlay());
+
+                    let in_overlay = has_overlay && self.content.as_ref().map_or(false, |c| {
+                        if let Some(cap) = c.capture_bounds(content_bounds) {
+                            // Translate to screen space
+                            let screen_cap = Bounds::new(
+                                cap.x,
+                                cap.y - self.scroll_state.offset.1,
+                                cap.width,
+                                cap.height,
+                            );
+                            screen_cap.contains(position.0, position.1)
                         } else {
                             false
                         }
                     });
 
-                    // Forward scroll to child with active overlay
-                    if in_overlay {
+                    // If child has overlay, ALWAYS forward scroll so it can close
+                    // This is critical: scroll anywhere should close dropdowns
+                    if has_overlay {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
                         let scroll_offset = self.scroll_state.offset.1;
@@ -647,8 +648,11 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             if let Some(msg) = content.on_event(&adjusted_event, content_bounds) {
                                 return Some(msg);
                             }
-                            // Even if no message, overlay handled it
-                            return None;
+                            // If we're inside the overlay, it handled it (even with no message)
+                            if in_overlay {
+                                return None;
+                            }
+                            // Otherwise fall through to normal scroll handling
                         }
                     }
 
@@ -669,6 +673,25 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         return None;
                     }
                 }
+            }
+
+            Event::CursorLeft => {
+                // Cursor left window - release any drag state
+                if self.scrollbar_dragging {
+                    self.scrollbar_dragging = false;
+                    log::debug!("Collapsible scrollbar drag ended (cursor left window)");
+                }
+                // Forward to content to release its drag states
+                if let Some(content) = &mut self.content {
+                    let content_bounds = Bounds::new(
+                        bounds.x,
+                        header_bounds.bottom(),
+                        self.content_size.width,
+                        self.content_size.height,
+                    );
+                    return content.on_event(event, content_bounds);
+                }
+                return None;
             }
 
             Event::MouseRelease { button, position, .. } => {

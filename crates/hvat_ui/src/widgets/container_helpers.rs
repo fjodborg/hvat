@@ -40,8 +40,27 @@ pub fn dispatch_event_to_children<M: 'static>(
         return result;
     }
 
-    // FocusLost should also be sent to all children
-    if matches!(event, Event::FocusLost) {
+    // MouseScroll when any child has an overlay: send to overlay child FIRST so it can close
+    // Then let other children handle the scroll normally
+    if matches!(event, Event::MouseScroll { .. }) {
+        let has_overlay = children.iter().any(|c| c.has_active_overlay());
+        if has_overlay {
+            // First, dispatch to children with overlays - they get priority
+            for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
+                if child.has_active_overlay() {
+                    let absolute_bounds = translate_bounds(*bounds, container_bounds);
+                    if let Some(msg) = child.on_event(event, absolute_bounds) {
+                        // Overlay handled it (e.g., dropdown closed) - consume event
+                        return Some(msg);
+                    }
+                }
+            }
+            // Overlay didn't produce a message, fall through to normal handling
+        }
+    }
+
+    // FocusLost and CursorLeft should also be sent to all children
+    if matches!(event, Event::FocusLost | Event::CursorLeft) {
         let mut result: Option<M> = None;
         for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
             let absolute_bounds = translate_bounds(*bounds, container_bounds);
@@ -93,6 +112,14 @@ pub fn dispatch_event_to_children<M: 'static>(
                     }
                     // Even if no message returned, consume the event to prevent passthrough
                     return None;
+                }
+
+                // For scroll events outside the overlay, still dispatch to the child
+                // so it can close itself (dropdowns should close on scroll outside)
+                if matches!(event, Event::MouseScroll { .. }) {
+                    if let Some(msg) = child.on_event(event, absolute_bounds) {
+                        return Some(msg);
+                    }
                 }
             } else {
                 // Non-positional event (keyboard, etc.) - dispatch normally

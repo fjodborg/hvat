@@ -14,8 +14,6 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-#[cfg(not(target_arch = "wasm32"))]
-use winit::dpi::PhysicalPosition;
 
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
@@ -138,6 +136,10 @@ pub trait Application: Sized {
     fn on_event(&mut self, _event: &Event) -> Option<Self::Message> {
         None
     }
+
+    /// Called when the window is resized.
+    /// Override this to respond to window size changes.
+    fn on_resize(&mut self, _width: f32, _height: f32) {}
 }
 
 /// Internal application state
@@ -217,6 +219,8 @@ impl<A: Application> AppState<A> {
             self.renderer.resize(width, height);
             self.window_size = (width, height);
             log::debug!("Resized to {}x{}", width, height);
+            // Notify the application
+            self.app.on_resize(width as f32, height as f32);
             // Mark for rebuild on resize
             self.needs_rebuild = true;
             self.redraw_requested = true;
@@ -631,6 +635,7 @@ fn handle_window_event<A: Application>(
                     button,
                     position: state.cursor_position,
                     modifiers: state.modifiers,
+                    screen_position: Some(state.cursor_position),
                 }
             } else {
                 Event::MouseRelease {
@@ -704,6 +709,16 @@ fn handle_window_event<A: Application>(
                 if let Some(w) = window {
                     w.request_redraw();
                 }
+            }
+        }
+
+        WindowEvent::CursorLeft { .. } => {
+            // Cursor left the window - release any drag states
+            log::debug!("Cursor left window");
+            state.handle_event(Event::CursorLeft);
+            state.request_redraw();
+            if let Some(w) = window {
+                w.request_redraw();
             }
         }
 

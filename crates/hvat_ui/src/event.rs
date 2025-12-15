@@ -243,6 +243,9 @@ pub enum Event {
         button: MouseButton,
         position: (f32, f32),
         modifiers: KeyModifiers,
+        /// Original screen position (before any transformations like scroll offset)
+        /// Used for determining popup direction in scrollable containers
+        screen_position: Option<(f32, f32)>,
     },
 
     /// Mouse button released
@@ -292,6 +295,9 @@ pub enum Event {
         button: MouseButton,
         position: (f32, f32),
     },
+
+    /// Cursor left the window - used to release drag states
+    CursorLeft,
 }
 
 impl Event {

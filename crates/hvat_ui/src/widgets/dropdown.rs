@@ -100,6 +100,8 @@ pub struct Dropdown<M> {
     /// Cached filtered options (original_index, text_ref_index)
     /// Invalidated when search_text changes
     filtered_cache: Option<(String, Vec<usize>)>,
+    /// Cached viewport height for determining popup direction
+    viewport_height: f32,
 }
 
 impl<M: 'static> Dropdown<M> {
@@ -119,6 +121,7 @@ impl<M: 'static> Dropdown<M> {
             hover_button: false,
             hover_option: None,
             filtered_cache: None,
+            viewport_height: 0.0,
         }
     }
 
@@ -186,6 +189,13 @@ impl<M: 'static> Dropdown<M> {
         self
     }
 
+    /// Set the viewport height (used to determine if popup should open upward)
+    /// If not set, defaults to opening downward
+    pub fn viewport_height(mut self, height: f32) -> Self {
+        self.viewport_height = height;
+        self
+    }
+
     /// Get filtered option indices based on search text (uses cache when possible)
     fn get_filtered_indices(&mut self) -> &[usize] {
         // Check if cache is valid
@@ -236,27 +246,8 @@ impl<M: 'static> Dropdown<M> {
         }
     }
 
-    /// Get count of filtered options (uses cache)
-    fn filtered_count(&self) -> usize {
-        if let Some((cached_search, indices)) = &self.filtered_cache {
-            if cached_search == &self.state.search_text {
-                return indices.len();
-            }
-        }
-        // Fallback
-        if !self.searchable || self.state.search_text.is_empty() {
-            self.options.len()
-        } else {
-            let search = self.state.search_text.to_lowercase();
-            self.options
-                .iter()
-                .filter(|opt| opt.to_lowercase().contains(&search))
-                .count()
-        }
-    }
-
-    /// Calculate popup bounds
-    fn popup_bounds(&self, button_bounds: Bounds) -> Bounds {
+    /// Calculate the height of the popup
+    fn popup_height(&self) -> f32 {
         let filtered = self.filtered_options();
         let visible_count = filtered.len().min(self.config.max_visible_options);
         let options_height = visible_count as f32 * self.config.option_height;
@@ -266,14 +257,48 @@ impl<M: 'static> Dropdown<M> {
         } else {
             0.0
         };
-        let popup_height = options_height + search_box_height;
+        options_height + search_box_height
+    }
 
-        Bounds::new(
-            button_bounds.x,
-            button_bounds.bottom(),
-            button_bounds.width,
-            popup_height,
-        )
+    /// Calculate popup bounds
+    fn popup_bounds(&self, button_bounds: Bounds) -> Bounds {
+        let popup_height = self.popup_height();
+
+        let popup_y = if self.state.opens_upward {
+            // Open above the button
+            button_bounds.y - popup_height
+        } else {
+            // Open below the button (default)
+            button_bounds.bottom()
+        };
+
+        Bounds::new(button_bounds.x, popup_y, button_bounds.width, popup_height)
+    }
+
+    /// Determine if the popup should open upward based on available space
+    /// Uses screen_click_y (the actual screen position of the click) to determine
+    /// available space, since button_bounds may be in content-space when inside
+    /// a scrollable container.
+    fn should_open_upward(&self, screen_click_y: f32, button_height: f32) -> bool {
+        let popup_height = self.popup_height();
+
+        // Calculate available space based on screen position
+        let button_screen_bottom = screen_click_y + button_height;
+        let space_below = self.viewport_height - button_screen_bottom;
+        let space_above = screen_click_y;
+
+        log::debug!(
+            "should_open_upward: screen_click_y={:.0}, button_height={:.0}, popup_height={:.0}, space_below={:.0}, space_above={:.0}, viewport_height={:.0}",
+            screen_click_y, button_height, popup_height, space_below, space_above, self.viewport_height
+        );
+
+        // Open upward if:
+        // 1. Not enough space below but enough space above, OR
+        // 2. Button is in the bottom third of the viewport and there's room above
+        let bottom_third = self.viewport_height * 2.0 / 3.0;
+        let prefer_upward = screen_click_y > bottom_third && space_above >= popup_height;
+
+        (space_below < popup_height && space_above >= popup_height) || prefer_upward
     }
 
     /// Get the Y offset for options (accounts for search box)
@@ -372,11 +397,15 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
             let popup_bounds = self.popup_bounds(button_bounds);
 
             // Return combined bounds of button and popup
+            // Handle both upward and downward popup directions
+            let combined_y = button_bounds.y.min(popup_bounds.y);
+            let combined_bottom = button_bounds.bottom().max(popup_bounds.bottom());
+
             Some(Bounds::new(
                 button_bounds.x,
-                button_bounds.y,
+                combined_y,
                 button_bounds.width.max(popup_bounds.width),
-                button_bounds.height + popup_bounds.height,
+                combined_bottom - combined_y,
             ))
         } else {
             None
@@ -444,11 +473,12 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
             Event::MousePress {
                 button: MouseButton::Left,
                 position,
+                screen_position,
                 ..
             } => {
                 log::debug!(
-                    "Dropdown click: pos=({:.0}, {:.0}), button_bounds={:?}, popup_bounds={:?}, is_open={}",
-                    position.0, position.1, button_bounds, popup_bounds, self.state.is_open
+                    "Dropdown click: pos=({:.0}, {:.0}), screen_pos={:?}, button_bounds={:?}, popup_bounds={:?}, is_open={}",
+                    position.0, position.1, screen_position, button_bounds, popup_bounds, self.state.is_open
                 );
 
                 // Click on button - toggle dropdown
@@ -457,6 +487,10 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     if self.state.is_open {
                         self.state.close();
                     } else {
+                        // Determine popup direction before opening
+                        // Use screen_position if available, otherwise fall back to position
+                        let screen_y = screen_position.map(|(_, y)| y).unwrap_or(position.1);
+                        self.state.opens_upward = self.should_open_upward(screen_y, button_bounds.height);
                         self.state.open();
                     }
                     return self.emit_change();
@@ -501,32 +535,34 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     }
                 } else {
                     self.hover_option = None;
-
-                    // Close dropdown when mouse moves outside both button and popup
-                    if self.state.is_open && !self.hover_button {
-                        log::debug!("Mouse left dropdown area - closing");
-                        self.state.close();
-                        return self.emit_change();
-                    }
                 }
             }
 
             Event::MouseScroll { delta, position, .. } => {
-                // Handle scroll within popup
-                if self.state.is_open && popup_bounds.contains(position.0, position.1) {
-                    let filtered_len = self.filtered_options().len();
-                    let visible_count = self.config.max_visible_options;
+                if self.state.is_open {
+                    // Handle scroll within popup
+                    if popup_bounds.contains(position.0, position.1) {
+                        let filtered_len = self.filtered_options().len();
+                        let visible_count = self.config.max_visible_options;
 
-                    // Scroll by 1 item per scroll unit (negative delta = scroll down)
-                    let scroll_delta = if delta.1 < 0.0 { 1 } else { -1 };
-                    self.state.scroll_by(scroll_delta, filtered_len, visible_count);
+                        // Scroll by 1 item per scroll unit (negative delta = scroll down)
+                        let scroll_delta = if delta.1 < 0.0 { 1 } else { -1 };
+                        self.state.scroll_by(scroll_delta, filtered_len, visible_count);
 
-                    log::debug!(
-                        "Dropdown scroll: delta={:?}, new_offset={}, max_items={}, visible={}",
-                        delta, self.state.scroll_offset, filtered_len, visible_count
-                    );
+                        log::debug!(
+                            "Dropdown scroll: delta={:?}, new_offset={}, max_items={}, visible={}",
+                            delta, self.state.scroll_offset, filtered_len, visible_count
+                        );
 
-                    return self.emit_change();
+                        return self.emit_change();
+                    }
+
+                    // Scroll outside dropdown - close it
+                    if !button_bounds.contains(position.0, position.1) {
+                        log::debug!("Scroll outside dropdown - closing");
+                        self.state.close();
+                        return self.emit_change();
+                    }
                 }
             }
 
@@ -599,6 +635,28 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     Some(0)
                 };
                 log::debug!("Dropdown search text: '{}'", self.state.search_text);
+            }
+
+            Event::GlobalMousePress { position, .. } => {
+                // Close dropdown if click is outside both button and popup
+                if self.state.is_open {
+                    let in_button = button_bounds.contains(position.0, position.1);
+                    let in_popup = popup_bounds.contains(position.0, position.1);
+                    if !in_button && !in_popup {
+                        log::debug!("GlobalMousePress outside dropdown - closing");
+                        self.state.close();
+                        return self.emit_change();
+                    }
+                }
+            }
+
+            Event::FocusLost => {
+                // Close dropdown when focus is lost (e.g., clicking elsewhere, tab away)
+                if self.state.is_open {
+                    log::debug!("FocusLost - closing dropdown");
+                    self.state.close();
+                    return self.emit_change();
+                }
             }
 
             _ => {}

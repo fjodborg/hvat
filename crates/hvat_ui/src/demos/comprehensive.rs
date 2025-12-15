@@ -52,6 +52,9 @@ pub struct ComprehensiveDemo {
     // Text input with undo demo
     pub notes_input_text: String,
     pub notes_input_state: TextInputState,
+
+    // Window size for dropdown positioning
+    pub window_height: f32,
 }
 
 /// Available tools
@@ -177,7 +180,14 @@ impl ComprehensiveDemo {
 
             notes_input_text: String::new(),
             notes_input_state: TextInputState::new(),
+
+            window_height: 900.0, // Default, updated by resize
         }
+    }
+
+    /// Update window dimensions (call this on resize)
+    pub fn set_window_size(&mut self, _width: f32, height: f32) {
+        self.window_height = height;
     }
 
     /// Setup the demo with a test texture. Call this in Application::setup()
@@ -253,6 +263,7 @@ impl ComprehensiveDemo {
             selected_blend_mode,
             notes_text,
             notes_state,
+            self.window_height,
         );
 
         // Build the center image viewer
@@ -294,6 +305,7 @@ impl ComprehensiveDemo {
         selected_blend_mode: Option<usize>,
         notes_text: String,
         notes_state: TextInputState,
+        window_height: f32,
     ) -> Element<M> {
         let wrap_vs = wrap.clone();
         let wrap_tools = wrap.clone();
@@ -420,6 +432,7 @@ impl ComprehensiveDemo {
                             .placeholder("Select blend mode...")
                             .searchable(true)
                             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
+                            .viewport_height(window_height)
                             .on_select(move |idx| {
                                 wrap_dropdown_select(ComprehensiveMessage::BlendModeSelected(idx))
                             })

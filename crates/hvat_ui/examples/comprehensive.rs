@@ -31,6 +31,10 @@ impl Application for ComprehensiveApp {
     fn update(&mut self, message: Self::Message) {
         self.demo.update(message);
     }
+
+    fn on_resize(&mut self, width: f32, height: f32) {
+        self.demo.set_window_size(width, height);
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -943,6 +943,18 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 None
             }
 
+            Event::CursorLeft => {
+                // Cursor left window - release any drag state
+                if self.state.dragging {
+                    self.state.dragging = false;
+                    log::debug!("Slider: stopped dragging (cursor left window)");
+                    if let Some(ref on_change) = self.on_change {
+                        return Some(on_change(self.state.clone()));
+                    }
+                }
+                None
+            }
+
             _ => None,
         }
     }

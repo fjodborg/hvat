@@ -857,6 +857,27 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 None
             }
 
+            Event::CursorLeft => {
+                // Cursor left window - release any drag states
+                let mut changed = false;
+                if self.state.dragging {
+                    self.state.dragging = false;
+                    self.state.last_drag_pos = None;
+                    changed = true;
+                    log::debug!("ImageViewer: stopped dragging (cursor left window)");
+                }
+                if self.left_dragging {
+                    self.left_dragging = false;
+                    self.last_left_drag_pos = None;
+                    changed = true;
+                    log::debug!("ImageViewer: stopped left dragging (cursor left window)");
+                }
+                if changed {
+                    return self.emit_change_with_bounds(&bounds);
+                }
+                None
+            }
+
             _ => None,
         }
     }

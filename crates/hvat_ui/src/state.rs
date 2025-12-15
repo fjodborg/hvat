@@ -185,6 +185,8 @@ pub struct DropdownState {
     pub highlighted: Option<usize>,
     /// Scroll offset for the popup list (in number of items)
     pub scroll_offset: usize,
+    /// Whether the popup should open upward (calculated when opening)
+    pub opens_upward: bool,
 }
 
 impl DropdownState {
@@ -202,6 +204,7 @@ impl DropdownState {
         self.is_open = false;
         self.search_text.clear();
         self.scroll_offset = 0;
+        self.opens_upward = false;
     }
 
     pub fn toggle(&mut self) {
