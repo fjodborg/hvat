@@ -449,29 +449,29 @@ impl ColorPipeline {
     ) -> u32 {
         let base_idx = vertices.len() as u16;
 
-        let x1_ndc = (x1 / window_width) * 2.0 - 1.0;
-        let y1_ndc = 1.0 - (y1 / window_height) * 2.0;
-        let x2_ndc = (x2 / window_width) * 2.0 - 1.0;
-        let y2_ndc = 1.0 - (y2 / window_height) * 2.0;
-
-        let dx = x2_ndc - x1_ndc;
-        let dy = y2_ndc - y1_ndc;
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 0.0001 {
+        // Calculate direction in pixel space first
+        let dx_px = x2 - x1;
+        let dy_px = y2 - y1;
+        let len_px = (dx_px * dx_px + dy_px * dy_px).sqrt();
+        if len_px < 0.0001 {
             // Zero-length line - draw a small rect
             return Self::append_rect(vertices, indices, x1, y1, 1.0, 1.0, color, window_width, window_height);
         }
 
-        let t_x = (thickness / window_width) * 2.0 / 2.0;
-        let t_y = (thickness / window_height) * 2.0 / 2.0;
-        let nx = -dy / len * t_y;
-        let ny = dx / len * t_x;
+        // Calculate perpendicular unit vector in pixel space
+        let half_thickness = thickness / 2.0;
+        let nx_px = -dy_px / len_px * half_thickness;
+        let ny_px = dx_px / len_px * half_thickness;
+
+        // Convert the four corners to NDC
+        let to_ndc_x = |px: f32| (px / window_width) * 2.0 - 1.0;
+        let to_ndc_y = |py: f32| 1.0 - (py / window_height) * 2.0;
 
         vertices.extend_from_slice(&[
-            ColorVertex { position: [x1_ndc - nx, y1_ndc - ny], color },
-            ColorVertex { position: [x1_ndc + nx, y1_ndc + ny], color },
-            ColorVertex { position: [x2_ndc + nx, y2_ndc + ny], color },
-            ColorVertex { position: [x2_ndc - nx, y2_ndc - ny], color },
+            ColorVertex { position: [to_ndc_x(x1 + nx_px), to_ndc_y(y1 + ny_px)], color },
+            ColorVertex { position: [to_ndc_x(x1 - nx_px), to_ndc_y(y1 - ny_px)], color },
+            ColorVertex { position: [to_ndc_x(x2 - nx_px), to_ndc_y(y2 - ny_px)], color },
+            ColorVertex { position: [to_ndc_x(x2 + nx_px), to_ndc_y(y2 + ny_px)], color },
         ]);
 
         indices.extend_from_slice(&[

@@ -4,7 +4,10 @@ use crate::element::Element;
 use crate::layout::Length;
 use crate::renderer::TextureId;
 use crate::state::{NumberInputState, SliderState, TextInputState};
-use crate::widgets::{Button, Column, ImageViewer, NumberInput, Row, Slider, Text, TextInput};
+use crate::widgets::{
+    AnnotationOverlay, Button, Column, ImageClick, ImageViewer, NumberInput, Row, Slider, Text,
+    TextInput,
+};
 
 /// Context for building widget trees using a closure-based API
 ///
@@ -206,6 +209,27 @@ impl<'a, M: 'static + Clone> ImageViewerBuilder<'a, M> {
     /// Set height
     pub fn height(mut self, height: impl Into<Length>) -> Self {
         self.viewer = self.viewer.height(height);
+        self
+    }
+
+    /// Enable annotation mode (left click for drawing instead of panning)
+    pub fn annotation_mode(mut self, enabled: bool) -> Self {
+        self.viewer = self.viewer.annotation_mode(enabled);
+        self
+    }
+
+    /// Set the click handler for annotation tools
+    pub fn on_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(ImageClick) -> M + 'static,
+    {
+        self.viewer = self.viewer.on_click(handler);
+        self
+    }
+
+    /// Set annotation overlays to draw
+    pub fn overlays(mut self, overlays: Vec<AnnotationOverlay>) -> Self {
+        self.viewer = self.viewer.overlays(overlays);
         self
     }
 

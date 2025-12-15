@@ -245,7 +245,13 @@ impl Renderer {
 
     /// Update window size
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.window_size = (width, height);
+        if self.window_size != (width, height) {
+            self.window_size = (width, height);
+            // Clear text buffer cache since buffers were created with old size
+            self.text_buffer_cache.clear();
+            self.text_cache_used_keys.clear();
+            log::debug!("Renderer resized to {}x{}, text cache cleared", width, height);
+        }
     }
 
     /// Get current window size

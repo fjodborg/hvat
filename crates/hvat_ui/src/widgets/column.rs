@@ -77,6 +77,24 @@ impl<M: 'static> Widget<M> for Column<M> {
         self.children.iter().any(|c| c.has_active_drag())
     }
 
+    fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
+        // Find any child with active overlay and get its capture bounds
+        for (child, child_bounds) in self.children.iter().zip(self.child_bounds.iter()) {
+            if child.has_active_overlay() {
+                let absolute_bounds = Bounds::new(
+                    layout_bounds.x + child_bounds.x,
+                    layout_bounds.y + child_bounds.y,
+                    child_bounds.width,
+                    child_bounds.height,
+                );
+                if let Some(child_capture) = child.capture_bounds(absolute_bounds) {
+                    return Some(layout_bounds.union(&child_capture));
+                }
+            }
+        }
+        None
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         log::debug!("Column layout: available={:?}", available);
 

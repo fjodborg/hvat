@@ -51,6 +51,12 @@ impl<M> Element<M> {
     pub fn has_active_drag(&self) -> bool {
         self.widget.has_active_drag()
     }
+
+    /// Get the capture bounds for this widget, which may be larger than layout bounds
+    /// when overlays are active (e.g., dropdown popups)
+    pub fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
+        self.widget.capture_bounds(layout_bounds)
+    }
 }
 
 impl<M> std::fmt::Debug for Element<M> {

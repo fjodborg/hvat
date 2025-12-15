@@ -235,6 +235,43 @@ impl<M: 'static> Default for Collapsible<M> {
 }
 
 impl<M: 'static> Widget<M> for Collapsible<M> {
+    fn has_active_overlay(&self) -> bool {
+        self.content.as_ref().map_or(false, |c| c.has_active_overlay())
+    }
+
+    fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
+        if !self.state.is_expanded {
+            return None;
+        }
+        if let Some(content) = &self.content {
+            if content.has_active_overlay() {
+                let header_bounds = Bounds::new(
+                    layout_bounds.x,
+                    layout_bounds.y,
+                    self.header_bounds.width,
+                    self.config.header_height,
+                );
+                let content_bounds = Bounds::new(
+                    layout_bounds.x,
+                    header_bounds.bottom(),
+                    self.content_size.width,
+                    self.content_size.height,
+                );
+                if let Some(content_capture) = content.capture_bounds(content_bounds) {
+                    // Translate content capture bounds to screen space (adjusting for scroll)
+                    let screen_capture = Bounds::new(
+                        content_capture.x,
+                        content_capture.y - self.scroll_state.offset.1,
+                        content_capture.width,
+                        content_capture.height,
+                    );
+                    return Some(layout_bounds.union(&screen_capture));
+                }
+            }
+        }
+        None
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         let width = self.width.resolve(available.width, available.width);
 
@@ -321,7 +358,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
         );
 
         // Draw content if expanded
-        if self.state.is_expanded && self.visible_content_height > 0.0 {
+        if self.state.is_expanded {
             if let Some(content) = &self.content {
                 let viewport_bounds = Bounds::new(
                     bounds.x,
@@ -432,35 +469,57 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
 
                 // Forward to content if expanded
-                if self.state.is_expanded && viewport_bounds.contains(position.0, position.1) {
-                    // Extract values before mutable borrow
-                    let needs_scroll = self.needs_scrolling();
-                    let scroll_offset = self.scroll_state.offset.1;
-                    let content_size = self.content_size;
+                if self.state.is_expanded {
+                    // Check if within viewport OR within overlay capture bounds
+                    let content_bounds = Bounds::new(
+                        bounds.x,
+                        header_bounds.bottom(),
+                        self.content_size.width,
+                        self.content_size.height,
+                    );
 
-                    if let Some(content) = &mut self.content {
-                        // Adjust position for scroll offset
-                        let adjusted_pos = if needs_scroll {
-                            (position.0, position.1 + scroll_offset)
+                    let in_viewport = viewport_bounds.contains(position.0, position.1);
+                    let in_overlay = self.content.as_ref().map_or(false, |c| {
+                        if c.has_active_overlay() {
+                            if let Some(cap) = c.capture_bounds(content_bounds) {
+                                // Translate to screen space
+                                let screen_cap = Bounds::new(
+                                    cap.x,
+                                    cap.y - self.scroll_state.offset.1,
+                                    cap.width,
+                                    cap.height,
+                                );
+                                screen_cap.contains(position.0, position.1)
+                            } else {
+                                false
+                            }
                         } else {
-                            *position
-                        };
+                            false
+                        }
+                    });
 
-                        let content_bounds = Bounds::new(
-                            bounds.x,
-                            header_bounds.bottom(),
-                            content_size.width,
-                            content_size.height,
-                        );
+                    if in_viewport || in_overlay {
+                        // Extract values before mutable borrow
+                        let needs_scroll = self.needs_scrolling();
+                        let scroll_offset = self.scroll_state.offset.1;
 
-                        // Create adjusted event
-                        let adjusted_event = Event::MousePress {
-                            button: MouseButton::Left,
-                            position: adjusted_pos,
-                            modifiers: event.modifiers(),
-                        };
+                        if let Some(content) = &mut self.content {
+                            // Adjust position for scroll offset
+                            let adjusted_pos = if needs_scroll {
+                                (position.0, position.1 + scroll_offset)
+                            } else {
+                                *position
+                            };
 
-                        return content.on_event(&adjusted_event, content_bounds);
+                            // Create adjusted event
+                            let adjusted_event = Event::MousePress {
+                                button: MouseButton::Left,
+                                position: adjusted_pos,
+                                modifiers: event.modifiers(),
+                            };
+
+                            return content.on_event(&adjusted_event, content_bounds);
+                        }
                     }
                 }
             }
@@ -485,55 +544,130 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
 
                 // Forward to content if expanded
-                if self.state.is_expanded && viewport_bounds.contains(position.0, position.1) {
-                    // Extract values before mutable borrow
-                    let needs_scroll = self.needs_scrolling();
-                    let scroll_offset = self.scroll_state.offset.1;
-                    let content_size = self.content_size;
+                if self.state.is_expanded {
+                    // Check if within viewport OR within overlay capture bounds
+                    let content_bounds = Bounds::new(
+                        bounds.x,
+                        header_bounds.bottom(),
+                        self.content_size.width,
+                        self.content_size.height,
+                    );
 
-                    if let Some(content) = &mut self.content {
-                        let adjusted_pos = if needs_scroll {
-                            (position.0, position.1 + scroll_offset)
+                    let in_viewport = viewport_bounds.contains(position.0, position.1);
+                    let in_overlay = self.content.as_ref().map_or(false, |c| {
+                        if c.has_active_overlay() {
+                            if let Some(cap) = c.capture_bounds(content_bounds) {
+                                // Translate to screen space
+                                let screen_cap = Bounds::new(
+                                    cap.x,
+                                    cap.y - self.scroll_state.offset.1,
+                                    cap.width,
+                                    cap.height,
+                                );
+                                screen_cap.contains(position.0, position.1)
+                            } else {
+                                false
+                            }
                         } else {
-                            *position
-                        };
+                            false
+                        }
+                    });
 
-                        let content_bounds = Bounds::new(
-                            bounds.x,
-                            header_bounds.bottom(),
-                            content_size.width,
-                            content_size.height,
-                        );
+                    if in_viewport || in_overlay {
+                        // Extract values before mutable borrow
+                        let needs_scroll = self.needs_scrolling();
+                        let scroll_offset = self.scroll_state.offset.1;
 
-                        let adjusted_event = Event::MouseMove {
-                            position: adjusted_pos,
-                            modifiers: event.modifiers(),
-                        };
+                        if let Some(content) = &mut self.content {
+                            let adjusted_pos = if needs_scroll {
+                                (position.0, position.1 + scroll_offset)
+                            } else {
+                                *position
+                            };
 
-                        return content.on_event(&adjusted_event, content_bounds);
+                            let adjusted_event = Event::MouseMove {
+                                position: adjusted_pos,
+                                modifiers: event.modifiers(),
+                            };
+
+                            return content.on_event(&adjusted_event, content_bounds);
+                        }
                     }
                 }
             }
 
-            Event::MouseScroll { delta, position, .. } => {
-                // Handle scrolling in content area
-                if self.state.is_expanded
-                    && self.needs_scrolling()
-                    && viewport_bounds.contains(position.0, position.1)
-                {
-                    let max_scroll = (self.content_size.height - self.visible_content_height).max(0.0);
-                    // Negative delta.1 means scroll down (content moves up), positive means scroll up
-                    let scroll_amount = -delta.1 * SCROLL_SPEED;
-                    self.scroll_state.offset.1 =
-                        (self.scroll_state.offset.1 + scroll_amount).clamp(0.0, max_scroll);
-                    log::debug!(
-                        "Collapsible scroll: delta={}, offset={}, max={}",
-                        delta.1,
-                        self.scroll_state.offset.1,
-                        max_scroll
+            Event::MouseScroll { delta, position, modifiers } => {
+                if self.state.is_expanded {
+                    // First check if a child has an active overlay that should receive the scroll
+                    let content_bounds = Bounds::new(
+                        bounds.x,
+                        header_bounds.bottom(),
+                        self.content_size.width,
+                        self.content_size.height,
                     );
-                    // Return None to indicate we handled it but no message
-                    return None;
+
+                    let in_overlay = self.content.as_ref().map_or(false, |c| {
+                        if c.has_active_overlay() {
+                            if let Some(cap) = c.capture_bounds(content_bounds) {
+                                // Translate to screen space
+                                let screen_cap = Bounds::new(
+                                    cap.x,
+                                    cap.y - self.scroll_state.offset.1,
+                                    cap.width,
+                                    cap.height,
+                                );
+                                screen_cap.contains(position.0, position.1)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    });
+
+                    // Forward scroll to child with active overlay
+                    if in_overlay {
+                        // Extract values before mutable borrow
+                        let needs_scroll = self.needs_scrolling();
+                        let scroll_offset = self.scroll_state.offset.1;
+
+                        if let Some(content) = &mut self.content {
+                            let adjusted_pos = if needs_scroll {
+                                (position.0, position.1 + scroll_offset)
+                            } else {
+                                *position
+                            };
+
+                            let adjusted_event = Event::MouseScroll {
+                                delta: *delta,
+                                position: adjusted_pos,
+                                modifiers: *modifiers,
+                            };
+
+                            if let Some(msg) = content.on_event(&adjusted_event, content_bounds) {
+                                return Some(msg);
+                            }
+                            // Even if no message, overlay handled it
+                            return None;
+                        }
+                    }
+
+                    // Handle scrolling in content area (only if no overlay captured it)
+                    if self.needs_scrolling() && viewport_bounds.contains(position.0, position.1) {
+                        let max_scroll = (self.content_size.height - self.visible_content_height).max(0.0);
+                        // Negative delta.1 means scroll down (content moves up), positive means scroll up
+                        let scroll_amount = -delta.1 * SCROLL_SPEED;
+                        self.scroll_state.offset.1 =
+                            (self.scroll_state.offset.1 + scroll_amount).clamp(0.0, max_scroll);
+                        log::debug!(
+                            "Collapsible scroll: delta={}, offset={}, max={}",
+                            delta.1,
+                            self.scroll_state.offset.1,
+                            max_scroll
+                        );
+                        // Return None to indicate we handled it but no message
+                        return None;
+                    }
                 }
             }
 

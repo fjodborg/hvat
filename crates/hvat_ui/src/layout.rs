@@ -93,6 +93,15 @@ impl Bounds {
             None
         }
     }
+
+    /// Union with another bounds (smallest rectangle containing both)
+    pub fn union(&self, other: &Bounds) -> Bounds {
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let right = self.right().max(other.right());
+        let bottom = self.bottom().max(other.bottom());
+        Bounds::new(x, y, right - x, bottom - y)
+    }
 }
 
 /// A size without position

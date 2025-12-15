@@ -192,8 +192,11 @@ impl<M> TextInput<M> {
         content_x + self.state.cursor as f32 * self.char_width()
     }
 
-    /// Handle text insertion
+    /// Handle text insertion (with undo support)
     fn insert_text(&mut self, text: &str) {
+        // Push undo before making changes
+        self.state.push_undo(&self.value);
+
         // If there's a selection, delete it first
         if let Some((start, end)) = self.state.selection {
             let (start, end) = (start.min(end), start.max(end));
@@ -206,15 +209,17 @@ impl<M> TextInput<M> {
         self.state.cursor += text.len();
     }
 
-    /// Handle backspace
+    /// Handle backspace (with undo support)
     fn handle_backspace(&mut self) -> bool {
         if let Some((start, end)) = self.state.selection {
+            self.state.push_undo(&self.value);
             let (start, end) = (start.min(end), start.max(end));
             self.value.drain(start..end);
             self.state.cursor = start;
             self.state.selection = None;
             true
         } else if self.state.cursor > 0 {
+            self.state.push_undo(&self.value);
             self.value.remove(self.state.cursor - 1);
             self.state.cursor -= 1;
             true
@@ -223,16 +228,38 @@ impl<M> TextInput<M> {
         }
     }
 
-    /// Handle delete
+    /// Handle delete (with undo support)
     fn handle_delete(&mut self) -> bool {
         if let Some((start, end)) = self.state.selection {
+            self.state.push_undo(&self.value);
             let (start, end) = (start.min(end), start.max(end));
             self.value.drain(start..end);
             self.state.cursor = start;
             self.state.selection = None;
             true
         } else if self.state.cursor < self.value.len() {
+            self.state.push_undo(&self.value);
             self.value.remove(self.state.cursor);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle undo (Ctrl+Z)
+    fn handle_undo(&mut self) -> bool {
+        if let Some(restored_text) = self.state.undo(&self.value) {
+            self.value = restored_text;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle redo (Ctrl+Y or Ctrl+Shift+Z)
+    fn handle_redo(&mut self) -> bool {
+        if let Some(restored_text) = self.state.redo(&self.value) {
+            self.value = restored_text;
             true
         } else {
             false
@@ -474,6 +501,33 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         // Select all
                         self.state.selection = Some((0, self.value.len()));
                         self.state.cursor = self.value.len();
+                    }
+                    KeyCode::Z if modifiers.ctrl && !modifiers.shift => {
+                        // Undo
+                        if self.handle_undo() {
+                            log::debug!("TextInput: undo, value = '{}'", self.value);
+                            if let Some(ref on_change) = self.on_change {
+                                return Some(on_change(self.value.clone(), self.state.clone()));
+                            }
+                        }
+                    }
+                    KeyCode::Z if modifiers.ctrl && modifiers.shift => {
+                        // Redo (Ctrl+Shift+Z)
+                        if self.handle_redo() {
+                            log::debug!("TextInput: redo, value = '{}'", self.value);
+                            if let Some(ref on_change) = self.on_change {
+                                return Some(on_change(self.value.clone(), self.state.clone()));
+                            }
+                        }
+                    }
+                    KeyCode::Y if modifiers.ctrl => {
+                        // Redo (Ctrl+Y)
+                        if self.handle_redo() {
+                            log::debug!("TextInput: redo, value = '{}'", self.value);
+                            if let Some(ref on_change) = self.on_change {
+                                return Some(on_change(self.value.clone(), self.state.clone()));
+                            }
+                        }
                     }
                     KeyCode::Enter => {
                         if let Some(ref on_submit) = self.on_submit {

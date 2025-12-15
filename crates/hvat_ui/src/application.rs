@@ -121,8 +121,15 @@ pub trait Application: Sized {
     /// Called on application startup (legacy, prefer setup())
     fn init(&mut self) {}
 
-    /// Called each frame before rendering
+    /// Called each frame before rendering (without GPU resource access)
     fn tick(&mut self) {}
+
+    /// Called each frame before rendering with GPU resource access.
+    /// Use this to update textures when data changes.
+    /// Returns true if the view needs to be rebuilt.
+    fn tick_with_resources(&mut self, _resources: &mut Resources) -> bool {
+        false
+    }
 
     /// Handle raw events before they're sent to widgets.
     /// Return Some(message) to handle the event and prevent widget processing.
@@ -271,6 +278,17 @@ impl<A: Application> AppState<A> {
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.app.tick();
+
+        // Call tick_with_resources for GPU updates (e.g., texture updates)
+        {
+            let mut resources = Resources {
+                gpu_ctx: &self.gpu_ctx,
+                renderer: &mut self.renderer,
+            };
+            if self.app.tick_with_resources(&mut resources) {
+                self.needs_rebuild = true;
+            }
+        }
 
         // Update frame timing
         self.last_frame_time = Instant::now();

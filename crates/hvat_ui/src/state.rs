@@ -5,14 +5,21 @@
 pub struct ImageViewerState {
     /// Pan offset in clip space (-1 to 1)
     pub pan: (f32, f32),
-    /// Zoom level (1.0 = 100%)
+    /// Zoom level (1.0 = fit to view, actual pixel ratio depends on image/view size)
     pub zoom: f32,
-    /// Current fit mode
+    /// Current fit mode - used temporarily when switching modes
+    /// After the ImageViewer processes this, fit_mode is set back to Manual
     pub fit_mode: FitMode,
     /// Whether the widget is currently being dragged
     pub dragging: bool,
     /// Last mouse position during drag (screen space)
     pub last_drag_pos: Option<(f32, f32)>,
+    /// Cached view bounds from last render (width, height)
+    /// Used to calculate 1:1 zoom from outside the widget
+    pub cached_view_size: Option<(f32, f32)>,
+    /// Cached texture size (width, height)
+    /// Used to calculate 1:1 zoom from outside the widget
+    pub cached_texture_size: Option<(u32, u32)>,
 }
 
 impl Default for ImageViewerState {
@@ -23,6 +30,8 @@ impl Default for ImageViewerState {
             fit_mode: FitMode::FitToView,
             dragging: false,
             last_drag_pos: None,
+            cached_view_size: None,
+            cached_texture_size: None,
         }
     }
 }
@@ -45,23 +54,46 @@ impl ImageViewerState {
         self
     }
 
-    /// Reset to default state
+    /// Reset to default state (fit to view)
     pub fn reset(&mut self) {
-        self.pan = (0.0, 0.0);
-        self.zoom = 1.0;
-        self.fit_mode = FitMode::FitToView;
+        self.set_fit_to_view();
     }
 
     /// Set to 1:1 pixel ratio
+    /// If cached view/texture sizes are available, calculates the actual zoom value.
+    /// Otherwise sets fit_mode to OneToOne for the widget to calculate later.
     pub fn set_one_to_one(&mut self) {
-        self.fit_mode = FitMode::OneToOne;
+        self.pan = (0.0, 0.0);
+        if let (Some((view_w, view_h)), Some((tex_w, tex_h))) = (self.cached_view_size, self.cached_texture_size) {
+            // Calculate 1:1 zoom directly
+            self.zoom = Self::calculate_one_to_one_zoom(view_w, view_h, tex_w, tex_h);
+            self.fit_mode = FitMode::Manual;
+        } else {
+            // No cached sizes - let widget calculate on next event
+            self.fit_mode = FitMode::OneToOne;
+        }
+    }
+
+    /// Set to fit to view (zoom = 1.0)
+    pub fn set_fit_to_view(&mut self) {
+        self.zoom = 1.0;
+        self.fit_mode = FitMode::Manual;
         self.pan = (0.0, 0.0);
     }
 
-    /// Set to fit to view
-    pub fn set_fit_to_view(&mut self) {
-        self.fit_mode = FitMode::FitToView;
-        self.pan = (0.0, 0.0);
+    /// Calculate the zoom value for 1:1 pixel mapping
+    pub fn calculate_one_to_one_zoom(view_w: f32, view_h: f32, tex_w: u32, tex_h: u32) -> f32 {
+        if tex_w == 0 || tex_h == 0 {
+            return 1.0;
+        }
+        let image_aspect = tex_w as f32 / tex_h as f32;
+        let view_aspect = view_w / view_h;
+
+        if image_aspect > view_aspect {
+            view_w / tex_w as f32
+        } else {
+            view_h / tex_h as f32
+        }
     }
 
     /// Pan by delta in clip space
@@ -247,7 +279,7 @@ impl CollapsibleState {
 }
 
 /// State for text input fields
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TextInputState {
     /// Cursor position (character index)
     pub cursor: usize,
@@ -255,6 +287,22 @@ pub struct TextInputState {
     pub selection: Option<(usize, usize)>,
     /// Whether the input is focused
     pub is_focused: bool,
+    /// Text undo stack (for Ctrl+Z)
+    pub(crate) undo_stack: Vec<TextSnapshot>,
+    /// Text redo stack (for Ctrl+Y/Ctrl+Shift+Z)
+    pub(crate) redo_stack: Vec<TextSnapshot>,
+}
+
+impl Default for TextInputState {
+    fn default() -> Self {
+        Self {
+            cursor: 0,
+            selection: None,
+            is_focused: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+        }
+    }
 }
 
 impl TextInputState {
@@ -269,6 +317,58 @@ impl TextInputState {
     pub fn blur(&mut self) {
         self.is_focused = false;
         self.selection = None;
+    }
+
+    /// Push current text state to undo stack (call before making changes)
+    pub fn push_undo(&mut self, text: &str) {
+        self.undo_stack.push(TextSnapshot {
+            text: text.to_string(),
+            cursor: self.cursor,
+        });
+        // Clear redo stack on new change
+        self.redo_stack.clear();
+        // Limit undo history to 50 entries
+        while self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Undo text change (Ctrl+Z) - returns the text to restore, if any
+    pub fn undo(&mut self, current_text: &str) -> Option<String> {
+        if let Some(snapshot) = self.undo_stack.pop() {
+            // Save current state to redo stack
+            self.redo_stack.push(TextSnapshot {
+                text: current_text.to_string(),
+                cursor: self.cursor,
+            });
+            self.cursor = snapshot.cursor;
+            self.selection = None;
+            Some(snapshot.text)
+        } else {
+            None
+        }
+    }
+
+    /// Redo text change (Ctrl+Y or Ctrl+Shift+Z) - returns the text to restore, if any
+    pub fn redo(&mut self, current_text: &str) -> Option<String> {
+        if let Some(snapshot) = self.redo_stack.pop() {
+            // Save current state to undo stack
+            self.undo_stack.push(TextSnapshot {
+                text: current_text.to_string(),
+                cursor: self.cursor,
+            });
+            self.cursor = snapshot.cursor;
+            self.selection = None;
+            Some(snapshot.text)
+        } else {
+            None
+        }
+    }
+
+    /// Clear undo/redo history
+    pub fn clear_history(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
     }
 }
 

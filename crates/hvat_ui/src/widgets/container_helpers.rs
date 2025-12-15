@@ -76,11 +76,29 @@ pub fn dispatch_event_to_children<M: 'static>(
 
     // Phase 1: Dispatch to children with active overlays first
     // This ensures popup clicks are handled before underlying elements
+    // For overlays, we check if the event is within the capture bounds (which includes popup area)
     for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
         if child.has_active_overlay() {
             let absolute_bounds = translate_bounds(*bounds, container_bounds);
-            if let Some(msg) = child.on_event(event, absolute_bounds) {
-                return Some(msg);
+
+            // Check if event position is within capture bounds (includes overlay area)
+            if let Some(pos) = event.position() {
+                let capture = child.capture_bounds(absolute_bounds);
+                let check_bounds = capture.unwrap_or(absolute_bounds);
+
+                if check_bounds.contains(pos.0, pos.1) {
+                    // Event is within overlay's capture area - dispatch and consume
+                    if let Some(msg) = child.on_event(event, absolute_bounds) {
+                        return Some(msg);
+                    }
+                    // Even if no message returned, consume the event to prevent passthrough
+                    return None;
+                }
+            } else {
+                // Non-positional event (keyboard, etc.) - dispatch normally
+                if let Some(msg) = child.on_event(event, absolute_bounds) {
+                    return Some(msg);
+                }
             }
         }
     }

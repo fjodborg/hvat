@@ -23,6 +23,49 @@ const CONTROL_PADDING: f32 = 8.0;
 /// Control button spacing
 const CONTROL_SPACING: f32 = 4.0;
 
+/// Click event data with image coordinates
+#[derive(Debug, Clone, Copy)]
+pub struct ImageClick {
+    /// X coordinate in image space (0 to image_width)
+    pub image_x: f32,
+    /// Y coordinate in image space (0 to image_height)
+    pub image_y: f32,
+    /// X coordinate in screen space
+    pub screen_x: f32,
+    /// Y coordinate in screen space
+    pub screen_y: f32,
+    /// Whether this is the start of a drag
+    pub is_drag_start: bool,
+    /// Whether this is a drag move
+    pub is_drag_move: bool,
+    /// Whether this is the end of a drag
+    pub is_drag_end: bool,
+}
+
+/// Annotation overlay to draw on the image
+#[derive(Debug, Clone)]
+pub struct AnnotationOverlay {
+    /// Type of shape
+    pub shape: OverlayShape,
+    /// Color (RGBA)
+    pub color: [f32; 4],
+    /// Line width
+    pub line_width: f32,
+    /// Whether this annotation is selected
+    pub selected: bool,
+}
+
+/// Shape types for annotation overlays
+#[derive(Debug, Clone)]
+pub enum OverlayShape {
+    /// Bounding box (x, y, width, height) in image coordinates
+    BoundingBox { x: f32, y: f32, width: f32, height: f32 },
+    /// Point marker (x, y) in image coordinates
+    Point { x: f32, y: f32 },
+    /// Polygon (vertices) in image coordinates
+    Polygon { vertices: Vec<(f32, f32)>, closed: bool },
+}
+
 /// An image viewer widget with pan and zoom capabilities
 pub struct ImageViewer<M> {
     /// Texture ID (registered with renderer)
@@ -35,6 +78,8 @@ pub struct ImageViewer<M> {
     state: ImageViewerState,
     /// Change handler
     on_change: Option<Box<dyn Fn(ImageViewerState) -> M>>,
+    /// Click handler for annotation tools
+    on_click: Option<Box<dyn Fn(ImageClick) -> M>>,
     /// Enable panning
     pannable: bool,
     /// Enable zooming
@@ -45,6 +90,14 @@ pub struct ImageViewer<M> {
     width: Length,
     /// Height
     height: Length,
+    /// Annotation overlays to draw
+    overlays: Vec<AnnotationOverlay>,
+    /// Whether left mouse is being used for annotation drawing
+    annotation_mode: bool,
+    /// Track left mouse drag for annotations
+    left_dragging: bool,
+    /// Last left drag position
+    last_left_drag_pos: Option<(f32, f32)>,
     /// Phantom data for message type
     _phantom: PhantomData<M>,
 }
@@ -58,11 +111,16 @@ impl<M> ImageViewer<M> {
             texture_height: height,
             state: ImageViewerState::default(),
             on_change: None,
+            on_click: None,
             pannable: true,
             zoomable: true,
             show_controls: true,
             width: Length::fill(),
             height: Length::fill(),
+            overlays: Vec::new(),
+            annotation_mode: false,
+            left_dragging: false,
+            last_left_drag_pos: None,
             _phantom: PhantomData,
         }
     }
@@ -75,11 +133,16 @@ impl<M> ImageViewer<M> {
             texture_height: 0,
             state: ImageViewerState::default(),
             on_change: None,
+            on_click: None,
             pannable: true,
             zoomable: true,
             show_controls: true,
             width: Length::fill(),
             height: Length::fill(),
+            overlays: Vec::new(),
+            annotation_mode: false,
+            left_dragging: false,
+            last_left_drag_pos: None,
             _phantom: PhantomData,
         }
     }
@@ -137,6 +200,123 @@ impl<M> ImageViewer<M> {
         self
     }
 
+    /// Set the click handler for annotation tools
+    pub fn on_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(ImageClick) -> M + 'static,
+    {
+        self.on_click = Some(Box::new(handler));
+        self
+    }
+
+    /// Enable annotation mode (left click for drawing instead of panning)
+    pub fn annotation_mode(mut self, enabled: bool) -> Self {
+        self.annotation_mode = enabled;
+        self
+    }
+
+    /// Set annotation overlays to draw
+    pub fn overlays(mut self, overlays: Vec<AnnotationOverlay>) -> Self {
+        self.overlays = overlays;
+        self
+    }
+
+    /// Convert screen coordinates to image coordinates
+    pub fn screen_to_image(&self, screen_x: f32, screen_y: f32, bounds: &Bounds) -> (f32, f32) {
+        if self.texture_width == 0 || self.texture_height == 0 {
+            return (0.0, 0.0);
+        }
+
+        // Get clip space coordinates
+        let (clip_x, clip_y) = self.screen_to_clip(screen_x, screen_y, bounds);
+
+        // Calculate the transform parameters (same as in calculate_transform)
+        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
+        let view_aspect = bounds.width / bounds.height;
+
+        let (aspect_scale_x, aspect_scale_y) = if image_aspect > view_aspect {
+            (1.0, view_aspect / image_aspect)
+        } else {
+            (image_aspect / view_aspect, 1.0)
+        };
+
+        let zoom = match self.state.fit_mode {
+            FitMode::FitToView => 1.0,
+            FitMode::OneToOne => {
+                if image_aspect > view_aspect {
+                    bounds.width / self.texture_width as f32
+                } else {
+                    bounds.height / self.texture_height as f32
+                }
+            }
+            FitMode::Manual => self.state.zoom,
+        };
+
+        let scale_x = aspect_scale_x * zoom;
+        let scale_y = aspect_scale_y * zoom;
+
+        // Reverse the transform: clip_space = (image_uv * 2 - 1) * scale + pan
+        // So: image_uv = ((clip_space - pan) / scale + 1) / 2
+        let uv_x = ((clip_x - self.state.pan.0) / scale_x + 1.0) / 2.0;
+        let uv_y = ((clip_y - self.state.pan.1) / scale_y + 1.0) / 2.0;
+
+        // Convert UV to image coordinates
+        // Note: UV y is flipped relative to image coordinates
+        let image_x = uv_x * self.texture_width as f32;
+        let image_y = (1.0 - uv_y) * self.texture_height as f32;
+
+        (image_x, image_y)
+    }
+
+    /// Convert image coordinates to screen coordinates
+    pub fn image_to_screen(&self, image_x: f32, image_y: f32, bounds: &Bounds) -> (f32, f32) {
+        if self.texture_width == 0 || self.texture_height == 0 {
+            return (bounds.x, bounds.y);
+        }
+
+        // Convert image coords to UV (0-1)
+        let uv_x = image_x / self.texture_width as f32;
+        let uv_y = 1.0 - (image_y / self.texture_height as f32); // Flip Y
+
+        // Calculate transform parameters
+        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
+        let view_aspect = bounds.width / bounds.height;
+
+        let (aspect_scale_x, aspect_scale_y) = if image_aspect > view_aspect {
+            (1.0, view_aspect / image_aspect)
+        } else {
+            (image_aspect / view_aspect, 1.0)
+        };
+
+        let zoom = match self.state.fit_mode {
+            FitMode::FitToView => 1.0,
+            FitMode::OneToOne => {
+                if image_aspect > view_aspect {
+                    bounds.width / self.texture_width as f32
+                } else {
+                    bounds.height / self.texture_height as f32
+                }
+            }
+            FitMode::Manual => self.state.zoom,
+        };
+
+        let scale_x = aspect_scale_x * zoom;
+        let scale_y = aspect_scale_y * zoom;
+
+        // Transform UV to clip space
+        let clip_x = (uv_x * 2.0 - 1.0) * scale_x + self.state.pan.0;
+        let clip_y = (uv_y * 2.0 - 1.0) * scale_y + self.state.pan.1;
+
+        // Convert clip space to screen coordinates
+        let rel_x = (clip_x + 1.0) / 2.0;
+        let rel_y = (-clip_y + 1.0) / 2.0; // Flip Y back
+
+        let screen_x = bounds.x + rel_x * bounds.width;
+        let screen_y = bounds.y + rel_y * bounds.height;
+
+        (screen_x, screen_y)
+    }
+
     /// Calculate the transform uniform based on current state and bounds
     fn calculate_transform(&self, bounds: &Bounds) -> TransformUniform {
         if self.texture_width == 0 || self.texture_height == 0 {
@@ -157,21 +337,9 @@ impl<M> ImageViewer<M> {
             (image_aspect / view_aspect, 1.0)
         };
 
-        // Calculate zoom factor based on fit mode
-        let zoom = match self.state.fit_mode {
-            FitMode::FitToView => 1.0,
-            FitMode::OneToOne => {
-                // 1:1 pixel mapping - calculate zoom to show actual pixels
-                // At zoom=1, the image fills the view. For 1:1, we need to
-                // scale so that 1 image pixel = 1 screen pixel
-                if image_aspect > view_aspect {
-                    bounds.width / self.texture_width as f32
-                } else {
-                    bounds.height / self.texture_height as f32
-                }
-            }
-            FitMode::Manual => self.state.zoom,
-        };
+        // Use state.zoom directly - it's the single source of truth
+        // zoom = 1.0 means "fit to view" (image fills the view bounds)
+        let zoom = self.state.zoom;
 
         // Apply zoom to aspect-corrected scale
         let scale_x = aspect_scale_x * zoom;
@@ -221,8 +389,44 @@ impl<M> ImageViewer<M> {
         None
     }
 
-    /// Emit a state change if handler is set
-    fn emit_change(&self) -> Option<M> {
+    /// Calculate the zoom value for 1:1 pixel mapping (1 image pixel = 1 screen pixel)
+    fn calculate_one_to_one_zoom(&self, bounds: &Bounds) -> f32 {
+        if self.texture_width == 0 || self.texture_height == 0 {
+            return 1.0;
+        }
+
+        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
+        let view_aspect = bounds.width / bounds.height;
+
+        // Calculate zoom to show actual pixels
+        // At zoom=1, the image fills the view. For 1:1, we need to
+        // scale so that 1 image pixel = 1 screen pixel
+        if image_aspect > view_aspect {
+            bounds.width / self.texture_width as f32
+        } else {
+            bounds.height / self.texture_height as f32
+        }
+    }
+
+    /// Calculate the appropriate zoom value based on fit mode
+    fn calculate_zoom_for_mode(&self, bounds: &Bounds) -> f32 {
+        match self.state.fit_mode {
+            FitMode::FitToView => 1.0,
+            FitMode::OneToOne => self.calculate_one_to_one_zoom(bounds),
+            FitMode::Manual => self.state.zoom,
+        }
+    }
+
+    /// Emit a state change with zoom updated based on current fit mode
+    fn emit_change_with_bounds(&mut self, bounds: &Bounds) -> Option<M> {
+        // Cache the view and texture sizes so external code can calculate 1:1 zoom
+        self.state.cached_view_size = Some((bounds.width, bounds.height));
+        self.state.cached_texture_size = Some((self.texture_width, self.texture_height));
+
+        // Update state.zoom based on fit_mode so it's always the single source of truth
+        // After this, fit_mode is set to Manual since we now have the actual zoom value
+        self.state.zoom = self.calculate_zoom_for_mode(bounds);
+        self.state.fit_mode = FitMode::Manual;
         self.on_change.as_ref().map(|f| f(self.state.clone()))
     }
 }
@@ -279,6 +483,117 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Switch to overlay layer for controls (rendered after textures)
         renderer.begin_overlay();
 
+        // Draw annotation overlays
+        for overlay in &self.overlays {
+            let color = Color::rgba(overlay.color[0], overlay.color[1], overlay.color[2], overlay.color[3]);
+            let selected_color = Color::rgba(1.0, 1.0, 0.0, 1.0); // Yellow for selected
+
+            match &overlay.shape {
+                OverlayShape::BoundingBox { x, y, width, height } => {
+                    // Convert image coordinates to screen coordinates
+                    let (screen_x1, screen_y1) = self.image_to_screen(*x, *y, &bounds);
+                    let (screen_x2, screen_y2) = self.image_to_screen(*x + *width, *y + *height, &bounds);
+
+                    let box_bounds = Bounds::new(
+                        screen_x1.min(screen_x2),
+                        screen_y1.min(screen_y2),
+                        (screen_x2 - screen_x1).abs(),
+                        (screen_y2 - screen_y1).abs(),
+                    );
+
+                    // Draw filled rectangle with transparency
+                    let fill_color = Color::rgba(color.r, color.g, color.b, 0.2);
+                    renderer.fill_rect(box_bounds, fill_color);
+
+                    // Draw border
+                    let border_color = if overlay.selected { selected_color } else { color };
+                    renderer.stroke_rect(box_bounds, border_color, overlay.line_width);
+
+                    // Draw corner handles if selected
+                    if overlay.selected {
+                        let handle_size = 6.0;
+                        let corners = [
+                            (screen_x1, screen_y1),
+                            (screen_x2, screen_y1),
+                            (screen_x2, screen_y2),
+                            (screen_x1, screen_y2),
+                        ];
+                        for (cx, cy) in corners {
+                            let handle_bounds = Bounds::new(
+                                cx - handle_size / 2.0,
+                                cy - handle_size / 2.0,
+                                handle_size,
+                                handle_size,
+                            );
+                            renderer.fill_rect(handle_bounds, Color::WHITE);
+                            renderer.stroke_rect(handle_bounds, selected_color, 1.0);
+                        }
+                    }
+                }
+                OverlayShape::Point { x, y } => {
+                    let (screen_x, screen_y) = self.image_to_screen(*x, *y, &bounds);
+                    let radius = 6.0;
+
+                    // Draw a circle approximation (diamond shape)
+                    let point_color = if overlay.selected { selected_color } else { color };
+                    let point_bounds = Bounds::new(
+                        screen_x - radius,
+                        screen_y - radius,
+                        radius * 2.0,
+                        radius * 2.0,
+                    );
+                    renderer.fill_rect(point_bounds, point_color);
+                    renderer.stroke_rect(point_bounds, Color::WHITE, 1.0);
+                }
+                OverlayShape::Polygon { vertices, closed } => {
+                    if vertices.len() >= 2 {
+                        // Draw polygon edges
+                        let line_color = if overlay.selected { selected_color } else { color };
+                        let screen_verts: Vec<(f32, f32)> = vertices
+                            .iter()
+                            .map(|(x, y)| self.image_to_screen(*x, *y, &bounds))
+                            .collect();
+
+                        for i in 0..screen_verts.len() {
+                            let j = if i + 1 < screen_verts.len() { i + 1 } else if *closed { 0 } else { continue };
+                            let (x1, y1) = screen_verts[i];
+                            let (x2, y2) = screen_verts[j];
+
+                            // Draw line as thin rectangle
+                            let dx = x2 - x1;
+                            let dy = y2 - y1;
+                            let len = (dx * dx + dy * dy).sqrt();
+                            if len > 0.0 {
+                                let line_width = overlay.line_width;
+                                // Simple line drawing using rectangles
+                                let mid_x = (x1 + x2) / 2.0;
+                                let mid_y = (y1 + y2) / 2.0;
+                                renderer.fill_rect(
+                                    Bounds::new(mid_x - len / 2.0, mid_y - line_width / 2.0, len, line_width),
+                                    line_color,
+                                );
+                            }
+                        }
+
+                        // Draw vertex handles if selected
+                        if overlay.selected {
+                            let handle_size = 6.0;
+                            for (sx, sy) in &screen_verts {
+                                let handle_bounds = Bounds::new(
+                                    sx - handle_size / 2.0,
+                                    sy - handle_size / 2.0,
+                                    handle_size,
+                                    handle_size,
+                                );
+                                renderer.fill_rect(handle_bounds, Color::WHITE);
+                                renderer.stroke_rect(handle_bounds, selected_color, 1.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Draw zoom info
         let zoom_text = format!("{:.0}%", self.state.zoom * 100.0);
         renderer.text(
@@ -292,23 +607,26 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Draw controls if enabled
         if self.show_controls {
             let controls = [
-                ("+", "Zoom In"),
-                ("-", "Zoom Out"),
-                ("1:1", "1:1"),
-                ("Fit", "Fit"),
+                ("+", 14.0),   // Larger font for + symbol
+                ("-", 14.0),   // Larger font for - symbol
+                ("1:1", 10.0), // Smaller font for text labels
+                ("Fit", 10.0),
             ];
 
-            for (i, (label, _tooltip)) in controls.iter().enumerate() {
+            for (i, (label, font_size)) in controls.iter().enumerate() {
                 let btn_bounds = self.control_button_bounds(i, &bounds);
 
                 // Button background
                 renderer.fill_rect(btn_bounds, Color::BUTTON_BG);
                 renderer.stroke_rect(btn_bounds, Color::BORDER, 1.0);
 
-                // Button label
-                let label_x = btn_bounds.x + (btn_bounds.width - label.len() as f32 * 7.0) / 2.0;
-                let label_y = btn_bounds.y + (btn_bounds.height - 12.0) / 2.0;
-                renderer.text(*label, label_x, label_y, 11.0, Color::TEXT_PRIMARY);
+                // Button label - center in button
+                // Approximate character width based on font size (roughly 0.6 * font_size for monospace)
+                let char_width = font_size * 0.6;
+                let text_width = label.len() as f32 * char_width;
+                let label_x = btn_bounds.x + (btn_bounds.width - text_width) / 2.0;
+                let label_y = btn_bounds.y + (btn_bounds.height - font_size) / 2.0;
+                renderer.text(*label, label_x, label_y, *font_size, Color::TEXT_PRIMARY);
             }
         }
 
@@ -320,7 +638,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
         match event {
-            // Handle control button clicks
+            // Handle control button clicks (left mouse)
             Event::MousePress {
                 button: MouseButton::Left,
                 position,
@@ -335,47 +653,119 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     match btn {
                         ControlButton::ZoomIn => {
                             self.state.zoom_in();
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                         ControlButton::ZoomOut => {
                             self.state.zoom_out();
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                         ControlButton::OneToOne => {
                             self.state.set_one_to_one();
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                         ControlButton::FitToView => {
                             self.state.set_fit_to_view();
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                 }
 
-                // Start panning
+                // In annotation mode, emit click events for drawing
+                if self.annotation_mode {
+                    if let Some(ref on_click) = self.on_click {
+                        let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                        self.left_dragging = true;
+                        self.last_left_drag_pos = Some(*position);
+                        return Some(on_click(ImageClick {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            is_drag_start: true,
+                            is_drag_move: false,
+                            is_drag_end: false,
+                        }));
+                    }
+                }
+                None
+            }
+
+            // Handle left mouse release for annotation mode
+            Event::MouseRelease {
+                button: MouseButton::Left,
+                position,
+                ..
+            } => {
+                if self.left_dragging && self.annotation_mode {
+                    self.left_dragging = false;
+                    self.last_left_drag_pos = None;
+                    if let Some(ref on_click) = self.on_click {
+                        let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                        return Some(on_click(ImageClick {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            is_drag_start: false,
+                            is_drag_move: false,
+                            is_drag_end: true,
+                        }));
+                    }
+                }
+                None
+            }
+
+            // Start panning with middle mouse button
+            Event::MousePress {
+                button: MouseButton::Middle,
+                position,
+                ..
+            } => {
+                if !bounds.contains(position.0, position.1) {
+                    return None;
+                }
+
                 if self.pannable {
                     self.state.dragging = true;
                     self.state.last_drag_pos = Some(*position);
                     // Emit change to persist dragging state
-                    return self.emit_change();
+                    return self.emit_change_with_bounds(&bounds);
                 }
                 None
             }
 
             Event::MouseRelease {
-                button: MouseButton::Left,
+                button: MouseButton::Middle,
                 ..
             } => {
                 if self.state.dragging {
                     self.state.dragging = false;
                     self.state.last_drag_pos = None;
                     // Emit change to persist state
-                    return self.emit_change();
+                    return self.emit_change_with_bounds(&bounds);
                 }
                 None
             }
 
             Event::MouseMove { position, .. } => {
+                // Handle annotation drag move
+                if self.left_dragging && self.annotation_mode {
+                    if let Some(ref on_click) = self.on_click {
+                        let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                        self.last_left_drag_pos = Some(*position);
+                        return Some(on_click(ImageClick {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            is_drag_start: false,
+                            is_drag_move: true,
+                            is_drag_end: false,
+                        }));
+                    }
+                }
+
+                // Handle pan drag move (middle mouse)
                 if self.state.dragging && self.pannable {
                     if let Some((last_x, last_y)) = self.state.last_drag_pos {
                         let delta_x = position.0 - last_x;
@@ -388,7 +778,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         self.state.pan_by(clip_delta_x, clip_delta_y);
                         self.state.last_drag_pos = Some(*position);
 
-                        return self.emit_change();
+                        return self.emit_change_with_bounds(&bounds);
                     }
                 }
                 None
@@ -413,7 +803,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 };
 
                 self.state.zoom_at(clip_x, clip_y, zoom_factor);
-                self.emit_change()
+                self.emit_change_with_bounds(&bounds)
             }
 
             Event::KeyPress { key, .. } => {
@@ -421,45 +811,45 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     KeyCode::Plus | KeyCode::Equal => {
                         if self.zoomable {
                             self.state.zoom_in();
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                     KeyCode::Minus => {
                         if self.zoomable {
                             self.state.zoom_out();
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                     KeyCode::Key0 => {
                         self.state.set_one_to_one();
-                        return self.emit_change();
+                        return self.emit_change_with_bounds(&bounds);
                     }
                     KeyCode::F => {
                         self.state.set_fit_to_view();
-                        return self.emit_change();
+                        return self.emit_change_with_bounds(&bounds);
                     }
                     KeyCode::Up => {
                         if self.pannable {
                             self.state.pan_by(0.0, PAN_SPEED);
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                     KeyCode::Down => {
                         if self.pannable {
                             self.state.pan_by(0.0, -PAN_SPEED);
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                     KeyCode::Left => {
                         if self.pannable {
                             self.state.pan_by(PAN_SPEED, 0.0);
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                     KeyCode::Right => {
                         if self.pannable {
                             self.state.pan_by(-PAN_SPEED, 0.0);
-                            return self.emit_change();
+                            return self.emit_change_with_bounds(&bounds);
                         }
                     }
                     _ => {}

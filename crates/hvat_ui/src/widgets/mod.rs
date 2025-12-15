@@ -17,7 +17,7 @@ pub use button::Button;
 pub use collapsible::{Collapsible, CollapsibleConfig};
 pub use column::Column;
 pub use dropdown::{Dropdown, DropdownConfig};
-pub use image_viewer::ImageViewer;
+pub use image_viewer::{ImageViewer, ImageClick, AnnotationOverlay, OverlayShape};
 pub use number_input::{NumberInput, NumberInputConfig};
 pub use row::Row;
 pub use scrollable::{Scrollable, ScrollDirection, ScrollbarVisibility, ScrollbarConfig};

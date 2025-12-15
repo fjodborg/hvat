@@ -360,6 +360,29 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
         self.state.is_open
     }
 
+    fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
+        if self.state.is_open {
+            // When open, capture events in both button and popup area
+            let button_bounds = Bounds::new(
+                layout_bounds.x,
+                layout_bounds.y,
+                self.button_bounds.width,
+                self.button_bounds.height,
+            );
+            let popup_bounds = self.popup_bounds(button_bounds);
+
+            // Return combined bounds of button and popup
+            Some(Bounds::new(
+                button_bounds.x,
+                button_bounds.y,
+                button_bounds.width.max(popup_bounds.width),
+                button_bounds.height + popup_bounds.height,
+            ))
+        } else {
+            None
+        }
+    }
+
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
         log::debug!("Dropdown draw: bounds={:?}, is_open={}", bounds, self.state.is_open);
 
