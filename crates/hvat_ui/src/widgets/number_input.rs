@@ -87,6 +87,9 @@ pub struct NumberInput<M> {
     button_hover: ButtonHover,
     /// Callback for value changes
     on_change: Option<Box<dyn Fn(f32, NumberInputState) -> M>>,
+    /// Side-effect callback for undo point (called when input gains focus)
+    /// This is called BEFORE on_change, allowing the app to save a snapshot.
+    on_undo_point: Option<Box<dyn Fn()>>,
 }
 
 impl<M> NumberInput<M> {
@@ -105,6 +108,7 @@ impl<M> NumberInput<M> {
             config: NumberInputConfig::default(),
             button_hover: ButtonHover::None,
             on_change: None,
+            on_undo_point: None,
         }
     }
 
@@ -181,6 +185,22 @@ impl<M> NumberInput<M> {
         F: Fn(f32, NumberInputState) -> M + 'static,
     {
         self.on_change = Some(Box::new(callback));
+        self
+    }
+
+    /// Set the undo point handler (called when input gains focus)
+    ///
+    /// This is a side-effect callback invoked at the start of an edit operation
+    /// (when focus is gained), BEFORE `on_change` is called. Use this to save an
+    /// undo snapshot of the current state before editing begins.
+    ///
+    /// Unlike `on_change`, this callback does not return a message - it's called
+    /// for its side effects only (typically to push state onto an undo stack).
+    pub fn on_undo_point<F>(mut self, callback: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        self.on_undo_point = Some(Box::new(callback));
         self
     }
 
@@ -564,6 +584,20 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     }
 
                     log::debug!("NumberInput: clicked, cursor = {}", self.state.cursor);
+
+                    // Call on_undo_point when input gains focus (for undo tracking)
+                    if !was_focused {
+                        if let Some(ref on_undo_point) = self.on_undo_point {
+                            log::debug!("NumberInput: calling on_undo_point (focus gained)");
+                            on_undo_point();
+                        }
+                    }
+
+                    if let Some(ref on_change) = self.on_change {
+                        if let Some(value) = self.state.value() {
+                            return Some(on_change(value, self.state.clone()));
+                        }
+                    }
                     return None;
                 } else if self.state.is_focused {
                     // Clicked outside - blur and validate

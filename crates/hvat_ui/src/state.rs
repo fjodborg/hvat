@@ -2,6 +2,115 @@
 
 use crate::constants::{format_number, UNDO_STACK_LIMIT, ZOOM_FACTOR, ZOOM_MAX, ZOOM_MIN};
 
+/// Generic undo stack for any value type
+///
+/// This can be used to implement undo/redo for any cloneable type:
+/// - Text input values
+/// - Slider values
+/// - Number inputs
+/// - Custom application state
+///
+/// # Example
+/// ```
+/// use hvat_ui::UndoStack;
+///
+/// let mut stack: UndoStack<String> = UndoStack::new(50);
+///
+/// // Before making a change, push current state
+/// stack.push("hello".to_string());
+///
+/// // Now the value is "hello world"
+/// let current = "hello world".to_string();
+///
+/// // Undo returns the previous state
+/// if let Some(previous) = stack.undo(current) {
+///     assert_eq!(previous, "hello");
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct UndoStack<T: Clone> {
+    /// Stack of states that can be undone
+    undo_stack: Vec<T>,
+    /// Stack of states that can be redone
+    redo_stack: Vec<T>,
+    /// Maximum history size
+    max_history: usize,
+}
+
+impl<T: Clone> Default for UndoStack<T> {
+    fn default() -> Self {
+        Self::new(UNDO_STACK_LIMIT)
+    }
+}
+
+impl<T: Clone> UndoStack<T> {
+    /// Create a new undo stack with specified max history size
+    pub fn new(max_history: usize) -> Self {
+        Self {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_history,
+        }
+    }
+
+    /// Push a state to the undo stack (call this BEFORE making a change)
+    ///
+    /// This clears the redo stack since a new change invalidates the redo history.
+    pub fn push(&mut self, state: T) {
+        self.undo_stack.push(state);
+        self.redo_stack.clear();
+
+        // Limit history size
+        while self.undo_stack.len() > self.max_history {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Check if undo is available
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    /// Check if redo is available
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    /// Undo: returns the previous state, or None if nothing to undo
+    ///
+    /// The current state must be passed so it can be pushed to the redo stack.
+    pub fn undo(&mut self, current: T) -> Option<T> {
+        let prev = self.undo_stack.pop()?;
+        self.redo_stack.push(current);
+        Some(prev)
+    }
+
+    /// Redo: returns the next state, or None if nothing to redo
+    ///
+    /// The current state must be passed so it can be pushed to the undo stack.
+    pub fn redo(&mut self, current: T) -> Option<T> {
+        let next = self.redo_stack.pop()?;
+        self.undo_stack.push(current);
+        Some(next)
+    }
+
+    /// Get number of undo steps available
+    pub fn undo_count(&self) -> usize {
+        self.undo_stack.len()
+    }
+
+    /// Get number of redo steps available
+    pub fn redo_count(&self) -> usize {
+        self.redo_stack.len()
+    }
+
+    /// Clear all history
+    pub fn clear(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+    }
+}
+
 /// State for the image viewer widget
 #[derive(Debug, Clone)]
 pub struct ImageViewerState {
@@ -272,7 +381,10 @@ impl CollapsibleState {
 }
 
 /// State for text input fields
-#[derive(Debug, Clone)]
+///
+/// Note: Undo/redo is handled externally via `UndoStack<T>`. Use the `on_undo_point`
+/// callback on the widget to know when to save an undo snapshot.
+#[derive(Debug, Clone, Default)]
 pub struct TextInputState {
     /// Cursor position (character index)
     pub cursor: usize,
@@ -280,22 +392,6 @@ pub struct TextInputState {
     pub selection: Option<(usize, usize)>,
     /// Whether the input is focused
     pub is_focused: bool,
-    /// Text undo stack (for Ctrl+Z)
-    pub(crate) undo_stack: Vec<TextSnapshot>,
-    /// Text redo stack (for Ctrl+Y/Ctrl+Shift+Z)
-    pub(crate) redo_stack: Vec<TextSnapshot>,
-}
-
-impl Default for TextInputState {
-    fn default() -> Self {
-        Self {
-            cursor: 0,
-            selection: None,
-            is_focused: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-        }
-    }
 }
 
 impl TextInputState {
@@ -311,58 +407,6 @@ impl TextInputState {
         self.is_focused = false;
         self.selection = None;
     }
-
-    /// Push current text state to undo stack (call before making changes)
-    pub fn push_undo(&mut self, text: &str) {
-        self.undo_stack.push(TextSnapshot {
-            text: text.to_string(),
-            cursor: self.cursor,
-        });
-        // Clear redo stack on new change
-        self.redo_stack.clear();
-        // Limit undo history
-        while self.undo_stack.len() > UNDO_STACK_LIMIT {
-            self.undo_stack.remove(0);
-        }
-    }
-
-    /// Undo text change (Ctrl+Z) - returns the text to restore, if any
-    pub fn undo(&mut self, current_text: &str) -> Option<String> {
-        if let Some(snapshot) = self.undo_stack.pop() {
-            // Save current state to redo stack
-            self.redo_stack.push(TextSnapshot {
-                text: current_text.to_string(),
-                cursor: self.cursor,
-            });
-            self.cursor = snapshot.cursor;
-            self.selection = None;
-            Some(snapshot.text)
-        } else {
-            None
-        }
-    }
-
-    /// Redo text change (Ctrl+Y or Ctrl+Shift+Z) - returns the text to restore, if any
-    pub fn redo(&mut self, current_text: &str) -> Option<String> {
-        if let Some(snapshot) = self.redo_stack.pop() {
-            // Save current state to undo stack
-            self.undo_stack.push(TextSnapshot {
-                text: current_text.to_string(),
-                cursor: self.cursor,
-            });
-            self.cursor = snapshot.cursor;
-            self.selection = None;
-            Some(snapshot.text)
-        } else {
-            None
-        }
-    }
-
-    /// Clear undo/redo history
-    pub fn clear_history(&mut self) {
-        self.undo_stack.clear();
-        self.redo_stack.clear();
-    }
 }
 
 /// A snapshot of text input state for undo (used externally by demos)
@@ -375,6 +419,9 @@ pub struct TextSnapshot {
 }
 
 /// State for slider widgets
+///
+/// Note: Undo/redo is handled externally via `UndoStack<T>`. Use the `on_undo_point`
+/// callback on the widget to know when to save an undo snapshot.
 #[derive(Debug, Clone)]
 pub struct SliderState {
     /// Current value
@@ -505,6 +552,9 @@ impl SliderState {
 }
 
 /// State for number input fields
+///
+/// Note: Undo/redo is handled externally via `UndoStack<T>`. Use the `on_undo_point`
+/// callback on the widget to know when to save an undo snapshot.
 #[derive(Debug, Clone)]
 pub struct NumberInputState {
     /// The current text being edited

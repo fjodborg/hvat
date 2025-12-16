@@ -86,6 +86,9 @@ pub struct Slider<M> {
     config: SliderConfig,
     /// Callback for value changes
     on_change: Option<Box<dyn Fn(SliderState) -> M>>,
+    /// Side-effect callback for undo point (called when edit starts: drag begins or input focuses)
+    /// This is called BEFORE on_change, allowing the app to save a snapshot of current state.
+    on_undo_point: Option<Box<dyn Fn()>>,
 }
 
 impl<M> Slider<M> {
@@ -104,6 +107,7 @@ impl<M> Slider<M> {
             format_value: None,
             config: SliderConfig::default(),
             on_change: None,
+            on_undo_point: None,
         }
     }
 
@@ -164,6 +168,22 @@ impl<M> Slider<M> {
         F: Fn(SliderState) -> M + 'static,
     {
         self.on_change = Some(Box::new(callback));
+        self
+    }
+
+    /// Set the undo point handler (called when drag starts or input field gains focus)
+    ///
+    /// This is a side-effect callback invoked at the start of an edit operation,
+    /// BEFORE `on_change` is called. Use this to save an undo snapshot of the current
+    /// state before the edit begins.
+    ///
+    /// Unlike `on_change`, this callback does not return a message - it's called
+    /// for its side effects only (typically to push state onto an undo stack).
+    pub fn on_undo_point<F>(mut self, callback: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        self.on_undo_point = Some(Box::new(callback));
         self
     }
 
@@ -540,6 +560,15 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         }
 
                         log::debug!("Slider input: clicked, cursor = {}", self.state.input_cursor);
+
+                        // Call on_undo_point when input field gains focus (for undo tracking)
+                        if !was_focused {
+                            if let Some(ref on_undo_point) = self.on_undo_point {
+                                log::debug!("Slider input: calling on_undo_point (focus gained)");
+                                on_undo_point();
+                            }
+                        }
+
                         // Emit message to trigger redraw (selection highlight)
                         if let Some(ref on_change) = self.on_change {
                             return Some(on_change(self.state.clone()));
@@ -567,12 +596,22 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 let hit_radius = SLIDER_THUMB_RADIUS * THUMB_HIT_AREA_MULTIPLIER;
 
                 if dist_sq <= hit_radius.powi(2) {
+                    // Start dragging - call on_undo_point to save snapshot before changes
+                    if let Some(ref on_undo_point) = self.on_undo_point {
+                        log::debug!("Slider: calling on_undo_point (drag start)");
+                        on_undo_point();
+                    }
                     self.state.dragging = true;
                     log::debug!("Slider: started dragging");
                     if let Some(ref on_change) = self.on_change {
                         return Some(on_change(self.state.clone()));
                     }
                 } else if slider_bounds.contains(x, y) {
+                    // Click on track - call on_undo_point to save snapshot before changes
+                    if let Some(ref on_undo_point) = self.on_undo_point {
+                        log::debug!("Slider: calling on_undo_point (track click)");
+                        on_undo_point();
+                    }
                     let new_value = self.position_to_value(x, &track);
                     self.state.value = new_value;
                     self.state.dragging = true;

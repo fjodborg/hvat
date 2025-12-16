@@ -277,14 +277,25 @@ impl<'a, M: Clone + 'static> SliderBuilder<'a, M> {
         self
     }
 
-    /// Set the change handler and finish building
-    pub fn on_change<F>(mut self, handler: F) -> &'a mut Context<M>
+    /// Set the change handler
+    pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(SliderState) -> M + 'static,
     {
         self.slider = self.slider.on_change(handler);
-        self.ctx.children.push(Element::new(self.slider));
-        self.ctx
+        self
+    }
+
+    /// Set the undo point handler (called when drag starts or input field gains focus)
+    ///
+    /// This is a side-effect callback invoked at the start of an edit operation.
+    /// Use it to save an undo snapshot before the edit begins.
+    pub fn on_undo_point<F>(mut self, handler: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        self.slider = self.slider.on_undo_point(handler);
+        self
     }
 
     /// Finish building without handler
@@ -325,14 +336,13 @@ impl<'a, M: Clone + 'static> TextInputBuilder<'a, M> {
         self
     }
 
-    /// Set the change handler and finish building
-    pub fn on_change<F>(mut self, handler: F) -> &'a mut Context<M>
+    /// Set the change handler
+    pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(String, TextInputState) -> M + 'static,
     {
         self.input = self.input.on_change(handler);
-        self.ctx.children.push(Element::new(self.input));
-        self.ctx
+        self
     }
 
     /// Set the submit handler
@@ -341,6 +351,18 @@ impl<'a, M: Clone + 'static> TextInputBuilder<'a, M> {
         F: Fn(String) -> M + 'static,
     {
         self.input = self.input.on_submit(handler);
+        self
+    }
+
+    /// Set the undo point handler (called when input gains focus)
+    ///
+    /// This is a side-effect callback invoked at the start of an edit operation.
+    /// Use it to save an undo snapshot before the edit begins.
+    pub fn on_undo_point<F>(mut self, handler: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        self.input = self.input.on_undo_point(handler);
         self
     }
 
@@ -400,14 +422,25 @@ impl<'a, M: Clone + 'static> NumberInputBuilder<'a, M> {
         self
     }
 
-    /// Set the change handler and finish building
-    pub fn on_change<F>(mut self, handler: F) -> &'a mut Context<M>
+    /// Set the change handler
+    pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(f32, NumberInputState) -> M + 'static,
     {
         self.input = self.input.on_change(handler);
-        self.ctx.children.push(Element::new(self.input));
-        self.ctx
+        self
+    }
+
+    /// Set the undo point handler (called when input gains focus)
+    ///
+    /// This is a side-effect callback invoked at the start of an edit operation.
+    /// Use it to save an undo snapshot before the edit begins.
+    pub fn on_undo_point<F>(mut self, handler: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        self.input = self.input.on_undo_point(handler);
+        self
     }
 
     /// Finish building without handler

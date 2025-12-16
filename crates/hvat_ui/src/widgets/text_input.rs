@@ -66,6 +66,9 @@ pub struct TextInput<M> {
     on_change: Option<Box<dyn Fn(String, TextInputState) -> M>>,
     /// Callback for submit (Enter pressed)
     on_submit: Option<Box<dyn Fn(String) -> M>>,
+    /// Side-effect callback for undo point (called when input gains focus)
+    /// This is called BEFORE on_change, allowing the app to save a snapshot.
+    on_undo_point: Option<Box<dyn Fn()>>,
 }
 
 impl<M> TextInput<M> {
@@ -82,6 +85,7 @@ impl<M> TextInput<M> {
             config: TextInputConfig::default(),
             on_change: None,
             on_submit: None,
+            on_undo_point: None,
         }
     }
 
@@ -151,6 +155,22 @@ impl<M> TextInput<M> {
         self
     }
 
+    /// Set the undo point handler (called when input gains focus)
+    ///
+    /// This is a side-effect callback invoked at the start of an edit operation
+    /// (when focus is gained), BEFORE `on_change` is called. Use this to save an
+    /// undo snapshot of the current state before editing begins.
+    ///
+    /// Unlike `on_change`, this callback does not return a message - it's called
+    /// for its side effects only (typically to push state onto an undo stack).
+    pub fn on_undo_point<F>(mut self, callback: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        self.on_undo_point = Some(Box::new(callback));
+        self
+    }
+
     /// Get the content bounds (inside padding)
     fn content_bounds(&self, bounds: Bounds) -> Bounds {
         Bounds::new(
@@ -161,74 +181,35 @@ impl<M> TextInput<M> {
         )
     }
 
-    /// Handle text insertion (with undo support)
+    /// Handle text insertion
     fn insert_text(&mut self, text: &str) {
-        // Push undo before making changes
-        self.state.push_undo(&self.value);
-
         self.state.cursor =
             text_core::insert_text(&mut self.value, self.state.cursor, self.state.selection, text);
         self.state.selection = None;
     }
 
-    /// Handle backspace (with undo support)
+    /// Handle backspace
     fn handle_backspace(&mut self) -> bool {
-        // Check if backspace would do anything (selection exists or cursor > 0)
-        let would_modify =
-            self.state.selection.is_some() || (self.state.cursor > 0 && !self.value.is_empty());
-
-        if would_modify {
-            // Push undo BEFORE making changes
-            self.state.push_undo(&self.value);
-
-            if let Some(new_cursor) = text_core::handle_backspace(
-                &mut self.value,
-                self.state.cursor,
-                self.state.selection,
-            ) {
-                self.state.cursor = new_cursor;
-                self.state.selection = None;
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Handle delete (with undo support)
-    fn handle_delete(&mut self) -> bool {
-        // Check if delete would do anything (selection exists or cursor < len)
-        let would_modify =
-            self.state.selection.is_some() || self.state.cursor < self.value.len();
-
-        if would_modify {
-            // Push undo BEFORE making changes
-            self.state.push_undo(&self.value);
-
-            if let Some(new_cursor) =
-                text_core::handle_delete(&mut self.value, self.state.cursor, self.state.selection)
-            {
-                self.state.cursor = new_cursor;
-                self.state.selection = None;
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Handle undo (Ctrl+Z)
-    fn handle_undo(&mut self) -> bool {
-        if let Some(restored_text) = self.state.undo(&self.value) {
-            self.value = restored_text;
+        if let Some(new_cursor) = text_core::handle_backspace(
+            &mut self.value,
+            self.state.cursor,
+            self.state.selection,
+        ) {
+            self.state.cursor = new_cursor;
+            self.state.selection = None;
             true
         } else {
             false
         }
     }
 
-    /// Handle redo (Ctrl+Y or Ctrl+Shift+Z)
-    fn handle_redo(&mut self) -> bool {
-        if let Some(restored_text) = self.state.redo(&self.value) {
-            self.value = restored_text;
+    /// Handle delete
+    fn handle_delete(&mut self) -> bool {
+        if let Some(new_cursor) =
+            text_core::handle_delete(&mut self.value, self.state.cursor, self.state.selection)
+        {
+            self.state.cursor = new_cursor;
+            self.state.selection = None;
             true
         } else {
             false
@@ -352,6 +333,15 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     }
 
                     log::debug!("TextInput: clicked, cursor = {}", self.state.cursor);
+
+                    // Call on_undo_point when input gains focus (for undo tracking)
+                    if !was_focused {
+                        if let Some(ref on_undo_point) = self.on_undo_point {
+                            log::debug!("TextInput: calling on_undo_point (focus gained)");
+                            on_undo_point();
+                        }
+                    }
+
                     if let Some(ref on_change) = self.on_change {
                         return Some(on_change(self.value.clone(), self.state.clone()));
                     }
@@ -437,33 +427,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }
-                    KeyCode::Z if modifiers.ctrl && !modifiers.shift => {
-                        // Undo
-                        if self.handle_undo() {
-                            log::debug!("TextInput: undo, value = '{}'", self.value);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.value.clone(), self.state.clone()));
-                            }
-                        }
-                    }
-                    KeyCode::Z if modifiers.ctrl && modifiers.shift => {
-                        // Redo (Ctrl+Shift+Z)
-                        if self.handle_redo() {
-                            log::debug!("TextInput: redo, value = '{}'", self.value);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.value.clone(), self.state.clone()));
-                            }
-                        }
-                    }
-                    KeyCode::Y if modifiers.ctrl => {
-                        // Redo (Ctrl+Y)
-                        if self.handle_redo() {
-                            log::debug!("TextInput: redo, value = '{}'", self.value);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.value.clone(), self.state.clone()));
-                            }
-                        }
-                    }
+                    // Note: Ctrl+Z/Y (undo/redo) is handled at application level via UndoStack<T>
                     KeyCode::Enter => {
                         if let Some(ref on_submit) = self.on_submit {
                             log::debug!("TextInput: submit '{}'", self.value);

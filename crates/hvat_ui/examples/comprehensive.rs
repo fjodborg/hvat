@@ -9,7 +9,7 @@
 //! - Proper three-column layout
 
 use hvat_ui::demos::{ComprehensiveDemo, ComprehensiveMessage};
-use hvat_ui::{Application, Element, Resources, Settings};
+use hvat_ui::{Application, Element, Event, Resources, Settings};
 
 /// Application wrapper for the comprehensive demo
 struct ComprehensiveApp {
@@ -30,6 +30,11 @@ impl Application for ComprehensiveApp {
 
     fn update(&mut self, message: Self::Message) {
         self.demo.update(message);
+    }
+
+    fn on_event(&mut self, event: &Event) -> Option<Self::Message> {
+        // Handle global keyboard shortcuts (Ctrl+Z/Y for undo/redo)
+        ComprehensiveDemo::handle_key_event(event)
     }
 
     fn on_resize(&mut self, width: f32, height: f32) {

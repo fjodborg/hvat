@@ -7,14 +7,29 @@
 //! - Proper layout with Row/Column containers
 
 use crate::element::Element;
+use crate::event::{Event, KeyCode};
 use crate::layout::Length;
 use crate::prelude::*;
-use crate::state::{CollapsibleState, DropdownState, NumberInputState, SliderState, TextInputState};
+use crate::state::{
+    CollapsibleState, DropdownState, NumberInputState, SliderState, TextInputState, UndoStack,
+};
 use crate::widgets::{Column, Row, Scrollable, ScrollDirection, ScrollbarVisibility};
 use crate::Context;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Sidebar width constant
 const SIDEBAR_WIDTH: f32 = 250.0;
+
+/// Snapshot for undo/redo in comprehensive demo
+#[derive(Debug, Clone)]
+struct DemoSnapshot {
+    notes_text: String,
+    brightness: f32,
+    contrast: f32,
+    gamma: f32,
+    saturation: f32,
+}
 
 /// Comprehensive demo state
 pub struct ComprehensiveDemo {
@@ -49,9 +64,12 @@ pub struct ComprehensiveDemo {
     pub blend_mode_dropdown: DropdownState,
     pub selected_blend_mode: Option<usize>,
 
-    // Text input with undo demo
+    // Text input
     pub notes_input_text: String,
     pub notes_input_state: TextInputState,
+
+    // Global undo stack for the demo (Rc<RefCell> for interior mutability)
+    undo_stack: Rc<RefCell<UndoStack<DemoSnapshot>>>,
 
     // Window size for dropdown positioning
     pub window_height: f32,
@@ -139,9 +157,16 @@ pub enum ComprehensiveMessage {
     BlendModeSelected(usize),
     BlendModeDropdownChanged(DropdownState),
 
-    // Text input with undo
+    // Text input
     NotesChanged(String, TextInputState),
     NotesSubmitted(String),
+
+    // Save undo snapshot (called by widgets when edit starts)
+    SaveSnapshot,
+
+    // Global undo/redo
+    Undo,
+    Redo,
 }
 
 impl Default for ComprehensiveDemo {
@@ -181,8 +206,54 @@ impl ComprehensiveDemo {
             notes_input_text: String::new(),
             notes_input_state: TextInputState::new(),
 
+            undo_stack: Rc::new(RefCell::new(UndoStack::new(50))),
+
             window_height: 900.0, // Default, updated by resize
         }
+    }
+
+    /// Create a snapshot of current state for undo
+    fn snapshot(&self) -> DemoSnapshot {
+        DemoSnapshot {
+            notes_text: self.notes_input_text.clone(),
+            brightness: self.brightness_slider.value,
+            contrast: self.contrast_slider.value,
+            gamma: self.gamma_slider.value,
+            saturation: self.saturation_slider.value,
+        }
+    }
+
+    /// Restore state from a snapshot
+    fn restore(&mut self, snapshot: &DemoSnapshot) {
+        self.notes_input_text = snapshot.notes_text.clone();
+        self.notes_input_state.cursor = self.notes_input_text.len();
+        self.notes_input_state.selection = None;
+        self.brightness_slider.set_value(snapshot.brightness);
+        self.contrast_slider.set_value(snapshot.contrast);
+        self.gamma_slider.set_value(snapshot.gamma);
+        self.saturation_slider.set_value(snapshot.saturation);
+    }
+
+    /// Handle keyboard events for undo/redo shortcuts
+    /// Returns Some(message) if a shortcut was triggered
+    pub fn handle_key_event(event: &Event) -> Option<ComprehensiveMessage> {
+        if let Event::KeyPress { key, modifiers, .. } = event {
+            if modifiers.ctrl {
+                match key {
+                    KeyCode::Z if modifiers.shift => {
+                        return Some(ComprehensiveMessage::Redo);
+                    }
+                    KeyCode::Z => {
+                        return Some(ComprehensiveMessage::Undo);
+                    }
+                    KeyCode::Y => {
+                        return Some(ComprehensiveMessage::Redo);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
     }
 
     /// Update window dimensions (call this on resize)
@@ -247,6 +318,9 @@ impl ComprehensiveDemo {
         let wrap_left = wrap.clone();
         let wrap_right = wrap.clone();
 
+        // Create snapshot for undo closures
+        let current_snapshot = self.snapshot();
+
         // Build the left sidebar
         let left_sidebar = self.build_left_sidebar(
             wrap_left,
@@ -264,6 +338,8 @@ impl ComprehensiveDemo {
             notes_text,
             notes_state,
             self.window_height,
+            current_snapshot.clone(),
+            Rc::clone(&self.undo_stack),
         );
 
         // Build the center image viewer
@@ -278,6 +354,8 @@ impl ComprehensiveDemo {
             saturation_state,
             zoom_state,
             right_scroll_state,
+            current_snapshot,
+            Rc::clone(&self.undo_stack),
         );
 
         log::debug!("ComprehensiveDemo: Building main layout with 3 children");
@@ -306,6 +384,8 @@ impl ComprehensiveDemo {
         notes_text: String,
         notes_state: TextInputState,
         window_height: f32,
+        notes_undo_snapshot: DemoSnapshot,
+        undo_stack: Rc<RefCell<UndoStack<DemoSnapshot>>>,
     ) -> Element<M> {
         let wrap_vs = wrap.clone();
         let wrap_tools = wrap.clone();
@@ -445,23 +525,27 @@ impl ComprehensiveDemo {
                 );
 
                 c.text("");
-                c.text_sized("Text Input (with undo):", 12.0);
-                c.text_sized("Ctrl+Z=Undo, Ctrl+Y=Redo", 9.0);
-                c.add(
-                    Element::new(
-                        crate::TextInput::new()
-                            .value(&notes_text)
-                            .state(&notes_state)
-                            .placeholder("Type here (supports undo)...")
-                            .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-                            .on_change(move |text, state| {
-                                wrap_notes(ComprehensiveMessage::NotesChanged(text, state))
-                            })
-                            .on_submit(move |text| {
-                                wrap_notes_submit(ComprehensiveMessage::NotesSubmitted(text))
-                            }),
-                    )
-                );
+                c.text_sized("Text Input:", 12.0);
+                c.text_input()
+                    .value(&notes_text)
+                    .state(&notes_state)
+                    .placeholder("Type here...")
+                    .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
+                    .on_change(move |text, state| {
+                        wrap_notes(ComprehensiveMessage::NotesChanged(text, state))
+                    })
+                    .on_submit(move |text| {
+                        wrap_notes_submit(ComprehensiveMessage::NotesSubmitted(text))
+                    })
+                    .on_undo_point({
+                        let stack = Rc::clone(&undo_stack);
+                        let snap = notes_undo_snapshot.clone();
+                        move || {
+                            log::debug!("on_undo_point: saving snapshot for notes input");
+                            stack.borrow_mut().push(snap.clone());
+                        }
+                    })
+                    .build();
                 c.text_sized(format!("Text: \"{}\"", notes_text), 9.0);
             });
         sidebar_ctx.add(Element::new(collapsible_widgets));
@@ -482,7 +566,7 @@ impl ComprehensiveDemo {
                 c.text_sized("- Sliders with inputs", 10.0);
                 c.text_sized("- Number inputs", 10.0);
                 c.text_sized("- Dropdown (searchable)", 10.0);
-                c.text_sized("- Text input with undo", 10.0);
+                c.text_sized("- Text input", 10.0);
                 c.text_sized("- Buttons", 10.0);
                 c.text_sized("- Row/Column layout", 10.0);
             });
@@ -541,6 +625,8 @@ impl ComprehensiveDemo {
         saturation_state: SliderState,
         zoom_state: SliderState,
         scroll_state: ScrollState,
+        slider_undo_snapshot: DemoSnapshot,
+        undo_stack: Rc<RefCell<UndoStack<DemoSnapshot>>>,
     ) -> Element<M> {
         let wrap_brightness = wrap.clone();
         let wrap_contrast = wrap.clone();
@@ -549,6 +635,16 @@ impl ComprehensiveDemo {
         let wrap_zoom = wrap.clone();
         let wrap_scroll = wrap.clone();
         let wrap_reset = wrap.clone();
+
+        // Clone undo stack for each slider's on_undo_point closure
+        let undo_stack1 = Rc::clone(&undo_stack);
+        let undo_stack2 = Rc::clone(&undo_stack);
+        let undo_stack3 = Rc::clone(&undo_stack);
+        let undo_stack4 = Rc::clone(&undo_stack);
+        let snap1 = slider_undo_snapshot.clone();
+        let snap2 = slider_undo_snapshot.clone();
+        let snap3 = slider_undo_snapshot.clone();
+        let snap4 = slider_undo_snapshot.clone();
 
         let mut sidebar_ctx = Context::new();
 
@@ -578,7 +674,16 @@ impl ComprehensiveDemo {
             .step(0.01)
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-            .on_change(move |s| wrap_brightness(ComprehensiveMessage::BrightnessChanged(s)));
+            .on_change(move |s| wrap_brightness(ComprehensiveMessage::BrightnessChanged(s)))
+            .on_undo_point({
+                let stack = undo_stack1;
+                let snap = snap1;
+                move || {
+                    log::debug!("on_undo_point: saving snapshot for brightness slider");
+                    stack.borrow_mut().push(snap.clone());
+                }
+            })
+            .build();
         sidebar_ctx.text("");
 
         // Contrast slider
@@ -588,7 +693,16 @@ impl ComprehensiveDemo {
             .step(0.01)
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-            .on_change(move |s| wrap_contrast(ComprehensiveMessage::ContrastChanged(s)));
+            .on_change(move |s| wrap_contrast(ComprehensiveMessage::ContrastChanged(s)))
+            .on_undo_point({
+                let stack = undo_stack2;
+                let snap = snap2;
+                move || {
+                    log::debug!("on_undo_point: saving snapshot for contrast slider");
+                    stack.borrow_mut().push(snap.clone());
+                }
+            })
+            .build();
         sidebar_ctx.text("");
 
         // Gamma slider
@@ -598,7 +712,16 @@ impl ComprehensiveDemo {
             .step(0.01)
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-            .on_change(move |s| wrap_gamma(ComprehensiveMessage::GammaChanged(s)));
+            .on_change(move |s| wrap_gamma(ComprehensiveMessage::GammaChanged(s)))
+            .on_undo_point({
+                let stack = undo_stack3;
+                let snap = snap3;
+                move || {
+                    log::debug!("on_undo_point: saving snapshot for gamma slider");
+                    stack.borrow_mut().push(snap.clone());
+                }
+            })
+            .build();
         sidebar_ctx.text("");
 
         // Saturation slider
@@ -608,7 +731,16 @@ impl ComprehensiveDemo {
             .step(0.01)
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-            .on_change(move |s| wrap_saturation(ComprehensiveMessage::SaturationChanged(s)));
+            .on_change(move |s| wrap_saturation(ComprehensiveMessage::SaturationChanged(s)))
+            .on_undo_point({
+                let stack = undo_stack4;
+                let snap = snap4;
+                move || {
+                    log::debug!("on_undo_point: saving snapshot for saturation slider");
+                    stack.borrow_mut().push(snap.clone());
+                }
+            })
+            .build();
         sidebar_ctx.text("");
 
         // Reset button
@@ -713,19 +845,15 @@ impl ComprehensiveDemo {
             // Right sidebar sliders
             ComprehensiveMessage::BrightnessChanged(state) => {
                 self.brightness_slider = state;
-                log::debug!("Brightness: {:.2}", self.brightness_slider.value);
             }
             ComprehensiveMessage::ContrastChanged(state) => {
                 self.contrast_slider = state;
-                log::debug!("Contrast: {:.2}", self.contrast_slider.value);
             }
             ComprehensiveMessage::GammaChanged(state) => {
                 self.gamma_slider = state;
-                log::debug!("Gamma: {:.2}", self.gamma_slider.value);
             }
             ComprehensiveMessage::SaturationChanged(state) => {
                 self.saturation_slider = state;
-                log::debug!("Saturation: {:.2}", self.saturation_slider.value);
             }
             ComprehensiveMessage::ZoomSliderChanged(state) => {
                 self.zoom_slider = state;
@@ -771,13 +899,46 @@ impl ComprehensiveDemo {
                 self.blend_mode_dropdown = state;
             }
 
-            // Text input with undo
+            // Text input
             ComprehensiveMessage::NotesChanged(text, state) => {
                 self.notes_input_text = text;
                 self.notes_input_state = state;
             }
+
+            // Save undo snapshot (called by widgets via on_undo_point callbacks)
+            ComprehensiveMessage::SaveSnapshot => {
+                // No longer used - snapshots saved via on_undo_point callbacks
+                self.undo_stack.borrow_mut().push(self.snapshot());
+                log::debug!("Saved undo snapshot (via message)");
+            }
             ComprehensiveMessage::NotesSubmitted(text) => {
                 log::info!("Notes submitted: \"{}\"", text);
+            }
+
+            // Global undo/redo
+            ComprehensiveMessage::Undo => {
+                let current = self.snapshot();
+                let prev = self.undo_stack.borrow_mut().undo(current);
+                if let Some(prev) = prev {
+                    self.restore(&prev);
+                    log::info!(
+                        "Undo: brightness={:.2}, text='{}'",
+                        self.brightness_slider.value,
+                        self.notes_input_text
+                    );
+                }
+            }
+            ComprehensiveMessage::Redo => {
+                let current = self.snapshot();
+                let next = self.undo_stack.borrow_mut().redo(current);
+                if let Some(next) = next {
+                    self.restore(&next);
+                    log::info!(
+                        "Redo: brightness={:.2}, text='{}'",
+                        self.brightness_slider.value,
+                        self.notes_input_text
+                    );
+                }
             }
         }
     }

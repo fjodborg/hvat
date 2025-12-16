@@ -18,4 +18,4 @@ pub use dropdown::{DropdownDemo, DropdownMessage, COUNTRY_OPTIONS, SIMPLE_OPTION
 pub use image_viewer::{create_test_pattern, ImageViewerDemo, ImageViewerMessage};
 pub use input_widgets::{InputWidgetsDemo, InputWidgetsMessage};
 pub use scrollable::{ScrollableDemo, ScrollableMessage};
-pub use undo::{SimpleUndoStack, UndoDemo, UndoMessage};
+pub use undo::{UndoDemo, UndoMessage};
