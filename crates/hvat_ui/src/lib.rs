@@ -3,12 +3,14 @@
 //! This crate provides a callback-based widget system with a clean builder API.
 
 mod application;
+pub mod constants;
 mod context;
 mod element;
 mod event;
 mod layout;
 mod renderer;
 mod state;
+pub mod theme;
 mod widget;
 mod widgets;
 
@@ -22,6 +24,7 @@ pub use event::{Event, KeyCode, KeyModifiers, MouseButton};
 pub use layout::{Bounds, Length, Padding, Size};
 pub use renderer::{Color, Renderer, TextureId};
 pub use state::*;
+pub use theme::Theme;
 pub use widget::Widget;
 
 // Re-export widgets
@@ -45,6 +48,7 @@ pub mod prelude {
     pub use crate::layout::{Bounds, Length, Padding, Size};
     pub use crate::renderer::TextureId;
     pub use crate::state::*;
+    pub use crate::theme::Theme;
     pub use crate::widgets::{
         button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
         slider, text, text_input, ScrollDirection, ScrollbarVisibility,

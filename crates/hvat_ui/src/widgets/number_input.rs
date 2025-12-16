@@ -1,27 +1,15 @@
 //! Number input widget for editable numeric values
 
+use crate::constants::{
+    line_height, DEFAULT_FONT_SIZE, NUMBER_INPUT_BUTTON_WIDTH, NUMBER_INPUT_DEFAULT_WIDTH,
+    TEXT_INPUT_PADDING,
+};
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::NumberInputState;
 use crate::widget::Widget;
-
-/// Default padding
-const DEFAULT_PADDING: Padding = Padding {
-    top: 6.0,
-    right: 8.0,
-    bottom: 6.0,
-    left: 8.0,
-};
-
-/// Default font size
-const DEFAULT_FONT_SIZE: f32 = 14.0;
-/// Cursor width
-const CURSOR_WIDTH: f32 = 1.0;
-/// Character width approximation
-const CHAR_WIDTH_FACTOR: f32 = 0.6;
-/// Button width for increment/decrement buttons
-const BUTTON_WIDTH: f32 = 20.0;
+use crate::widgets::text_core;
 
 /// Configuration for number input appearance
 #[derive(Debug, Clone)]
@@ -109,9 +97,9 @@ impl<M> NumberInput<M> {
             max: None,
             step: 1.0,
             state: NumberInputState::default(),
-            width: Length::Fixed(120.0),
+            width: Length::Fixed(NUMBER_INPUT_DEFAULT_WIDTH),
             height: Length::Shrink,
-            padding: DEFAULT_PADDING,
+            padding: TEXT_INPUT_PADDING,
             font_size: DEFAULT_FONT_SIZE,
             show_buttons: true,
             config: NumberInputConfig::default(),
@@ -199,7 +187,7 @@ impl<M> NumberInput<M> {
     /// Get the content bounds (inside padding, excluding buttons)
     fn content_bounds(&self, bounds: Bounds) -> Bounds {
         let button_space = if self.show_buttons {
-            BUTTON_WIDTH * 2.0
+            NUMBER_INPUT_BUTTON_WIDTH * 2.0
         } else {
             0.0
         };
@@ -217,9 +205,9 @@ impl<M> NumberInput<M> {
             return None;
         }
         Some(Bounds::new(
-            bounds.x + bounds.width - BUTTON_WIDTH,
+            bounds.x + bounds.width - NUMBER_INPUT_BUTTON_WIDTH,
             bounds.y,
-            BUTTON_WIDTH,
+            NUMBER_INPUT_BUTTON_WIDTH,
             bounds.height,
         ))
     }
@@ -230,29 +218,11 @@ impl<M> NumberInput<M> {
             return None;
         }
         Some(Bounds::new(
-            bounds.x + bounds.width - BUTTON_WIDTH * 2.0,
+            bounds.x + bounds.width - NUMBER_INPUT_BUTTON_WIDTH * 2.0,
             bounds.y,
-            BUTTON_WIDTH,
+            NUMBER_INPUT_BUTTON_WIDTH,
             bounds.height,
         ))
-    }
-
-    /// Calculate character width
-    fn char_width(&self) -> f32 {
-        self.font_size * CHAR_WIDTH_FACTOR
-    }
-
-    /// Convert x position to character index
-    fn x_to_char_index(&self, x: f32, content_x: f32) -> usize {
-        let relative_x = x - content_x;
-        let char_width = self.char_width();
-        let index = (relative_x / char_width).round() as i32;
-        index.clamp(0, self.state.text.len() as i32) as usize
-    }
-
-    /// Get cursor x position
-    fn cursor_x(&self, content_x: f32) -> f32 {
-        content_x + self.state.cursor as f32 * self.char_width()
     }
 
     /// Clamp value to min/max range
@@ -269,65 +239,69 @@ impl<M> NumberInput<M> {
 
     /// Handle character insertion (only allow valid number characters)
     fn insert_char(&mut self, c: char) -> bool {
-        // Only allow digits, minus, and period
-        if !c.is_ascii_digit() && c != '-' && c != '.' {
+        // Use text_core validation
+        if !text_core::is_valid_number_char(c, self.state.cursor, &self.state.text) {
             return false;
         }
 
-        // Minus only at start
-        if c == '-' && self.state.cursor != 0 {
-            return false;
-        }
+        // Push undo BEFORE making changes
+        self.state.push_undo();
 
-        // Only one period
-        if c == '.' && self.state.text.contains('.') {
-            return false;
-        }
-
-        // If there's a selection, delete it first
-        if let Some((start, end)) = self.state.selection {
-            let (start, end) = (start.min(end), start.max(end));
-            self.state.text.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-        }
-
-        self.state.text.insert(self.state.cursor, c);
-        self.state.cursor += 1;
+        // If there's a selection, delete it first, then insert
+        self.state.cursor = text_core::insert_text(
+            &mut self.state.text,
+            self.state.cursor,
+            self.state.selection,
+            &c.to_string(),
+        );
+        self.state.selection = None;
         true
     }
 
-    /// Handle backspace
+    /// Handle backspace (with undo support)
     fn handle_backspace(&mut self) -> bool {
-        if let Some((start, end)) = self.state.selection {
-            let (start, end) = (start.min(end), start.max(end));
-            self.state.text.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-            true
-        } else if self.state.cursor > 0 {
-            self.state.text.remove(self.state.cursor - 1);
-            self.state.cursor -= 1;
-            true
-        } else {
-            false
+        // Check if backspace would do anything
+        let would_modify = self.state.selection.is_some()
+            || (self.state.cursor > 0 && !self.state.text.is_empty());
+
+        if would_modify {
+            // Push undo BEFORE making changes
+            self.state.push_undo();
+
+            if let Some(new_cursor) = text_core::handle_backspace(
+                &mut self.state.text,
+                self.state.cursor,
+                self.state.selection,
+            ) {
+                self.state.cursor = new_cursor;
+                self.state.selection = None;
+                return true;
+            }
         }
+        false
     }
 
-    /// Handle delete
+    /// Handle delete (with undo support)
     fn handle_delete(&mut self) -> bool {
-        if let Some((start, end)) = self.state.selection {
-            let (start, end) = (start.min(end), start.max(end));
-            self.state.text.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-            true
-        } else if self.state.cursor < self.state.text.len() {
-            self.state.text.remove(self.state.cursor);
-            true
-        } else {
-            false
+        // Check if delete would do anything
+        let would_modify =
+            self.state.selection.is_some() || self.state.cursor < self.state.text.len();
+
+        if would_modify {
+            // Push undo BEFORE making changes
+            self.state.push_undo();
+
+            if let Some(new_cursor) = text_core::handle_delete(
+                &mut self.state.text,
+                self.state.cursor,
+                self.state.selection,
+            ) {
+                self.state.cursor = new_cursor;
+                self.state.selection = None;
+                return true;
+            }
         }
+        false
     }
 
     /// Increment the value
@@ -374,7 +348,7 @@ impl<M> Default for NumberInput<M> {
 
 impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
     fn layout(&mut self, available: Size) -> Size {
-        let content_height = self.font_size * 1.2;
+        let content_height = line_height(self.font_size);
         let min_height = content_height + self.padding.vertical();
         let min_width = 80.0;
 
@@ -405,13 +379,14 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
         // Draw selection if present
         if self.state.is_focused {
-            if let Some((start, end)) = self.state.selection {
-                let (start, end) = (start.min(end), start.max(end));
-                let char_width = self.char_width();
-                let sel_x = content.x + start as f32 * char_width;
-                let sel_width = (end - start) as f32 * char_width;
-                let sel_bounds = Bounds::new(sel_x, content.y, sel_width, content.height);
-                renderer.fill_rect(sel_bounds, self.config.selection_color);
+            if let Some(selection) = self.state.selection {
+                text_core::draw_selection(
+                    renderer,
+                    content,
+                    selection,
+                    self.font_size,
+                    self.config.selection_color,
+                );
             }
         }
 
@@ -427,14 +402,13 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
         // Draw cursor if focused
         if self.state.is_focused {
-            let cursor_x = self.cursor_x(content.x);
-            let cursor_bounds = Bounds::new(
-                cursor_x,
-                content.y + 2.0,
-                CURSOR_WIDTH,
-                content.height - 4.0,
+            text_core::draw_cursor(
+                renderer,
+                content,
+                self.state.cursor,
+                self.font_size,
+                self.config.cursor_color,
             );
-            renderer.fill_rect(cursor_bounds, self.config.cursor_color);
         }
 
         // Draw buttons
@@ -564,7 +538,12 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 if content.contains(x, y) || bounds.contains(x, y) {
                     let was_focused = self.state.is_focused;
                     self.state.is_focused = true;
-                    let new_cursor = self.x_to_char_index(x, content.x);
+                    let new_cursor = text_core::x_to_char_index(
+                        x,
+                        content.x,
+                        self.font_size,
+                        self.state.text.len(),
+                    );
 
                     if modifiers.shift && was_focused {
                         // Extend selection
@@ -604,6 +583,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
             Event::TextInput { text } if self.state.is_focused => {
                 let mut changed = false;
                 for c in text.chars() {
+                    // insert_char handles undo internally
                     if self.insert_char(c) {
                         changed = true;
                     }
@@ -621,7 +601,40 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
             Event::KeyPress { key, modifiers, .. } if self.state.is_focused => {
                 match key {
+                    // Undo: Ctrl+Z
+                    KeyCode::Z if modifiers.ctrl && !modifiers.shift => {
+                        if self.state.undo() {
+                            log::debug!("NumberInput: undo, value = '{}'", self.state.text);
+                            if let Some(ref on_change) = self.on_change {
+                                if let Some(value) = self.state.value() {
+                                    return Some(on_change(value, self.state.clone()));
+                                }
+                            }
+                        }
+                    }
+                    // Redo: Ctrl+Y or Ctrl+Shift+Z
+                    KeyCode::Y if modifiers.ctrl => {
+                        if self.state.redo() {
+                            log::debug!("NumberInput: redo, value = '{}'", self.state.text);
+                            if let Some(ref on_change) = self.on_change {
+                                if let Some(value) = self.state.value() {
+                                    return Some(on_change(value, self.state.clone()));
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Z if modifiers.ctrl && modifiers.shift => {
+                        if self.state.redo() {
+                            log::debug!("NumberInput: redo (Ctrl+Shift+Z), value = '{}'", self.state.text);
+                            if let Some(ref on_change) = self.on_change {
+                                if let Some(value) = self.state.value() {
+                                    return Some(on_change(value, self.state.clone()));
+                                }
+                            }
+                        }
+                    }
                     KeyCode::Backspace => {
+                        // handle_backspace manages undo internally
                         if self.handle_backspace() {
                             log::debug!("NumberInput: backspace, value = '{}'", self.state.text);
                             if let Some(ref on_change) = self.on_change {
@@ -632,6 +645,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         }
                     }
                     KeyCode::Delete => {
+                        // handle_delete manages undo internally
                         if self.handle_delete() {
                             log::debug!("NumberInput: delete, value = '{}'", self.state.text);
                             if let Some(ref on_change) = self.on_change {
@@ -642,78 +656,47 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         }
                     }
                     KeyCode::Left => {
-                        if modifiers.shift {
-                            if self.state.cursor > 0 {
-                                let anchor = self
-                                    .state
-                                    .selection
-                                    .map(|(s, _)| s)
-                                    .unwrap_or(self.state.cursor);
-                                self.state.cursor -= 1;
-                                self.state.selection = Some((anchor, self.state.cursor));
-                            }
-                        } else {
-                            if self.state.selection.is_some() {
-                                let (start, end) = self.state.selection.unwrap();
-                                self.state.cursor = start.min(end);
-                                self.state.selection = None;
-                            } else if self.state.cursor > 0 {
-                                self.state.cursor -= 1;
-                            }
-                        }
+                        let result = text_core::handle_left(
+                            self.state.cursor,
+                            self.state.selection,
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::Right => {
-                        if modifiers.shift {
-                            if self.state.cursor < self.state.text.len() {
-                                let anchor = self
-                                    .state
-                                    .selection
-                                    .map(|(s, _)| s)
-                                    .unwrap_or(self.state.cursor);
-                                self.state.cursor += 1;
-                                self.state.selection = Some((anchor, self.state.cursor));
-                            }
-                        } else {
-                            if self.state.selection.is_some() {
-                                let (start, end) = self.state.selection.unwrap();
-                                self.state.cursor = start.max(end);
-                                self.state.selection = None;
-                            } else if self.state.cursor < self.state.text.len() {
-                                self.state.cursor += 1;
-                            }
-                        }
+                        let result = text_core::handle_right(
+                            self.state.cursor,
+                            self.state.selection,
+                            self.state.text.len(),
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::Home => {
-                        if modifiers.shift {
-                            let anchor = self
-                                .state
-                                .selection
-                                .map(|(s, _)| s)
-                                .unwrap_or(self.state.cursor);
-                            self.state.cursor = 0;
-                            self.state.selection = Some((anchor, 0));
-                        } else {
-                            self.state.cursor = 0;
-                            self.state.selection = None;
-                        }
+                        let result = text_core::handle_home(
+                            self.state.cursor,
+                            self.state.selection,
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::End => {
-                        if modifiers.shift {
-                            let anchor = self
-                                .state
-                                .selection
-                                .map(|(s, _)| s)
-                                .unwrap_or(self.state.cursor);
-                            self.state.cursor = self.state.text.len();
-                            self.state.selection = Some((anchor, self.state.cursor));
-                        } else {
-                            self.state.cursor = self.state.text.len();
-                            self.state.selection = None;
-                        }
+                        let result = text_core::handle_end(
+                            self.state.cursor,
+                            self.state.selection,
+                            self.state.text.len(),
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::A if modifiers.ctrl => {
-                        self.state.selection = Some((0, self.state.text.len()));
-                        self.state.cursor = self.state.text.len();
+                        let result = text_core::handle_select_all(self.state.text.len());
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::Up => {
                         if self.increment() {

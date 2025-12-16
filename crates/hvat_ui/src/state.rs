@@ -1,5 +1,7 @@
 //! Widget state types for stateful widgets
 
+use crate::constants::{format_number, UNDO_STACK_LIMIT, ZOOM_FACTOR, ZOOM_MAX, ZOOM_MIN};
+
 /// State for the image viewer widget
 #[derive(Debug, Clone)]
 pub struct ImageViewerState {
@@ -106,7 +108,7 @@ impl ImageViewerState {
 
     /// Zoom at a specific point (in clip space)
     pub fn zoom_at(&mut self, cursor_x: f32, cursor_y: f32, factor: f32) {
-        let new_zoom = (self.zoom * factor).clamp(0.1, 50.0);
+        let new_zoom = (self.zoom * factor).clamp(ZOOM_MIN, ZOOM_MAX);
         let zoom_ratio = new_zoom / self.zoom;
 
         // Adjust pan so point under cursor stays fixed
@@ -121,13 +123,13 @@ impl ImageViewerState {
 
     /// Zoom in by a standard factor
     pub fn zoom_in(&mut self) {
-        self.zoom = (self.zoom * 1.25).clamp(0.1, 50.0);
+        self.zoom = (self.zoom * ZOOM_FACTOR).clamp(ZOOM_MIN, ZOOM_MAX);
         self.fit_mode = FitMode::Manual;
     }
 
     /// Zoom out by a standard factor
     pub fn zoom_out(&mut self) {
-        self.zoom = (self.zoom / 1.25).clamp(0.1, 50.0);
+        self.zoom = (self.zoom / ZOOM_FACTOR).clamp(ZOOM_MIN, ZOOM_MAX);
         self.fit_mode = FitMode::Manual;
     }
 }
@@ -243,28 +245,16 @@ impl DropdownState {
 }
 
 /// State for collapsible sections
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CollapsibleState {
     /// Whether the section is expanded
     pub is_expanded: bool,
-    /// Animation progress (0.0 = collapsed, 1.0 = expanded)
-    pub(crate) animation_progress: f32,
-}
-
-impl Default for CollapsibleState {
-    fn default() -> Self {
-        Self {
-            is_expanded: false,
-            animation_progress: 0.0,
-        }
-    }
 }
 
 impl CollapsibleState {
     pub fn new(expanded: bool) -> Self {
         Self {
             is_expanded: expanded,
-            animation_progress: if expanded { 1.0 } else { 0.0 },
         }
     }
 
@@ -330,8 +320,8 @@ impl TextInputState {
         });
         // Clear redo stack on new change
         self.redo_stack.clear();
-        // Limit undo history to 50 entries
-        while self.undo_stack.len() > 50 {
+        // Limit undo history
+        while self.undo_stack.len() > UNDO_STACK_LIMIT {
             self.undo_stack.remove(0);
         }
     }
@@ -444,8 +434,8 @@ impl SliderState {
         });
         // Clear redo stack on new change
         self.input_redo_stack.clear();
-        // Limit undo history to 50 entries
-        while self.input_undo_stack.len() > 50 {
+        // Limit undo history
+        while self.input_undo_stack.len() > UNDO_STACK_LIMIT {
             self.input_undo_stack.remove(0);
         }
     }
@@ -501,14 +491,7 @@ impl SliderState {
 
     /// Format value for input field display
     fn format_value(value: f32) -> String {
-        // If it's close to an integer, display as integer
-        if (value - value.round()).abs() < 0.0001 {
-            format!("{}", value.round() as i32)
-        } else {
-            // Otherwise display with up to 3 decimal places, trimming trailing zeros
-            let formatted = format!("{:.3}", value);
-            formatted.trim_end_matches('0').trim_end_matches('.').to_string()
-        }
+        format_number(value)
     }
 
     /// Sync input text from value (call when not focused)
@@ -532,6 +515,10 @@ pub struct NumberInputState {
     pub is_focused: bool,
     /// Selection range (start, end) if any
     pub selection: Option<(usize, usize)>,
+    /// Text undo stack (for Ctrl+Z)
+    pub(crate) undo_stack: Vec<TextSnapshot>,
+    /// Text redo stack (for Ctrl+Y/Ctrl+Shift+Z)
+    pub(crate) redo_stack: Vec<TextSnapshot>,
 }
 
 impl Default for NumberInputState {
@@ -541,6 +528,8 @@ impl Default for NumberInputState {
             cursor: 1,
             is_focused: false,
             selection: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 }
@@ -554,6 +543,8 @@ impl NumberInputState {
             cursor,
             is_focused: false,
             selection: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -584,16 +575,58 @@ impl NumberInputState {
         self.is_focused = false;
         self.selection = None;
     }
-}
 
-/// Format a number for display, avoiding excessive decimal places
-fn format_number(value: f32) -> String {
-    // If it's close to an integer, display as integer
-    if (value - value.round()).abs() < 0.0001 {
-        format!("{}", value.round() as i32)
-    } else {
-        // Otherwise display with up to 3 decimal places, trimming trailing zeros
-        let formatted = format!("{:.3}", value);
-        formatted.trim_end_matches('0').trim_end_matches('.').to_string()
+    /// Push current text state to undo stack (call before making changes)
+    pub fn push_undo(&mut self) {
+        self.undo_stack.push(TextSnapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+        });
+        // Clear redo stack on new change
+        self.redo_stack.clear();
+        // Limit undo history
+        while self.undo_stack.len() > UNDO_STACK_LIMIT {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Undo text change (Ctrl+Z) - returns true if undo was performed
+    pub fn undo(&mut self) -> bool {
+        if let Some(snapshot) = self.undo_stack.pop() {
+            // Save current state to redo stack
+            self.redo_stack.push(TextSnapshot {
+                text: self.text.clone(),
+                cursor: self.cursor,
+            });
+            self.text = snapshot.text;
+            self.cursor = snapshot.cursor;
+            self.selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo text change (Ctrl+Y or Ctrl+Shift+Z) - returns true if redo was performed
+    pub fn redo(&mut self) -> bool {
+        if let Some(snapshot) = self.redo_stack.pop() {
+            // Save current state to undo stack
+            self.undo_stack.push(TextSnapshot {
+                text: self.text.clone(),
+                cursor: self.cursor,
+            });
+            self.text = snapshot.text;
+            self.cursor = snapshot.cursor;
+            self.selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear undo/redo history
+    pub fn clear_history(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
     }
 }

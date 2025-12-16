@@ -683,7 +683,8 @@ fn handle_window_event<A: Application>(
             }
 
             // Generate TextInput event for text input (on key press only)
-            if event.state == ElementState::Pressed {
+            // Don't generate TextInput when Ctrl or Alt is held (those are shortcuts, not text input)
+            if event.state == ElementState::Pressed && !state.modifiers.ctrl && !state.modifiers.alt {
                 if let Some(text) = &event.text {
                     let text_str = text.as_str();
                     // Filter out control characters (but allow space)

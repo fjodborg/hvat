@@ -1,29 +1,16 @@
 //! Slider widget for selecting numeric values
 
+use crate::constants::{
+    format_number, BIG_STEP_MULTIPLIER, DEFAULT_STEP_DIVIDER, FINE_STEP_MULTIPLIER,
+    SLIDER_HEIGHT, SLIDER_INPUT_PADDING, SLIDER_INPUT_SPACING, SLIDER_INPUT_WIDTH,
+    SLIDER_THUMB_RADIUS, SLIDER_TRACK_HEIGHT, SMALL_FONT_SIZE, THUMB_HIT_AREA_MULTIPLIER,
+};
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::SliderState;
 use crate::widget::Widget;
-
-/// Default slider height
-const DEFAULT_HEIGHT: f32 = 24.0;
-/// Track height
-const TRACK_HEIGHT: f32 = 4.0;
-/// Thumb radius
-const THUMB_RADIUS: f32 = 8.0;
-/// Default font size
-const FONT_SIZE: f32 = 12.0;
-/// Input field width
-const INPUT_WIDTH: f32 = 60.0;
-/// Input field padding
-const INPUT_PADDING: f32 = 4.0;
-/// Spacing between slider and input
-const INPUT_SPACING: f32 = 8.0;
-/// Cursor width for input
-const CURSOR_WIDTH: f32 = 1.0;
-/// Character width approximation
-const CHAR_WIDTH_FACTOR: f32 = 0.6;
+use crate::widgets::text_core;
 
 /// Configuration for slider appearance
 #[derive(Debug, Clone)]
@@ -110,7 +97,7 @@ impl<M> Slider<M> {
             step: None,
             state: SliderState::default(),
             width: Length::Fill(1.0),
-            height: Length::Fixed(DEFAULT_HEIGHT),
+            height: Length::Fixed(SLIDER_HEIGHT),
             hovered: false,
             show_value: false,
             show_input: false,
@@ -220,14 +207,7 @@ impl<M> Slider<M> {
 
     /// Format value for input field (always editable format)
     fn format_value_for_input(&self, value: f32) -> String {
-        // If it's close to an integer, display as integer
-        if (value - value.round()).abs() < 0.0001 {
-            format!("{}", value.round() as i32)
-        } else {
-            // Otherwise display with up to 3 decimal places, trimming trailing zeros
-            let formatted = format!("{:.3}", value);
-            formatted.trim_end_matches('0').trim_end_matches('.').to_string()
-        }
+        format_number(value)
     }
 
     /// Get slider bounds (excludes input area if shown)
@@ -236,7 +216,7 @@ impl<M> Slider<M> {
             Bounds::new(
                 bounds.x,
                 bounds.y,
-                bounds.width - INPUT_WIDTH - INPUT_SPACING,
+                bounds.width - SLIDER_INPUT_WIDTH - SLIDER_INPUT_SPACING,
                 bounds.height,
             )
         } else {
@@ -248,10 +228,10 @@ impl<M> Slider<M> {
     fn input_bounds(&self, bounds: Bounds) -> Option<Bounds> {
         if self.show_input {
             Some(Bounds::new(
-                bounds.x + bounds.width - INPUT_WIDTH,
-                bounds.y + (bounds.height - DEFAULT_HEIGHT) / 2.0,
-                INPUT_WIDTH,
-                DEFAULT_HEIGHT,
+                bounds.x + bounds.width - SLIDER_INPUT_WIDTH,
+                bounds.y + (bounds.height - SLIDER_HEIGHT) / 2.0,
+                SLIDER_INPUT_WIDTH,
+                SLIDER_HEIGHT,
             ))
         } else {
             None
@@ -260,13 +240,13 @@ impl<M> Slider<M> {
 
     /// Get track bounds (accounting for thumb radius)
     fn track_bounds(&self, slider_bounds: Bounds) -> Bounds {
-        let padding = THUMB_RADIUS;
-        let track_y = slider_bounds.y + (slider_bounds.height - TRACK_HEIGHT) / 2.0;
+        let padding = SLIDER_THUMB_RADIUS;
+        let track_y = slider_bounds.y + (slider_bounds.height - SLIDER_TRACK_HEIGHT) / 2.0;
         Bounds::new(
             slider_bounds.x + padding,
             track_y,
             slider_bounds.width - padding * 2.0,
-            TRACK_HEIGHT,
+            SLIDER_TRACK_HEIGHT,
         )
     }
 
@@ -277,85 +257,78 @@ impl<M> Slider<M> {
         let thumb_x = track.x + progress * track.width;
         let thumb_y = slider_bounds.y + slider_bounds.height / 2.0;
         Bounds::new(
-            thumb_x - THUMB_RADIUS,
-            thumb_y - THUMB_RADIUS,
-            THUMB_RADIUS * 2.0,
-            THUMB_RADIUS * 2.0,
+            thumb_x - SLIDER_THUMB_RADIUS,
+            thumb_y - SLIDER_THUMB_RADIUS,
+            SLIDER_THUMB_RADIUS * 2.0,
+            SLIDER_THUMB_RADIUS * 2.0,
         )
     }
 
     /// Handle input field character insertion
     fn input_insert_char(&mut self, c: char) -> bool {
-        // Only allow digits, minus, and period
-        if !c.is_ascii_digit() && c != '-' && c != '.' {
-            return false;
-        }
-
-        // Minus only at start
-        if c == '-' && self.state.input_cursor != 0 {
-            return false;
-        }
-
-        // Only one period
-        if c == '.' && self.state.input_text.contains('.') {
+        // Use text_core validation for number chars
+        if !text_core::is_valid_number_char(c, self.state.input_cursor, &self.state.input_text) {
             return false;
         }
 
         // Push undo state before making changes
         self.state.push_text_undo();
 
-        // If there's a selection, delete it first
-        if let Some((start, end)) = self.state.input_selection {
-            let (start, end) = (start.min(end), start.max(end));
-            self.state.input_text.drain(start..end);
-            self.state.input_cursor = start;
-            self.state.input_selection = None;
-        }
-
-        self.state.input_text.insert(self.state.input_cursor, c);
-        self.state.input_cursor += 1;
+        // Insert text using text_core (handles selection deletion)
+        self.state.input_cursor = text_core::insert_text(
+            &mut self.state.input_text,
+            self.state.input_cursor,
+            self.state.input_selection,
+            &c.to_string(),
+        );
+        self.state.input_selection = None;
         true
     }
 
-    /// Handle input field backspace
+    /// Handle input field backspace (with undo support)
     fn input_handle_backspace(&mut self) -> bool {
-        if let Some((start, end)) = self.state.input_selection {
-            // Push undo state before making changes
+        // Check if backspace would do anything
+        let would_modify = self.state.input_selection.is_some()
+            || (self.state.input_cursor > 0 && !self.state.input_text.is_empty());
+
+        if would_modify {
+            // Push undo BEFORE making changes
             self.state.push_text_undo();
-            let (start, end) = (start.min(end), start.max(end));
-            self.state.input_text.drain(start..end);
-            self.state.input_cursor = start;
-            self.state.input_selection = None;
-            true
-        } else if self.state.input_cursor > 0 {
-            // Push undo state before making changes
-            self.state.push_text_undo();
-            self.state.input_text.remove(self.state.input_cursor - 1);
-            self.state.input_cursor -= 1;
-            true
-        } else {
-            false
+
+            if let Some(new_cursor) = text_core::handle_backspace(
+                &mut self.state.input_text,
+                self.state.input_cursor,
+                self.state.input_selection,
+            ) {
+                self.state.input_cursor = new_cursor;
+                self.state.input_selection = None;
+                return true;
+            }
         }
+        false
     }
 
-    /// Handle input field delete
+    /// Handle input field delete (with undo support)
     fn input_handle_delete(&mut self) -> bool {
-        if let Some((start, end)) = self.state.input_selection {
-            // Push undo state before making changes
+        // Check if delete would do anything
+        let would_modify = self.state.input_selection.is_some()
+            || self.state.input_cursor < self.state.input_text.len();
+
+        if would_modify {
+            // Push undo BEFORE making changes
             self.state.push_text_undo();
-            let (start, end) = (start.min(end), start.max(end));
-            self.state.input_text.drain(start..end);
-            self.state.input_cursor = start;
-            self.state.input_selection = None;
-            true
-        } else if self.state.input_cursor < self.state.input_text.len() {
-            // Push undo state before making changes
-            self.state.push_text_undo();
-            self.state.input_text.remove(self.state.input_cursor);
-            true
-        } else {
-            false
+
+            if let Some(new_cursor) = text_core::handle_delete(
+                &mut self.state.input_text,
+                self.state.input_cursor,
+                self.state.input_selection,
+            ) {
+                self.state.input_cursor = new_cursor;
+                self.state.input_selection = None;
+                return true;
+            }
         }
+        false
     }
 
     /// Parse input text and update value
@@ -387,26 +360,12 @@ impl<M> Slider<M> {
             self.state.input_cursor = self.state.input_text.len();
         }
     }
-
-    /// Calculate character width for input field
-    fn input_char_width(&self) -> f32 {
-        FONT_SIZE * CHAR_WIDTH_FACTOR
-    }
-
-    /// Convert x position to character index in input
-    fn input_x_to_char_index(&self, x: f32, input_bounds: &Bounds) -> usize {
-        let content_x = input_bounds.x + INPUT_PADDING;
-        let relative_x = x - content_x;
-        let char_width = self.input_char_width();
-        let index = (relative_x / char_width).round() as i32;
-        index.clamp(0, self.state.input_text.len() as i32) as usize
-    }
 }
 
 impl<M: Clone + 'static> Widget<M> for Slider<M> {
     fn layout(&mut self, available: Size) -> Size {
         let width = self.width.resolve(available.width, 200.0);
-        let height = self.height.resolve(available.height, DEFAULT_HEIGHT);
+        let height = self.height.resolve(available.height, SLIDER_HEIGHT);
         Size::new(width, height)
     }
 
@@ -437,14 +396,14 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
 
         let cx = thumb.x + thumb.width / 2.0;
         let cy = thumb.y + thumb.height / 2.0;
-        renderer.fill_circle(cx, cy, THUMB_RADIUS, thumb_color);
+        renderer.fill_circle(cx, cy, SLIDER_THUMB_RADIUS, thumb_color);
 
         // Draw value label if enabled (above thumb)
         if self.show_value {
             let text = self.format_current_value();
-            let text_x = thumb.x + THUMB_RADIUS - (text.len() as f32 * FONT_SIZE * 0.3);
+            let text_x = thumb.x + SLIDER_THUMB_RADIUS - (text.len() as f32 * SMALL_FONT_SIZE * 0.3);
             let text_y = slider_bounds.y + 2.0;
-            renderer.text(&text, text_x, text_y, FONT_SIZE, self.config.label_color);
+            renderer.text(&text, text_x, text_y, SMALL_FONT_SIZE, self.config.label_color);
         }
 
         // Draw input field if enabled
@@ -465,47 +424,46 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
             };
             renderer.stroke_rect(input_bounds, border_color, 1.0);
 
-            // Content area
-            let content_x = input_bounds.x + INPUT_PADDING;
-            let content_y = input_bounds.y + (input_bounds.height - FONT_SIZE) / 2.0;
-            let content_width = input_bounds.width - INPUT_PADDING * 2.0;
+            // Content area for text_core functions
+            let content = Bounds::new(
+                input_bounds.x + SLIDER_INPUT_PADDING,
+                input_bounds.y + 2.0,
+                input_bounds.width - SLIDER_INPUT_PADDING * 2.0,
+                input_bounds.height - 4.0,
+            );
+            let content_y = input_bounds.y + (input_bounds.height - SMALL_FONT_SIZE) / 2.0;
 
             // Selection
             if self.state.input_focused {
-                if let Some((start, end)) = self.state.input_selection {
-                    let (start, end) = (start.min(end), start.max(end));
-                    let char_width = self.input_char_width();
-                    let sel_x = content_x + start as f32 * char_width;
-                    let sel_width = (end - start) as f32 * char_width;
-                    let sel_bounds = Bounds::new(
-                        sel_x,
-                        input_bounds.y + 2.0,
-                        sel_width.min(content_width),
-                        input_bounds.height - 4.0,
+                if let Some(selection) = self.state.input_selection {
+                    text_core::draw_selection(
+                        renderer,
+                        content,
+                        selection,
+                        SMALL_FONT_SIZE,
+                        self.config.input_selection_color,
                     );
-                    renderer.fill_rect(sel_bounds, self.config.input_selection_color);
                 }
             }
 
             // Text
             renderer.text(
                 &self.state.input_text,
-                content_x,
+                content.x,
                 content_y,
-                FONT_SIZE,
+                SMALL_FONT_SIZE,
                 self.config.input_text_color,
             );
 
             // Cursor
             if self.state.input_focused {
-                let cursor_x = content_x + self.state.input_cursor as f32 * self.input_char_width();
-                let cursor_bounds = Bounds::new(
-                    cursor_x,
-                    input_bounds.y + 4.0,
-                    CURSOR_WIDTH,
-                    input_bounds.height - 8.0,
+                text_core::draw_cursor(
+                    renderer,
+                    content,
+                    self.state.input_cursor,
+                    SMALL_FONT_SIZE,
+                    self.config.input_cursor_color,
                 );
-                renderer.fill_rect(cursor_bounds, self.config.input_cursor_color);
             }
         }
     }
@@ -520,11 +478,12 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
             Event::MouseMove { position, .. } => {
                 let (x, y) = *position;
 
-                // Check if hovering thumb
-                let thumb_center_x = thumb.x + THUMB_RADIUS;
-                let thumb_center_y = thumb.y + THUMB_RADIUS;
+                // Check if hovering thumb (with expanded hit area)
+                let thumb_center_x = thumb.x + SLIDER_THUMB_RADIUS;
+                let thumb_center_y = thumb.y + SLIDER_THUMB_RADIUS;
                 let dist_sq = (x - thumb_center_x).powi(2) + (y - thumb_center_y).powi(2);
-                self.hovered = dist_sq <= (THUMB_RADIUS * 1.5).powi(2);
+                let hit_radius = SLIDER_THUMB_RADIUS * THUMB_HIT_AREA_MULTIPLIER;
+                self.hovered = dist_sq <= hit_radius.powi(2);
 
                 // Handle drag
                 if self.state.dragging {
@@ -555,7 +514,13 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     if ib.contains(x, y) {
                         let was_focused = self.state.input_focused;
                         self.state.input_focused = true;
-                        let new_cursor = self.input_x_to_char_index(x, ib);
+                        let content_x = ib.x + SLIDER_INPUT_PADDING;
+                        let new_cursor = text_core::x_to_char_index(
+                            x,
+                            content_x,
+                            SMALL_FONT_SIZE,
+                            self.state.input_text.len(),
+                        );
 
                         if modifiers.shift && was_focused {
                             if let Some((start, _)) = self.state.input_selection {
@@ -595,12 +560,13 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                 }
 
-                // Check if clicking on thumb
-                let thumb_center_x = thumb.x + THUMB_RADIUS;
-                let thumb_center_y = thumb.y + THUMB_RADIUS;
+                // Check if clicking on thumb (with expanded hit area)
+                let thumb_center_x = thumb.x + SLIDER_THUMB_RADIUS;
+                let thumb_center_y = thumb.y + SLIDER_THUMB_RADIUS;
                 let dist_sq = (x - thumb_center_x).powi(2) + (y - thumb_center_y).powi(2);
+                let hit_radius = SLIDER_THUMB_RADIUS * THUMB_HIT_AREA_MULTIPLIER;
 
-                if dist_sq <= (THUMB_RADIUS * 1.5).powi(2) {
+                if dist_sq <= hit_radius.powi(2) {
                     self.state.dragging = true;
                     log::debug!("Slider: started dragging");
                     if let Some(ref on_change) = self.on_change {
@@ -684,58 +650,47 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             }
                         }
                         KeyCode::Left => {
-                            if modifiers.shift {
-                                if self.state.input_cursor > 0 {
-                                    let anchor = self.state.input_selection.map(|(s, _)| s).unwrap_or(self.state.input_cursor);
-                                    self.state.input_cursor -= 1;
-                                    self.state.input_selection = Some((anchor, self.state.input_cursor));
-                                }
-                            } else if self.state.input_selection.is_some() {
-                                let (start, end) = self.state.input_selection.unwrap();
-                                self.state.input_cursor = start.min(end);
-                                self.state.input_selection = None;
-                            } else if self.state.input_cursor > 0 {
-                                self.state.input_cursor -= 1;
-                            }
+                            let result = text_core::handle_left(
+                                self.state.input_cursor,
+                                self.state.input_selection,
+                                modifiers.shift,
+                            );
+                            self.state.input_cursor = result.cursor;
+                            self.state.input_selection = result.selection;
                         }
                         KeyCode::Right => {
-                            if modifiers.shift {
-                                if self.state.input_cursor < self.state.input_text.len() {
-                                    let anchor = self.state.input_selection.map(|(s, _)| s).unwrap_or(self.state.input_cursor);
-                                    self.state.input_cursor += 1;
-                                    self.state.input_selection = Some((anchor, self.state.input_cursor));
-                                }
-                            } else if self.state.input_selection.is_some() {
-                                let (start, end) = self.state.input_selection.unwrap();
-                                self.state.input_cursor = start.max(end);
-                                self.state.input_selection = None;
-                            } else if self.state.input_cursor < self.state.input_text.len() {
-                                self.state.input_cursor += 1;
-                            }
+                            let result = text_core::handle_right(
+                                self.state.input_cursor,
+                                self.state.input_selection,
+                                self.state.input_text.len(),
+                                modifiers.shift,
+                            );
+                            self.state.input_cursor = result.cursor;
+                            self.state.input_selection = result.selection;
                         }
                         KeyCode::Home => {
-                            if modifiers.shift {
-                                let anchor = self.state.input_selection.map(|(s, _)| s).unwrap_or(self.state.input_cursor);
-                                self.state.input_cursor = 0;
-                                self.state.input_selection = Some((anchor, 0));
-                            } else {
-                                self.state.input_cursor = 0;
-                                self.state.input_selection = None;
-                            }
+                            let result = text_core::handle_home(
+                                self.state.input_cursor,
+                                self.state.input_selection,
+                                modifiers.shift,
+                            );
+                            self.state.input_cursor = result.cursor;
+                            self.state.input_selection = result.selection;
                         }
                         KeyCode::End => {
-                            if modifiers.shift {
-                                let anchor = self.state.input_selection.map(|(s, _)| s).unwrap_or(self.state.input_cursor);
-                                self.state.input_cursor = self.state.input_text.len();
-                                self.state.input_selection = Some((anchor, self.state.input_cursor));
-                            } else {
-                                self.state.input_cursor = self.state.input_text.len();
-                                self.state.input_selection = None;
-                            }
+                            let result = text_core::handle_end(
+                                self.state.input_cursor,
+                                self.state.input_selection,
+                                self.state.input_text.len(),
+                                modifiers.shift,
+                            );
+                            self.state.input_cursor = result.cursor;
+                            self.state.input_selection = result.selection;
                         }
                         KeyCode::A if modifiers.ctrl => {
-                            self.state.input_selection = Some((0, self.state.input_text.len()));
-                            self.state.input_cursor = self.state.input_text.len();
+                            let result = text_core::handle_select_all(self.state.input_text.len());
+                            self.state.input_cursor = result.cursor;
+                            self.state.input_selection = result.selection;
                         }
                         KeyCode::Z if modifiers.ctrl && modifiers.shift => {
                             // Ctrl+Shift+Z = Redo
@@ -790,7 +745,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             }
                         }
                         KeyCode::Up => {
-                            let step = self.step.unwrap_or((self.max - self.min) / 100.0);
+                            let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                             let new_value = (self.state.value + step).clamp(self.min, self.max);
                             if (new_value - self.state.value).abs() > f32::EPSILON {
                                 self.state.value = new_value;
@@ -803,7 +758,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             }
                         }
                         KeyCode::Down => {
-                            let step = self.step.unwrap_or((self.max - self.min) / 100.0);
+                            let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                             let new_value = (self.state.value - step).clamp(self.min, self.max);
                             if (new_value - self.state.value).abs() > f32::EPSILON {
                                 self.state.value = new_value;
@@ -825,8 +780,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     return None;
                 }
 
-                let step = self.step.unwrap_or((self.max - self.min) / 100.0);
-                let big_step = step * 10.0;
+                let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
+                let big_step = step * BIG_STEP_MULTIPLIER;
 
                 let delta = match key {
                     KeyCode::Left | KeyCode::Down => Some(-step),
@@ -853,7 +808,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 };
 
                 if let Some(d) = delta {
-                    let multiplier = if modifiers.shift { 0.1 } else { 1.0 };
+                    let multiplier = if modifiers.shift { FINE_STEP_MULTIPLIER } else { 1.0 };
                     let new_value = (self.state.value + d * multiplier).clamp(self.min, self.max);
                     if (new_value - self.state.value).abs() > f32::EPSILON {
                         self.state.value = new_value;
@@ -874,7 +829,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 // Handle scroll on input field
                 if let Some(ib) = &input_bounds {
                     if ib.contains(position.0, position.1) {
-                        let step = self.step.unwrap_or((self.max - self.min) / 100.0);
+                        let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                         let scroll_delta = delta.1.signum() * step;
                         let new_value = (self.state.value + scroll_delta).clamp(self.min, self.max);
                         if (new_value - self.state.value).abs() > f32::EPSILON {
@@ -893,7 +848,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     return None;
                 }
 
-                let step = self.step.unwrap_or((self.max - self.min) / 100.0);
+                let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                 let scroll_delta = delta.1 * step;
                 let new_value = (self.state.value + scroll_delta).clamp(self.min, self.max);
 

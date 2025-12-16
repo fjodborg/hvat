@@ -8,9 +8,11 @@ mod dropdown;
 mod image_viewer;
 mod number_input;
 mod row;
+pub mod scrollbar;
 mod scrollable;
 mod slider;
 mod text;
+pub mod text_core;
 mod text_input;
 
 pub use button::Button;

@@ -775,7 +775,6 @@ impl ComprehensiveDemo {
             ComprehensiveMessage::NotesChanged(text, state) => {
                 self.notes_input_text = text;
                 self.notes_input_state = state;
-                log::debug!("Notes changed: \"{}\"", self.notes_input_text);
             }
             ComprehensiveMessage::NotesSubmitted(text) => {
                 log::info!("Notes submitted: \"{}\"", text);

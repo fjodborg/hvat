@@ -1,25 +1,12 @@
 //! Text input widget for editable text fields
 
+use crate::constants::{line_height, DEFAULT_FONT_SIZE, TEXT_INPUT_PADDING};
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::TextInputState;
 use crate::widget::Widget;
-
-/// Default padding
-const DEFAULT_PADDING: Padding = Padding {
-    top: 6.0,
-    right: 8.0,
-    bottom: 6.0,
-    left: 8.0,
-};
-
-/// Default font size
-const DEFAULT_FONT_SIZE: f32 = 14.0;
-/// Cursor width
-const CURSOR_WIDTH: f32 = 1.0;
-/// Character width approximation
-const CHAR_WIDTH_FACTOR: f32 = 0.6;
+use crate::widgets::text_core;
 
 /// Configuration for text input appearance
 #[derive(Debug, Clone)]
@@ -90,7 +77,7 @@ impl<M> TextInput<M> {
             state: TextInputState::default(),
             width: Length::Fill(1.0),
             height: Length::Shrink,
-            padding: DEFAULT_PADDING,
+            padding: TEXT_INPUT_PADDING,
             font_size: DEFAULT_FONT_SIZE,
             config: TextInputConfig::default(),
             on_change: None,
@@ -174,76 +161,58 @@ impl<M> TextInput<M> {
         )
     }
 
-    /// Calculate character width
-    fn char_width(&self) -> f32 {
-        self.font_size * CHAR_WIDTH_FACTOR
-    }
-
-    /// Convert x position to character index
-    fn x_to_char_index(&self, x: f32, content_x: f32) -> usize {
-        let relative_x = x - content_x;
-        let char_width = self.char_width();
-        let index = (relative_x / char_width).round() as i32;
-        index.clamp(0, self.value.len() as i32) as usize
-    }
-
-    /// Get cursor x position
-    fn cursor_x(&self, content_x: f32) -> f32 {
-        content_x + self.state.cursor as f32 * self.char_width()
-    }
-
     /// Handle text insertion (with undo support)
     fn insert_text(&mut self, text: &str) {
         // Push undo before making changes
         self.state.push_undo(&self.value);
 
-        // If there's a selection, delete it first
-        if let Some((start, end)) = self.state.selection {
-            let (start, end) = (start.min(end), start.max(end));
-            self.value.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-        }
-
-        self.value.insert_str(self.state.cursor, text);
-        self.state.cursor += text.len();
+        self.state.cursor =
+            text_core::insert_text(&mut self.value, self.state.cursor, self.state.selection, text);
+        self.state.selection = None;
     }
 
     /// Handle backspace (with undo support)
     fn handle_backspace(&mut self) -> bool {
-        if let Some((start, end)) = self.state.selection {
+        // Check if backspace would do anything (selection exists or cursor > 0)
+        let would_modify =
+            self.state.selection.is_some() || (self.state.cursor > 0 && !self.value.is_empty());
+
+        if would_modify {
+            // Push undo BEFORE making changes
             self.state.push_undo(&self.value);
-            let (start, end) = (start.min(end), start.max(end));
-            self.value.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-            true
-        } else if self.state.cursor > 0 {
-            self.state.push_undo(&self.value);
-            self.value.remove(self.state.cursor - 1);
-            self.state.cursor -= 1;
-            true
-        } else {
-            false
+
+            if let Some(new_cursor) = text_core::handle_backspace(
+                &mut self.value,
+                self.state.cursor,
+                self.state.selection,
+            ) {
+                self.state.cursor = new_cursor;
+                self.state.selection = None;
+                return true;
+            }
         }
+        false
     }
 
     /// Handle delete (with undo support)
     fn handle_delete(&mut self) -> bool {
-        if let Some((start, end)) = self.state.selection {
+        // Check if delete would do anything (selection exists or cursor < len)
+        let would_modify =
+            self.state.selection.is_some() || self.state.cursor < self.value.len();
+
+        if would_modify {
+            // Push undo BEFORE making changes
             self.state.push_undo(&self.value);
-            let (start, end) = (start.min(end), start.max(end));
-            self.value.drain(start..end);
-            self.state.cursor = start;
-            self.state.selection = None;
-            true
-        } else if self.state.cursor < self.value.len() {
-            self.state.push_undo(&self.value);
-            self.value.remove(self.state.cursor);
-            true
-        } else {
-            false
+
+            if let Some(new_cursor) =
+                text_core::handle_delete(&mut self.value, self.state.cursor, self.state.selection)
+            {
+                self.state.cursor = new_cursor;
+                self.state.selection = None;
+                return true;
+            }
         }
+        false
     }
 
     /// Handle undo (Ctrl+Z)
@@ -275,7 +244,7 @@ impl<M> Default for TextInput<M> {
 
 impl<M: Clone + 'static> Widget<M> for TextInput<M> {
     fn layout(&mut self, available: Size) -> Size {
-        let content_height = self.font_size * 1.2;
+        let content_height = line_height(self.font_size);
         let min_height = content_height + self.padding.vertical();
         let min_width = 100.0;
 
@@ -306,13 +275,14 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
         // Draw selection if present
         if self.state.is_focused {
-            if let Some((start, end)) = self.state.selection {
-                let (start, end) = (start.min(end), start.max(end));
-                let char_width = self.char_width();
-                let sel_x = content.x + start as f32 * char_width;
-                let sel_width = (end - start) as f32 * char_width;
-                let sel_bounds = Bounds::new(sel_x, content.y, sel_width, content.height);
-                renderer.fill_rect(sel_bounds, self.config.selection_color);
+            if let Some(selection) = self.state.selection {
+                text_core::draw_selection(
+                    renderer,
+                    content,
+                    selection,
+                    self.font_size,
+                    self.config.selection_color,
+                );
             }
         }
 
@@ -340,14 +310,13 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
         // Draw cursor if focused
         if self.state.is_focused {
-            let cursor_x = self.cursor_x(content.x);
-            let cursor_bounds = Bounds::new(
-                cursor_x,
-                content.y + 2.0,
-                CURSOR_WIDTH,
-                content.height - 4.0,
+            text_core::draw_cursor(
+                renderer,
+                content,
+                self.state.cursor,
+                self.font_size,
+                self.config.cursor_color,
             );
-            renderer.fill_rect(cursor_bounds, self.config.cursor_color);
         }
     }
 
@@ -367,7 +336,8 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     // Focus and position cursor
                     let was_focused = self.state.is_focused;
                     self.state.is_focused = true;
-                    let new_cursor = self.x_to_char_index(x, content.x);
+                    let new_cursor =
+                        text_core::x_to_char_index(x, content.x, self.font_size, self.value.len());
 
                     if modifiers.shift && was_focused {
                         // Extend selection
@@ -400,7 +370,6 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
             Event::TextInput { text } if self.state.is_focused => {
                 self.insert_text(text);
-                log::debug!("TextInput: text input '{}', value = '{}'", text, self.value);
                 if let Some(ref on_change) = self.on_change {
                     return Some(on_change(self.value.clone(), self.state.clone()));
                 }
@@ -426,81 +395,47 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         }
                     }
                     KeyCode::Left => {
-                        if modifiers.shift {
-                            // Extend selection
-                            if self.state.cursor > 0 {
-                                let anchor = self
-                                    .state
-                                    .selection
-                                    .map(|(s, _)| s)
-                                    .unwrap_or(self.state.cursor);
-                                self.state.cursor -= 1;
-                                self.state.selection = Some((anchor, self.state.cursor));
-                            }
-                        } else {
-                            if self.state.selection.is_some() {
-                                let (start, end) = self.state.selection.unwrap();
-                                self.state.cursor = start.min(end);
-                                self.state.selection = None;
-                            } else if self.state.cursor > 0 {
-                                self.state.cursor -= 1;
-                            }
-                        }
+                        let result = text_core::handle_left(
+                            self.state.cursor,
+                            self.state.selection,
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::Right => {
-                        if modifiers.shift {
-                            // Extend selection
-                            if self.state.cursor < self.value.len() {
-                                let anchor = self
-                                    .state
-                                    .selection
-                                    .map(|(s, _)| s)
-                                    .unwrap_or(self.state.cursor);
-                                self.state.cursor += 1;
-                                self.state.selection = Some((anchor, self.state.cursor));
-                            }
-                        } else {
-                            if self.state.selection.is_some() {
-                                let (start, end) = self.state.selection.unwrap();
-                                self.state.cursor = start.max(end);
-                                self.state.selection = None;
-                            } else if self.state.cursor < self.value.len() {
-                                self.state.cursor += 1;
-                            }
-                        }
+                        let result = text_core::handle_right(
+                            self.state.cursor,
+                            self.state.selection,
+                            self.value.len(),
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::Home => {
-                        if modifiers.shift {
-                            let anchor = self
-                                .state
-                                .selection
-                                .map(|(s, _)| s)
-                                .unwrap_or(self.state.cursor);
-                            self.state.cursor = 0;
-                            self.state.selection = Some((anchor, 0));
-                        } else {
-                            self.state.cursor = 0;
-                            self.state.selection = None;
-                        }
+                        let result = text_core::handle_home(
+                            self.state.cursor,
+                            self.state.selection,
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::End => {
-                        if modifiers.shift {
-                            let anchor = self
-                                .state
-                                .selection
-                                .map(|(s, _)| s)
-                                .unwrap_or(self.state.cursor);
-                            self.state.cursor = self.value.len();
-                            self.state.selection = Some((anchor, self.state.cursor));
-                        } else {
-                            self.state.cursor = self.value.len();
-                            self.state.selection = None;
-                        }
+                        let result = text_core::handle_end(
+                            self.state.cursor,
+                            self.state.selection,
+                            self.value.len(),
+                            modifiers.shift,
+                        );
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::A if modifiers.ctrl => {
-                        // Select all
-                        self.state.selection = Some((0, self.value.len()));
-                        self.state.cursor = self.value.len();
+                        let result = text_core::handle_select_all(self.value.len());
+                        self.state.cursor = result.cursor;
+                        self.state.selection = result.selection;
                     }
                     KeyCode::Z if modifiers.ctrl && !modifiers.shift => {
                         // Undo
