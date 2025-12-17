@@ -1,7 +1,9 @@
 //! Demo showcasing input widgets: Slider, TextInput, NumberInput
 
+use crate::element::Element;
+use crate::layout::Length;
+use crate::prelude::*;
 use crate::state::{NumberInputState, SliderState, TextInputState};
-use crate::{col, Element, Length};
 
 /// Input widgets demo state
 pub struct InputWidgetsDemo {
@@ -56,18 +58,26 @@ impl InputWidgetsDemo {
         &self,
         wrap: impl Fn(InputWidgetsMessage) -> M + Clone + 'static,
     ) -> Element<M> {
+        // Clone state values needed inside closures
+        let slider_state = self.slider_value.clone();
         let slider_value = self.slider_value.value;
+        let slider_input_state = self.slider_input_value.clone();
         let slider_input_value = self.slider_input_value.value;
+        let stepped_slider_state = self.stepped_slider_value.clone();
         let stepped_slider_value = self.stepped_slider_value.value;
+        let text_input_state = self.text_input_state.clone();
         let text_value = self.text_value.clone();
+        let number_input_state = self.number_input_state.clone();
+        let number_input_state2 = self.number_input_state2.clone();
 
-        let wrap1 = wrap.clone();
-        let wrap2 = wrap.clone();
-        let wrap3 = wrap.clone();
-        let wrap4 = wrap.clone();
-        let wrap5 = wrap.clone();
-        let wrap6 = wrap.clone();
-        let wrap7 = wrap.clone();
+        // Clone wrap for each widget that needs it
+        let wrap_slider = wrap.clone();
+        let wrap_slider_input = wrap.clone();
+        let wrap_stepped = wrap.clone();
+        let wrap_text_submit = wrap.clone();
+        let wrap_text_change = wrap.clone();
+        let wrap_number1 = wrap.clone();
+        let wrap_number2 = wrap.clone();
 
         col(move |c| {
             c.text("Input Widgets Demo");
@@ -78,10 +88,10 @@ impl InputWidgetsDemo {
             c.text("Basic Slider (0-100):");
             c.row(|r| {
                 r.slider(0.0, 100.0)
-                    .state(&self.slider_value)
+                    .state(&slider_state)
                     .width(Length::Fixed(300.0))
                     .on_change({
-                        let w = wrap1.clone();
+                        let w = wrap_slider.clone();
                         move |s| w(InputWidgetsMessage::SliderChanged(s))
                     })
                     .build();
@@ -93,11 +103,11 @@ impl InputWidgetsDemo {
             c.text("Slider with Editable Input (0-100):");
             c.row(|r| {
                 r.slider(0.0, 100.0)
-                    .state(&self.slider_input_value)
+                    .state(&slider_input_state)
                     .show_input(true)
                     .width(Length::Fixed(300.0))
                     .on_change({
-                        let w = wrap2.clone();
+                        let w = wrap_slider_input.clone();
                         move |s| w(InputWidgetsMessage::SliderInputChanged(s))
                     })
                     .build();
@@ -109,13 +119,13 @@ impl InputWidgetsDemo {
             c.text("Stepped Slider (0-10, step=1) with Value Label:");
             c.row(|r| {
                 r.slider(0.0, 10.0)
-                    .state(&self.stepped_slider_value)
+                    .state(&stepped_slider_state)
                     .step(1.0)
                     .show_value(true)
                     .show_input(true)
                     .width(Length::Fixed(300.0))
                     .on_change({
-                        let w = wrap3.clone();
+                        let w = wrap_stepped.clone();
                         move |s| w(InputWidgetsMessage::SteppedSliderChanged(s))
                     })
                     .build();
@@ -127,16 +137,16 @@ impl InputWidgetsDemo {
             c.text("Text Input:");
             c.row(|r| {
                 r.text_input()
-                    .value(&self.text_value)
+                    .value(&text_value)
                     .placeholder("Enter some text...")
-                    .state(&self.text_input_state)
+                    .state(&text_input_state)
                     .width(Length::Fixed(300.0))
                     .on_submit({
-                        let w = wrap4.clone();
+                        let w = wrap_text_submit.clone();
                         move |s| w(InputWidgetsMessage::TextInputSubmitted(s))
                     })
                     .on_change({
-                        let w = wrap5.clone();
+                        let w = wrap_text_change.clone();
                         move |s, state| w(InputWidgetsMessage::TextInputChanged(s, state))
                     })
                     .build();
@@ -148,12 +158,12 @@ impl InputWidgetsDemo {
             c.text("Number Input with Buttons (0-100, step=1):");
             c.row(|r| {
                 r.number_input()
-                    .state(&self.number_input_state)
+                    .state(&number_input_state)
                     .range(0.0, 100.0)
                     .step(1.0)
                     .width(Length::Fixed(120.0))
                     .on_change({
-                        let w = wrap6.clone();
+                        let w = wrap_number1.clone();
                         move |v, s| w(InputWidgetsMessage::NumberInputChanged(v, s))
                     })
                     .build();
@@ -165,12 +175,12 @@ impl InputWidgetsDemo {
             c.text("Number Input without Buttons (decimal, step=0.1):");
             c.row(|r| {
                 r.number_input()
-                    .state(&self.number_input_state2)
+                    .state(&number_input_state2)
                     .step(0.1)
                     .show_buttons(false)
                     .width(Length::Fixed(100.0))
                     .on_change({
-                        let w = wrap7.clone();
+                        let w = wrap_number2.clone();
                         move |v, s| w(InputWidgetsMessage::NumberInput2Changed(v, s))
                     })
                     .build();

@@ -3,9 +3,9 @@
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer, TextureId};
-use crate::state::{FitMode, ImageViewerState};
+use crate::state::{FitMode, ImageViewerState, PanDragData, PanDragExt};
 use crate::widget::Widget;
-use hvat_gpu::TransformUniform;
+use hvat_gpu::{ImageAdjustments, TransformUniform};
 use std::marker::PhantomData;
 
 /// Zoom factor per scroll notch
@@ -76,6 +76,8 @@ pub struct ImageViewer<M> {
     texture_height: u32,
     /// Current state
     state: ImageViewerState,
+    /// Image adjustments (brightness, contrast, gamma, hue) - applied on GPU
+    adjustments: ImageAdjustments,
     /// Change handler
     on_change: Option<Box<dyn Fn(ImageViewerState) -> M>>,
     /// Click handler for annotation tools
@@ -110,6 +112,7 @@ impl<M> ImageViewer<M> {
             texture_width: width,
             texture_height: height,
             state: ImageViewerState::default(),
+            adjustments: ImageAdjustments::default(),
             on_change: None,
             on_click: None,
             pannable: true,
@@ -132,6 +135,7 @@ impl<M> ImageViewer<M> {
             texture_width: 0,
             texture_height: 0,
             state: ImageViewerState::default(),
+            adjustments: ImageAdjustments::default(),
             on_change: None,
             on_click: None,
             pannable: true,
@@ -218,6 +222,14 @@ impl<M> ImageViewer<M> {
     /// Set annotation overlays to draw
     pub fn overlays(mut self, overlays: Vec<AnnotationOverlay>) -> Self {
         self.overlays = overlays;
+        self
+    }
+
+    /// Set image adjustments (brightness, contrast, gamma, hue shift)
+    ///
+    /// These adjustments are applied on the GPU for real-time performance.
+    pub fn adjustments(mut self, adjustments: ImageAdjustments) -> Self {
+        self.adjustments = adjustments;
         self
     }
 
@@ -389,30 +401,16 @@ impl<M> ImageViewer<M> {
         None
     }
 
-    /// Calculate the zoom value for 1:1 pixel mapping (1 image pixel = 1 screen pixel)
-    fn calculate_one_to_one_zoom(&self, bounds: &Bounds) -> f32 {
-        if self.texture_width == 0 || self.texture_height == 0 {
-            return 1.0;
-        }
-
-        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
-        let view_aspect = bounds.width / bounds.height;
-
-        // Calculate zoom to show actual pixels
-        // At zoom=1, the image fills the view. For 1:1, we need to
-        // scale so that 1 image pixel = 1 screen pixel
-        if image_aspect > view_aspect {
-            bounds.width / self.texture_width as f32
-        } else {
-            bounds.height / self.texture_height as f32
-        }
-    }
-
     /// Calculate the appropriate zoom value based on fit mode
     fn calculate_zoom_for_mode(&self, bounds: &Bounds) -> f32 {
         match self.state.fit_mode {
             FitMode::FitToView => 1.0,
-            FitMode::OneToOne => self.calculate_one_to_one_zoom(bounds),
+            FitMode::OneToOne => ImageViewerState::calculate_one_to_one_zoom(
+                bounds.width,
+                bounds.height,
+                self.texture_width,
+                self.texture_height,
+            ),
             FitMode::Manual => self.state.zoom,
         }
     }
@@ -458,7 +456,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Draw the texture if we have one
         if let Some(texture_id) = self.texture_id {
             let transform = self.calculate_transform(&bounds);
-            renderer.texture(texture_id, bounds, transform);
+            renderer.texture_with_adjustments(texture_id, bounds, transform, self.adjustments);
         } else {
             // Draw a placeholder if no texture
             let placeholder_color = Color::rgba(0.2, 0.3, 0.4, 0.5);
@@ -726,7 +724,9 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 }
 
                 if self.pannable {
-                    self.state.drag.start_drag(*position);
+                    self.state.drag.start_drag_with(PanDragData {
+                        last_pos: *position,
+                    });
                     // Emit change to persist dragging state
                     return self.emit_change_with_bounds(&bounds);
                 }

@@ -1,7 +1,9 @@
 //! Scrollable widget demo
 
+use crate::element::Element;
 use crate::prelude::*;
-use crate::{Column, Context, Element, Scrollable, ScrollDirection, ScrollbarVisibility};
+use crate::widgets::{Column, Scrollable, ScrollDirection, ScrollbarVisibility};
+use crate::Context;
 
 /// Scrollable demo state
 pub struct ScrollableDemo {
@@ -40,7 +42,7 @@ impl ScrollableDemo {
         let scroll_offset = self.scroll_state.offset.1;
         let scroll_state = self.scroll_state.clone();
 
-        crate::col(move |c| {
+        col(move |c| {
             c.text("Scrollable Widget Demo");
 
             let add_msg = wrap_add(ScrollableMessage::AddItems);

@@ -6,7 +6,7 @@ use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
-use hvat_gpu::{ColorPipeline, ColorVertex, GpuContext, Pipeline, Texture, TexturePipeline, TransformUniform};
+use hvat_gpu::{ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, Pipeline, Texture, TexturePipeline, TransformUniform};
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
@@ -103,6 +103,7 @@ struct TextureRequest {
     texture_id: TextureId,
     bounds: Bounds,
     transform: TransformUniform,
+    adjustments: ImageAdjustments,
     clip: Option<Bounds>,
 }
 
@@ -475,11 +476,23 @@ impl Renderer {
         bounds: Bounds,
         transform: TransformUniform,
     ) {
+        self.texture_with_adjustments(texture_id, bounds, transform, ImageAdjustments::default());
+    }
+
+    /// Queue a texture for rendering with image adjustments (brightness, contrast, etc.)
+    pub fn texture_with_adjustments(
+        &mut self,
+        texture_id: TextureId,
+        bounds: Bounds,
+        transform: TransformUniform,
+        adjustments: ImageAdjustments,
+    ) {
         let clip = self.clip_stack.last().cloned();
         self.texture_requests.push(TextureRequest {
             texture_id,
             bounds,
             transform,
+            adjustments,
             clip,
         });
     }
@@ -660,8 +673,9 @@ impl Renderer {
                 continue;
             }
 
-            // Update transform uniform
+            // Update transform uniform and image adjustments
             self.texture_pipeline.update_transform(gpu_ctx, request.transform);
+            self.texture_pipeline.update_adjustments(gpu_ctx, request.adjustments);
 
             // Render with scissor rect
             {

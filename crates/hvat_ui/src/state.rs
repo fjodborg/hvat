@@ -113,45 +113,86 @@ impl<T: Clone> UndoStack<T> {
     }
 }
 
-/// Pan drag interaction state for image viewer
+/// Generic drag interaction state
+///
+/// This enum represents a dragging state that can optionally hold data.
+/// Use `()` as the type parameter for simple drag tracking without data.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum PanDragState {
+pub enum DragState<T = ()> {
     /// Not dragging
     #[default]
     Idle,
-    /// Dragging with last mouse position (screen space)
-    Dragging { last_pos: (f32, f32) },
+    /// Dragging with optional data
+    Dragging(T),
 }
 
-impl PanDragState {
+impl<T: Default> DragState<T> {
     /// Check if currently dragging
     pub fn is_dragging(&self) -> bool {
-        matches!(self, PanDragState::Dragging { .. })
+        matches!(self, DragState::Dragging(_))
     }
 
-    /// Get the last drag position if dragging
-    pub fn last_pos(&self) -> Option<(f32, f32)> {
-        match self {
-            PanDragState::Dragging { last_pos } => Some(*last_pos),
-            PanDragState::Idle => None,
-        }
-    }
-
-    /// Start dragging with the given position
-    pub fn start_drag(&mut self, pos: (f32, f32)) {
-        *self = PanDragState::Dragging { last_pos: pos };
-    }
-
-    /// Update last position during drag
-    pub fn update_pos(&mut self, pos: (f32, f32)) {
-        if let PanDragState::Dragging { last_pos } = self {
-            *last_pos = pos;
-        }
+    /// Start dragging with default data
+    pub fn start_drag(&mut self) {
+        *self = DragState::Dragging(T::default());
     }
 
     /// Stop dragging
     pub fn stop_drag(&mut self) {
-        *self = PanDragState::Idle;
+        *self = DragState::Idle;
+    }
+
+    /// Get the drag data if dragging
+    pub fn data(&self) -> Option<&T> {
+        match self {
+            DragState::Dragging(data) => Some(data),
+            DragState::Idle => None,
+        }
+    }
+
+    /// Get mutable drag data if dragging
+    pub fn data_mut(&mut self) -> Option<&mut T> {
+        match self {
+            DragState::Dragging(data) => Some(data),
+            DragState::Idle => None,
+        }
+    }
+}
+
+impl<T> DragState<T> {
+    /// Start dragging with specific data
+    pub fn start_drag_with(&mut self, data: T) {
+        *self = DragState::Dragging(data);
+    }
+}
+
+/// Pan drag data for image viewer
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PanDragData {
+    /// Last mouse position (screen space)
+    pub last_pos: (f32, f32),
+}
+
+/// Pan drag interaction state for image viewer
+pub type PanDragState = DragState<PanDragData>;
+
+/// Extension methods for PanDragState
+pub trait PanDragExt {
+    /// Get the last drag position if dragging
+    fn last_pos(&self) -> Option<(f32, f32)>;
+    /// Update last position during drag
+    fn update_pos(&mut self, pos: (f32, f32));
+}
+
+impl PanDragExt for PanDragState {
+    fn last_pos(&self) -> Option<(f32, f32)> {
+        self.data().map(|d| d.last_pos)
+    }
+
+    fn update_pos(&mut self, pos: (f32, f32)) {
+        if let Some(data) = self.data_mut() {
+            data.last_pos = pos;
+        }
     }
 }
 
@@ -233,7 +274,7 @@ impl ImageViewerState {
         self.pan = (0.0, 0.0);
     }
 
-    /// Calculate the zoom value for 1:1 pixel mapping
+    /// Calculate the zoom value for 1:1 pixel mapping (1 image pixel = 1 screen pixel)
     pub fn calculate_one_to_one_zoom(view_w: f32, view_h: f32, tex_w: u32, tex_h: u32) -> f32 {
         if tex_w == 0 || tex_h == 0 {
             return 1.0;
@@ -241,10 +282,15 @@ impl ImageViewerState {
         let image_aspect = tex_w as f32 / tex_h as f32;
         let view_aspect = view_w / view_h;
 
+        // At zoom=1.0, the image fills the view (fit mode).
+        // For 1:1, we need to zoom so that 1 image pixel = 1 screen pixel.
+        // This is the INVERSE of fit: zoom = texture_size / view_size
         if image_aspect > view_aspect {
-            view_w / tex_w as f32
+            // Image is wider - would be width-constrained in fit mode
+            tex_w as f32 / view_w
         } else {
-            view_h / tex_h as f32
+            // Image is taller - would be height-constrained in fit mode
+            tex_h as f32 / view_h
         }
     }
 
@@ -296,38 +342,25 @@ pub enum FitMode {
     OneToOne,
 }
 
-/// Scroll thumb drag interaction state
+/// Scroll thumb drag data
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ScrollDragState {
-    /// Not dragging
-    #[default]
-    Idle,
-    /// Dragging the scrollbar thumb, with offset within thumb where drag started
-    Dragging { thumb_offset: f32 },
+pub struct ScrollDragData {
+    /// Offset within thumb where drag started
+    pub thumb_offset: f32,
 }
 
-impl ScrollDragState {
-    /// Check if currently dragging
-    pub fn is_dragging(&self) -> bool {
-        matches!(self, ScrollDragState::Dragging { .. })
-    }
+/// Scroll thumb drag interaction state
+pub type ScrollDragState = DragState<ScrollDragData>;
 
+/// Extension methods for ScrollDragState
+pub trait ScrollDragExt {
     /// Get the thumb offset if dragging
-    pub fn thumb_offset(&self) -> Option<f32> {
-        match self {
-            ScrollDragState::Dragging { thumb_offset } => Some(*thumb_offset),
-            ScrollDragState::Idle => None,
-        }
-    }
+    fn thumb_offset(&self) -> Option<f32>;
+}
 
-    /// Start dragging with the given thumb offset
-    pub fn start_drag(&mut self, offset: f32) {
-        *self = ScrollDragState::Dragging { thumb_offset: offset };
-    }
-
-    /// Stop dragging
-    pub fn stop_drag(&mut self) {
-        *self = ScrollDragState::Idle;
+impl ScrollDragExt for ScrollDragState {
+    fn thumb_offset(&self) -> Option<f32> {
+        self.data().map(|d| d.thumb_offset)
     }
 }
 
@@ -492,32 +525,141 @@ pub struct TextSnapshot {
     pub cursor: usize,
 }
 
-/// Slider thumb drag interaction state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SliderDragState {
-    /// Not dragging
-    #[default]
-    Idle,
-    /// Dragging the slider thumb
-    Dragging,
+/// Shared undo/redo history for text input fields
+///
+/// This encapsulates the common undo/redo logic used by SliderState and NumberInputState
+/// to avoid code duplication.
+#[derive(Debug, Clone, Default)]
+pub struct TextUndoHistory {
+    undo_stack: Vec<TextSnapshot>,
+    redo_stack: Vec<TextSnapshot>,
 }
 
-impl SliderDragState {
-    /// Check if currently dragging
-    pub fn is_dragging(&self) -> bool {
-        matches!(self, SliderDragState::Dragging)
+impl TextUndoHistory {
+    /// Push current state to undo stack (call before making changes)
+    pub fn push(&mut self, snapshot: TextSnapshot) {
+        self.undo_stack.push(snapshot);
+        self.redo_stack.clear();
+        while self.undo_stack.len() > UNDO_STACK_LIMIT {
+            self.undo_stack.remove(0);
+        }
     }
 
-    /// Start dragging
-    pub fn start_drag(&mut self) {
-        *self = SliderDragState::Dragging;
+    /// Undo: returns previous state if available
+    pub fn undo(&mut self, current: TextSnapshot) -> Option<TextSnapshot> {
+        let prev = self.undo_stack.pop()?;
+        self.redo_stack.push(current);
+        Some(prev)
     }
 
-    /// Stop dragging
-    pub fn stop_drag(&mut self) {
-        *self = SliderDragState::Idle;
+    /// Redo: returns next state if available
+    pub fn redo(&mut self, current: TextSnapshot) -> Option<TextSnapshot> {
+        let next = self.redo_stack.pop()?;
+        self.undo_stack.push(current);
+        Some(next)
+    }
+
+    /// Clear all history
+    pub fn clear(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
     }
 }
+
+/// Text editing state with integrated undo/redo support
+///
+/// This struct combines text, cursor, selection, and undo stack into a single
+/// reusable component that can be embedded in widget states.
+#[derive(Debug, Clone)]
+pub struct TextEditState {
+    /// The text content
+    pub text: String,
+    /// Cursor position (character index)
+    pub cursor: usize,
+    /// Selection range (start, end) if any
+    pub selection: Option<(usize, usize)>,
+    /// Undo stack for text changes
+    undo: UndoStack<TextSnapshot>,
+}
+
+impl Default for TextEditState {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            cursor: 0,
+            selection: None,
+            undo: UndoStack::default(),
+        }
+    }
+}
+
+impl TextEditState {
+    /// Create a new text edit state with initial text
+    pub fn new(text: impl Into<String>) -> Self {
+        let text = text.into();
+        let cursor = text.len();
+        Self {
+            text,
+            cursor,
+            selection: None,
+            undo: UndoStack::default(),
+        }
+    }
+
+    /// Create a snapshot of current state
+    fn snapshot(&self) -> TextSnapshot {
+        TextSnapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+        }
+    }
+
+    /// Push current state to undo stack (call BEFORE making changes)
+    pub fn push_undo(&mut self) {
+        self.undo.push(self.snapshot());
+    }
+
+    /// Undo the last change, returns true if successful
+    pub fn undo(&mut self) -> bool {
+        let current = self.snapshot();
+        if let Some(prev) = self.undo.undo(current) {
+            self.text = prev.text;
+            self.cursor = prev.cursor;
+            self.selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo the last undone change, returns true if successful
+    pub fn redo(&mut self) -> bool {
+        let current = self.snapshot();
+        if let Some(next) = self.undo.redo(current) {
+            self.text = next.text;
+            self.cursor = next.cursor;
+            self.selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear undo/redo history
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+    }
+
+    /// Set the text content, updating cursor to end
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+        self.cursor = self.text.len();
+        self.selection = None;
+    }
+}
+
+/// Slider thumb drag interaction state (alias for DragState<()>)
+pub type SliderDragState = DragState<()>;
 
 /// State for slider widgets
 ///
@@ -537,10 +679,8 @@ pub struct SliderState {
     pub input_cursor: usize,
     /// Input field selection range
     pub input_selection: Option<(usize, usize)>,
-    /// Text undo stack (for Ctrl+Z in input field)
-    pub(crate) input_undo_stack: Vec<TextSnapshot>,
-    /// Text redo stack (for Ctrl+Y in input field)
-    pub(crate) input_redo_stack: Vec<TextSnapshot>,
+    /// Text undo/redo history (for Ctrl+Z/Ctrl+Y in input field)
+    pub(crate) input_history: TextUndoHistory,
 }
 
 impl Default for SliderState {
@@ -552,8 +692,7 @@ impl Default for SliderState {
             input_text: String::new(),
             input_cursor: 0,
             input_selection: None,
-            input_undo_stack: Vec::new(),
-            input_redo_stack: Vec::new(),
+            input_history: TextUndoHistory::default(),
         }
     }
 }
@@ -569,33 +708,25 @@ impl SliderState {
             input_text: text,
             input_cursor: cursor,
             input_selection: None,
-            input_undo_stack: Vec::new(),
-            input_redo_stack: Vec::new(),
+            input_history: TextUndoHistory::default(),
         }
     }
 
     /// Push current text state to undo stack (call before making changes)
     pub fn push_text_undo(&mut self) {
-        self.input_undo_stack.push(TextSnapshot {
+        self.input_history.push(TextSnapshot {
             text: self.input_text.clone(),
             cursor: self.input_cursor,
         });
-        // Clear redo stack on new change
-        self.input_redo_stack.clear();
-        // Limit undo history
-        while self.input_undo_stack.len() > UNDO_STACK_LIMIT {
-            self.input_undo_stack.remove(0);
-        }
     }
 
     /// Undo text change (Ctrl+Z)
     pub fn text_undo(&mut self) -> bool {
-        if let Some(snapshot) = self.input_undo_stack.pop() {
-            // Save current state to redo stack
-            self.input_redo_stack.push(TextSnapshot {
-                text: self.input_text.clone(),
-                cursor: self.input_cursor,
-            });
+        let current = TextSnapshot {
+            text: self.input_text.clone(),
+            cursor: self.input_cursor,
+        };
+        if let Some(snapshot) = self.input_history.undo(current) {
             self.input_text = snapshot.text;
             self.input_cursor = snapshot.cursor;
             self.input_selection = None;
@@ -607,12 +738,11 @@ impl SliderState {
 
     /// Redo text change (Ctrl+Y or Ctrl+Shift+Z)
     pub fn text_redo(&mut self) -> bool {
-        if let Some(snapshot) = self.input_redo_stack.pop() {
-            // Save current state to undo stack
-            self.input_undo_stack.push(TextSnapshot {
-                text: self.input_text.clone(),
-                cursor: self.input_cursor,
-            });
+        let current = TextSnapshot {
+            text: self.input_text.clone(),
+            cursor: self.input_cursor,
+        };
+        if let Some(snapshot) = self.input_history.redo(current) {
             self.input_text = snapshot.text;
             self.input_cursor = snapshot.cursor;
             self.input_selection = None;
@@ -624,8 +754,7 @@ impl SliderState {
 
     /// Clear text undo/redo history
     pub fn clear_text_history(&mut self) {
-        self.input_undo_stack.clear();
-        self.input_redo_stack.clear();
+        self.input_history.clear();
     }
 
     /// Set the value
@@ -666,10 +795,8 @@ pub struct NumberInputState {
     pub is_focused: bool,
     /// Selection range (start, end) if any
     pub selection: Option<(usize, usize)>,
-    /// Text undo stack (for Ctrl+Z)
-    pub(crate) undo_stack: Vec<TextSnapshot>,
-    /// Text redo stack (for Ctrl+Y/Ctrl+Shift+Z)
-    pub(crate) redo_stack: Vec<TextSnapshot>,
+    /// Text undo/redo history (for Ctrl+Z/Ctrl+Y)
+    pub(crate) history: TextUndoHistory,
 }
 
 impl Default for NumberInputState {
@@ -679,8 +806,7 @@ impl Default for NumberInputState {
             cursor: 1,
             is_focused: false,
             selection: None,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            history: TextUndoHistory::default(),
         }
     }
 }
@@ -694,8 +820,7 @@ impl NumberInputState {
             cursor,
             is_focused: false,
             selection: None,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            history: TextUndoHistory::default(),
         }
     }
 
@@ -729,26 +854,19 @@ impl NumberInputState {
 
     /// Push current text state to undo stack (call before making changes)
     pub fn push_undo(&mut self) {
-        self.undo_stack.push(TextSnapshot {
+        self.history.push(TextSnapshot {
             text: self.text.clone(),
             cursor: self.cursor,
         });
-        // Clear redo stack on new change
-        self.redo_stack.clear();
-        // Limit undo history
-        while self.undo_stack.len() > UNDO_STACK_LIMIT {
-            self.undo_stack.remove(0);
-        }
     }
 
     /// Undo text change (Ctrl+Z) - returns true if undo was performed
     pub fn undo(&mut self) -> bool {
-        if let Some(snapshot) = self.undo_stack.pop() {
-            // Save current state to redo stack
-            self.redo_stack.push(TextSnapshot {
-                text: self.text.clone(),
-                cursor: self.cursor,
-            });
+        let current = TextSnapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+        };
+        if let Some(snapshot) = self.history.undo(current) {
             self.text = snapshot.text;
             self.cursor = snapshot.cursor;
             self.selection = None;
@@ -760,12 +878,11 @@ impl NumberInputState {
 
     /// Redo text change (Ctrl+Y or Ctrl+Shift+Z) - returns true if redo was performed
     pub fn redo(&mut self) -> bool {
-        if let Some(snapshot) = self.redo_stack.pop() {
-            // Save current state to undo stack
-            self.undo_stack.push(TextSnapshot {
-                text: self.text.clone(),
-                cursor: self.cursor,
-            });
+        let current = TextSnapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+        };
+        if let Some(snapshot) = self.history.redo(current) {
             self.text = snapshot.text;
             self.cursor = snapshot.cursor;
             self.selection = None;
@@ -777,8 +894,7 @@ impl NumberInputState {
 
     /// Clear undo/redo history
     pub fn clear_history(&mut self) {
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        self.history.clear();
     }
 }
 

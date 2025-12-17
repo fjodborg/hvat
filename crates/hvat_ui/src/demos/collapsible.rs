@@ -1,7 +1,9 @@
 //! Collapsible widget demo
 
+use crate::element::Element;
+use crate::prelude::*;
+use crate::renderer::Color;
 use crate::state::CollapsibleState;
-use crate::{collapsible, Color, Element};
 
 /// Collapsible demo state
 pub struct CollapsibleDemo {
@@ -58,7 +60,7 @@ impl CollapsibleDemo {
         let scrollable_section = self.scrollable_section.clone();
         let click_count = self.click_count;
 
-        crate::col(move |c| {
+        col(move |c| {
             c.text("Collapsible Widget Demo");
             c.text("");
             c.text("-- Basic Collapsible Sections --");

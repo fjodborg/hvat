@@ -8,6 +8,7 @@ use crate::widgets::{
     AnnotationOverlay, Button, Column, ImageClick, ImageViewer, NumberInput, Row, Slider, Text,
     TextInput,
 };
+use hvat_gpu::ImageAdjustments;
 
 /// Context for building widget trees using a closure-based API
 ///
@@ -232,6 +233,14 @@ impl<'a, M: 'static + Clone> ImageViewerBuilder<'a, M> {
     /// Set annotation overlays to draw
     pub fn overlays(mut self, overlays: Vec<AnnotationOverlay>) -> Self {
         self.viewer = self.viewer.overlays(overlays);
+        self
+    }
+
+    /// Set image adjustments (brightness, contrast, gamma, hue shift)
+    ///
+    /// These adjustments are applied on the GPU for real-time performance.
+    pub fn adjustments(mut self, adjustments: ImageAdjustments) -> Self {
+        self.viewer = self.viewer.adjustments(adjustments);
         self
     }
 

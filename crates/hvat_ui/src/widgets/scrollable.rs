@@ -5,7 +5,7 @@ use crate::element::Element;
 use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
-use crate::state::ScrollState;
+use crate::state::{ScrollDragExt, ScrollState};
 use crate::widget::Widget;
 
 /// Scroll direction for scrollable containers
@@ -501,7 +501,9 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 // Check vertical scrollbar
                 if let Some(thumb) = self.v_scrollbar_thumb(bounds) {
                     if thumb.contains(position.0, position.1) {
-                        self.state.drag.start_drag(position.1 - thumb.y);
+                        self.state.drag.start_drag_with(crate::state::ScrollDragData {
+                            thumb_offset: position.1 - thumb.y,
+                        });
                         return self.emit_change();
                     }
 
@@ -534,7 +536,9 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 // Check horizontal scrollbar
                 if let Some(thumb) = self.h_scrollbar_thumb(bounds) {
                     if thumb.contains(position.0, position.1) {
-                        self.state.drag.start_drag(position.0 - thumb.x);
+                        self.state.drag.start_drag_with(crate::state::ScrollDragData {
+                            thumb_offset: position.0 - thumb.x,
+                        });
                         return self.emit_change();
                     }
 

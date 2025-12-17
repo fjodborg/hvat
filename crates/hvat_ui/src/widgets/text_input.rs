@@ -6,40 +6,23 @@ use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::TextInputState;
 use crate::widget::Widget;
+use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
 
 /// Configuration for text input appearance
 #[derive(Debug, Clone)]
 pub struct TextInputConfig {
-    /// Background color
-    pub background_color: Color,
-    /// Background color when focused
-    pub focused_background_color: Color,
-    /// Border color
-    pub border_color: Color,
-    /// Border color when focused
-    pub focused_border_color: Color,
-    /// Text color
-    pub text_color: Color,
+    /// Base input configuration (colors for background, border, cursor, selection)
+    pub base: BaseInputConfig,
     /// Placeholder text color
     pub placeholder_color: Color,
-    /// Cursor color
-    pub cursor_color: Color,
-    /// Selection background color
-    pub selection_color: Color,
 }
 
 impl Default for TextInputConfig {
     fn default() -> Self {
         Self {
-            background_color: Color::rgb(0.15, 0.15, 0.17),
-            focused_background_color: Color::rgb(0.18, 0.18, 0.2),
-            border_color: Color::BORDER,
-            focused_border_color: Color::ACCENT,
-            text_color: Color::TEXT_PRIMARY,
+            base: BaseInputConfig::default(),
             placeholder_color: Color::TEXT_SECONDARY,
-            cursor_color: Color::ACCENT,
-            selection_color: Color::rgba(0.4, 0.6, 1.0, 0.3),
         }
     }
 }
@@ -173,12 +156,7 @@ impl<M> TextInput<M> {
 
     /// Get the content bounds (inside padding)
     fn content_bounds(&self, bounds: Bounds) -> Bounds {
-        Bounds::new(
-            bounds.x + self.padding.left,
-            bounds.y + self.padding.top,
-            bounds.width - self.padding.horizontal(),
-            bounds.height - self.padding.vertical(),
-        )
+        text_core::content_bounds(bounds, &self.padding)
     }
 
     /// Handle text insertion
@@ -243,25 +221,12 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
-        // Draw background
-        let bg_color = if self.state.is_focused {
-            self.config.focused_background_color
-        } else {
-            self.config.background_color
-        };
-        renderer.fill_rect(bounds, bg_color);
-
-        // Draw border
-        let border_color = if self.state.is_focused {
-            self.config.focused_border_color
-        } else {
-            self.config.border_color
-        };
-        renderer.stroke_rect(bounds, border_color, 1.0);
-
         let content = self.content_bounds(bounds);
 
-        // Draw selection if present
+        // Draw background and border
+        text_core::draw_input_background(renderer, bounds, self.state.is_focused, &self.config.base);
+
+        // Draw selection if present and focused
         if self.state.is_focused {
             if let Some(selection) = self.state.selection {
                 text_core::draw_selection(
@@ -269,7 +234,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     content,
                     selection,
                     self.font_size,
-                    self.config.selection_color,
+                    self.config.base.selection_color,
                 );
             }
         }
@@ -292,7 +257,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                 content.x,
                 text_y,
                 self.font_size,
-                self.config.text_color,
+                self.config.base.text_color,
             );
         }
 
@@ -303,7 +268,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                 content,
                 self.state.cursor,
                 self.font_size,
-                self.config.cursor_color,
+                self.config.base.cursor_color,
             );
         }
     }
@@ -444,23 +409,21 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
             Event::GlobalMousePress { position, .. } => {
                 // Blur when clicking outside (but not inside - that's handled by MousePress)
-                if self.state.is_focused {
-                    let (x, y) = *position;
-                    if !bounds.contains(x, y) {
-                        self.state.is_focused = false;
-                        self.state.selection = None;
-                        log::debug!("TextInput: GlobalMousePress outside, blurred");
-                        return self.emit_change();
-                    }
+                if text_core::handle_blur_on_outside_click(
+                    &mut self.state.is_focused,
+                    &mut self.state.selection,
+                    *position,
+                    bounds,
+                ) {
+                    log::debug!("TextInput: GlobalMousePress outside, blurred");
+                    return self.emit_change();
                 }
                 None
             }
 
             Event::FocusLost => {
                 // Blur when window loses focus
-                if self.state.is_focused {
-                    self.state.is_focused = false;
-                    self.state.selection = None;
+                if text_core::handle_focus_lost(&mut self.state.is_focused, &mut self.state.selection) {
                     log::debug!("TextInput: FocusLost, blurred");
                     return self.emit_change();
                 }

@@ -1,7 +1,8 @@
 //! Dropdown widget demo
 
+use crate::element::Element;
 use crate::prelude::*;
-use crate::{Dropdown, Element};
+use crate::widgets::Dropdown;
 
 /// Dropdown demo state
 pub struct DropdownDemo {
@@ -75,7 +76,7 @@ impl DropdownDemo {
         let simple_dropdown = self.simple_dropdown.clone();
         let searchable_dropdown = self.searchable_dropdown.clone();
 
-        crate::col(move |c| {
+        col(move |c| {
             c.text("Dropdown Widget Demo");
 
             let reset_msg = wrap_reset(DropdownMessage::Reset);

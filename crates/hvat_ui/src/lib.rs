@@ -31,9 +31,9 @@ pub use widget::Widget;
 // Re-export widgets
 pub use widgets::{
     button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
-    slider, text, text_input, AnnotationOverlay, Collapsible, CollapsibleConfig, Column,
-    Dropdown, DropdownConfig, ImageClick, NumberInput, NumberInputConfig, OverlayShape, Row,
-    Scrollable, ScrollDirection, ScrollbarConfig, ScrollbarVisibility, Slider, SliderConfig,
+    slider, text, text_input, AnnotationOverlay, BaseInputConfig, Collapsible, CollapsibleConfig,
+    Column, Dropdown, DropdownConfig, ImageClick, NumberInput, NumberInputConfig, OverlayShape,
+    Row, Scrollable, ScrollDirection, ScrollbarConfig, ScrollbarVisibility, Slider, SliderConfig,
     Text, TextInput, TextInputConfig,
 };
 
@@ -54,7 +54,7 @@ pub mod prelude {
         button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
         slider, text, text_input, ScrollDirection, ScrollbarVisibility,
     };
-    pub use crate::{ClearColor, Texture};
+    pub use crate::{ClearColor, ImageAdjustments, Texture};
 }
 
 /// Run an application with default settings

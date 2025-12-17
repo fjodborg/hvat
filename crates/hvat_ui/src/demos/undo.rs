@@ -1,8 +1,10 @@
 //! Demo showcasing undo/redo functionality with counter, slider, and text input
 
+use crate::element::Element;
 use crate::event::{Event, KeyCode};
+use crate::layout::Length;
+use crate::prelude::*;
 use crate::state::{SliderState, TextInputState, UndoContext, UndoStack};
-use crate::{col, Element, Length};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -36,8 +38,6 @@ pub enum UndoMessage {
     Decrement,
     SliderChanged(SliderState),
     TextInputChanged(String, TextInputState),
-    /// Save undo snapshot (called by widget when edit starts)
-    SaveSnapshot,
     /// Global undo (Ctrl+Z)
     Undo,
     /// Global redo (Ctrl+Y or Ctrl+Shift+Z)
@@ -113,24 +113,28 @@ impl UndoDemo {
         &self,
         wrap: impl Fn(UndoMessage) -> M + Clone + 'static,
     ) -> Element<M> {
+        // Clone state values needed inside closures
         let counter = self.counter;
         let slider_value = self.slider_state.value;
+        let slider_state = self.slider_state.clone();
         let text_value = self.text_value.clone();
+        let text_input_state = self.text_input_state.clone();
         let can_undo = self.global_undo.borrow().can_undo();
         let can_redo = self.global_undo.borrow().can_redo();
         let undo_count = self.global_undo.borrow().undo_count();
         let redo_count = self.global_undo.borrow().redo_count();
 
-        let wrap1 = wrap.clone();
-        let wrap2 = wrap.clone();
-        let wrap3 = wrap.clone();
-        let wrap4 = wrap.clone();
-        let wrap5 = wrap.clone();
-        let wrap6 = wrap.clone();
-        let wrap7 = wrap.clone();
-
         // Create UndoContext for clean on_undo_point callbacks
         let undo_ctx = UndoContext::new(Rc::clone(&self.global_undo), self.snapshot());
+
+        // Clone wrap for each section that needs it
+        let wrap_decrement = wrap.clone();
+        let wrap_increment = wrap.clone();
+        let wrap_slider = wrap.clone();
+        let wrap_text = wrap.clone();
+        let wrap_undo = wrap.clone();
+        let wrap_redo = wrap.clone();
+        let wrap_clear = wrap.clone();
 
         col(move |c| {
             c.text("Undo/Redo Demo (Global)");
@@ -142,11 +146,11 @@ impl UndoDemo {
             c.row(|r| {
                 r.button("-")
                     .width(Length::Fixed(40.0))
-                    .on_click(wrap1(UndoMessage::Decrement));
+                    .on_click(wrap_decrement(UndoMessage::Decrement));
                 r.text(format!("  {}  ", counter));
                 r.button("+")
                     .width(Length::Fixed(40.0))
-                    .on_click(wrap2(UndoMessage::Increment));
+                    .on_click(wrap_increment(UndoMessage::Increment));
             });
             c.text("");
 
@@ -154,11 +158,11 @@ impl UndoDemo {
             c.text("Slider (records on drag start):");
             c.row(|r| {
                 r.slider(0.0, 100.0)
-                    .state(&self.slider_state)
+                    .state(&slider_state)
                     .show_input(true)
                     .width(Length::Fixed(300.0))
                     .on_change({
-                        let w = wrap3.clone();
+                        let w = wrap_slider.clone();
                         move |s| w(UndoMessage::SliderChanged(s))
                     })
                     .on_undo_point(undo_ctx.callback_with_label("slider"))
@@ -171,12 +175,12 @@ impl UndoDemo {
             c.text("Text Input (records on focus):");
             c.row(|r| {
                 r.text_input()
-                    .value(&self.text_value)
+                    .value(&text_value)
                     .placeholder("Type something...")
-                    .state(&self.text_input_state)
+                    .state(&text_input_state)
                     .width(Length::Fixed(300.0))
                     .on_change({
-                        let w = wrap7.clone();
+                        let w = wrap_text.clone();
                         move |s, state| w(UndoMessage::TextInputChanged(s, state))
                     })
                     .on_undo_point(undo_ctx.callback_with_label("text_input"))
@@ -191,20 +195,20 @@ impl UndoDemo {
                 if can_undo {
                     r.button("Undo (Ctrl+Z)")
                         .width(Length::Fixed(120.0))
-                        .on_click(wrap4(UndoMessage::Undo));
+                        .on_click(wrap_undo(UndoMessage::Undo));
                 } else {
                     r.button("Undo (Ctrl+Z)").width(Length::Fixed(120.0)).build();
                 }
                 if can_redo {
                     r.button("Redo (Ctrl+Y)")
                         .width(Length::Fixed(120.0))
-                        .on_click(wrap5(UndoMessage::Redo));
+                        .on_click(wrap_redo(UndoMessage::Redo));
                 } else {
                     r.button("Redo (Ctrl+Y)").width(Length::Fixed(120.0)).build();
                 }
                 r.button("Clear History")
                     .width(Length::Fixed(120.0))
-                    .on_click(wrap6(UndoMessage::ClearHistory));
+                    .on_click(wrap_clear(UndoMessage::ClearHistory));
             });
             c.text(format!("History: {} undo, {} redo steps", undo_count, redo_count));
             c.text("");
@@ -243,11 +247,6 @@ impl UndoDemo {
             UndoMessage::TextInputChanged(text, state) => {
                 self.text_value = text;
                 self.text_input_state = state;
-            }
-            UndoMessage::SaveSnapshot => {
-                // This message is no longer used - snapshots are saved via on_undo_point callbacks
-                self.global_undo.borrow_mut().push(self.snapshot());
-                log::debug!("Saved undo snapshot (via message)");
             }
             UndoMessage::Undo => {
                 let current = self.snapshot();

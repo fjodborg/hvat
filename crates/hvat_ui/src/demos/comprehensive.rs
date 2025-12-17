@@ -162,9 +162,6 @@ pub enum ComprehensiveMessage {
     NotesChanged(String, TextInputState),
     NotesSubmitted(String),
 
-    // Save undo snapshot (called by widgets when edit starts)
-    SaveSnapshot,
-
     // Global undo/redo
     Undo,
     Redo,
@@ -870,12 +867,6 @@ impl ComprehensiveDemo {
                 self.notes_input_state = state;
             }
 
-            // Save undo snapshot (called by widgets via on_undo_point callbacks)
-            ComprehensiveMessage::SaveSnapshot => {
-                // No longer used - snapshots saved via on_undo_point callbacks
-                self.undo_stack.borrow_mut().push(self.snapshot());
-                log::debug!("Saved undo snapshot (via message)");
-            }
             ComprehensiveMessage::NotesSubmitted(text) => {
                 log::info!("Notes submitted: \"{}\"", text);
             }

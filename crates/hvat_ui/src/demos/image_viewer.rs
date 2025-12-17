@@ -1,7 +1,7 @@
 //! Image viewer widget demo
 
+use crate::element::Element;
 use crate::prelude::*;
-use crate::Element;
 
 /// Image viewer demo state
 pub struct ImageViewerDemo {
@@ -75,7 +75,7 @@ impl ImageViewerDemo {
         let pattern = create_test_pattern(width, height);
 
         let gpu_ctx = resources.gpu_context();
-        match crate::Texture::from_rgba8(gpu_ctx, &pattern, width, height) {
+        match Texture::from_rgba8(gpu_ctx, &pattern, width, height) {
             Ok(texture) => {
                 let id = resources.register_texture(&texture);
                 self.texture_id = Some(id);
@@ -100,7 +100,7 @@ impl ImageViewerDemo {
         let wrap_toggle = wrap.clone();
         let wrap_viewer = wrap.clone();
 
-        crate::col(move |c| {
+        col(move |c| {
             // Info bar
             c.row(|r| {
                 r.text(format!(

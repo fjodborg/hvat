@@ -3,8 +3,10 @@
 mod button;
 mod collapsible;
 mod column;
+pub mod config;
 mod container_helpers;
 mod dropdown;
+mod flex_layout;
 mod image_viewer;
 mod number_input;
 mod row;
@@ -18,6 +20,7 @@ mod text_input;
 pub use button::Button;
 pub use collapsible::{Collapsible, CollapsibleConfig};
 pub use column::Column;
+pub use config::BaseInputConfig;
 pub use dropdown::{Dropdown, DropdownConfig};
 pub use image_viewer::{ImageViewer, ImageClick, AnnotationOverlay, OverlayShape};
 pub use number_input::{NumberInput, NumberInputConfig};

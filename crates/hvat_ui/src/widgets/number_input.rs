@@ -9,25 +9,14 @@ use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::NumberInputState;
 use crate::widget::Widget;
+use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
 
 /// Configuration for number input appearance
 #[derive(Debug, Clone)]
 pub struct NumberInputConfig {
-    /// Background color
-    pub background_color: Color,
-    /// Background color when focused
-    pub focused_background_color: Color,
-    /// Border color
-    pub border_color: Color,
-    /// Border color when focused
-    pub focused_border_color: Color,
-    /// Text color
-    pub text_color: Color,
-    /// Cursor color
-    pub cursor_color: Color,
-    /// Selection background color
-    pub selection_color: Color,
+    /// Base input configuration (colors for background, border, cursor, selection, text)
+    pub base: BaseInputConfig,
     /// Button background color
     pub button_color: Color,
     /// Button hover color
@@ -39,13 +28,7 @@ pub struct NumberInputConfig {
 impl Default for NumberInputConfig {
     fn default() -> Self {
         Self {
-            background_color: Color::rgb(0.15, 0.15, 0.17),
-            focused_background_color: Color::rgb(0.18, 0.18, 0.2),
-            border_color: Color::BORDER,
-            focused_border_color: Color::ACCENT,
-            text_color: Color::TEXT_PRIMARY,
-            cursor_color: Color::ACCENT,
-            selection_color: Color::rgba(0.4, 0.6, 1.0, 0.3),
+            base: BaseInputConfig::default(),
             button_color: Color::rgb(0.2, 0.2, 0.24),
             button_hover_color: Color::rgb(0.28, 0.28, 0.32),
             button_text_color: Color::TEXT_PRIMARY,
@@ -388,25 +371,12 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
-        // Draw background
-        let bg_color = if self.state.is_focused {
-            self.config.focused_background_color
-        } else {
-            self.config.background_color
-        };
-        renderer.fill_rect(bounds, bg_color);
-
-        // Draw border
-        let border_color = if self.state.is_focused {
-            self.config.focused_border_color
-        } else {
-            self.config.border_color
-        };
-        renderer.stroke_rect(bounds, border_color, 1.0);
-
         let content = self.content_bounds(bounds);
 
-        // Draw selection if present
+        // Draw background and border
+        text_core::draw_input_background(renderer, bounds, self.state.is_focused, &self.config.base);
+
+        // Draw selection if present and focused
         if self.state.is_focused {
             if let Some(selection) = self.state.selection {
                 text_core::draw_selection(
@@ -414,7 +384,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     content,
                     selection,
                     self.font_size,
-                    self.config.selection_color,
+                    self.config.base.selection_color,
                 );
             }
         }
@@ -426,7 +396,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
             content.x,
             text_y,
             self.font_size,
-            self.config.text_color,
+            self.config.base.text_color,
         );
 
         // Draw cursor if focused
@@ -436,7 +406,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 content,
                 self.state.cursor,
                 self.font_size,
-                self.config.cursor_color,
+                self.config.base.cursor_color,
             );
         }
 
@@ -450,7 +420,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     self.config.button_color
                 };
                 renderer.fill_rect(dec_bounds, btn_color);
-                renderer.stroke_rect(dec_bounds, self.config.border_color, 1.0);
+                renderer.stroke_rect(dec_bounds, self.config.base.border_color, 1.0);
                 // Draw minus
                 let minus_y = dec_bounds.y + dec_bounds.height / 2.0;
                 let minus_x = dec_bounds.x + 4.0;
@@ -472,7 +442,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     self.config.button_color
                 };
                 renderer.fill_rect(inc_bounds, btn_color);
-                renderer.stroke_rect(inc_bounds, self.config.border_color, 1.0);
+                renderer.stroke_rect(inc_bounds, self.config.base.border_color, 1.0);
                 // Draw plus
                 let center_x = inc_bounds.x + inc_bounds.width / 2.0;
                 let center_y = inc_bounds.y + inc_bounds.height / 2.0;
@@ -745,24 +715,22 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
             Event::GlobalMousePress { position, .. } => {
                 // Blur when clicking outside (but not inside - that's handled by MousePress)
-                if self.state.is_focused {
-                    let (x, y) = *position;
-                    if !bounds.contains(x, y) {
-                        self.state.is_focused = false;
-                        self.state.selection = None;
-                        log::debug!("NumberInput: GlobalMousePress outside, blurred");
-                        self.validate_value();
-                        return self.emit_change();
-                    }
+                if text_core::handle_blur_on_outside_click(
+                    &mut self.state.is_focused,
+                    &mut self.state.selection,
+                    *position,
+                    bounds,
+                ) {
+                    log::debug!("NumberInput: GlobalMousePress outside, blurred");
+                    self.validate_value();
+                    return self.emit_change();
                 }
                 None
             }
 
             Event::FocusLost => {
                 // Blur when window loses focus
-                if self.state.is_focused {
-                    self.state.is_focused = false;
-                    self.state.selection = None;
+                if text_core::handle_focus_lost(&mut self.state.is_focused, &mut self.state.selection) {
                     log::debug!("NumberInput: FocusLost, blurred");
                     self.validate_value();
                     return self.emit_change();

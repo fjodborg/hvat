@@ -10,6 +10,7 @@ use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::SliderState;
 use crate::widget::Widget;
+use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
 
 /// Configuration for slider appearance
@@ -29,16 +30,8 @@ pub struct SliderConfig {
     pub border_color: Color,
     /// Label color
     pub label_color: Color,
-    /// Input background color
-    pub input_background_color: Color,
-    /// Input focused background color
-    pub input_focused_background_color: Color,
-    /// Input text color
-    pub input_text_color: Color,
-    /// Input cursor color
-    pub input_cursor_color: Color,
-    /// Input selection color
-    pub input_selection_color: Color,
+    /// Input field configuration (reuses BaseInputConfig)
+    pub input: BaseInputConfig,
 }
 
 impl Default for SliderConfig {
@@ -51,11 +44,7 @@ impl Default for SliderConfig {
             thumb_active_color: Color::ACCENT,
             border_color: Color::BORDER,
             label_color: Color::TEXT_SECONDARY,
-            input_background_color: Color::rgb(0.15, 0.15, 0.17),
-            input_focused_background_color: Color::rgb(0.18, 0.18, 0.2),
-            input_text_color: Color::TEXT_PRIMARY,
-            input_cursor_color: Color::ACCENT,
-            input_selection_color: Color::rgba(0.4, 0.6, 1.0, 0.3),
+            input: BaseInputConfig::default(),
         }
     }
 }
@@ -433,15 +422,9 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
 
         // Draw input field if enabled
         if let Some(input_bounds) = self.input_bounds(bounds) {
-            // Background
-            let bg_color = if self.state.input_focused {
-                self.config.input_focused_background_color
-            } else {
-                self.config.input_background_color
-            };
-            renderer.fill_rect(input_bounds, bg_color);
-
-            // Border
+            // Background and border using input config helpers
+            renderer.fill_rect(input_bounds, self.config.input.background(self.state.input_focused));
+            // Use track_fill_color for focused border to match slider theme
             let border_color = if self.state.input_focused {
                 self.config.track_fill_color
             } else {
@@ -466,7 +449,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         content,
                         selection,
                         SMALL_FONT_SIZE,
-                        self.config.input_selection_color,
+                        self.config.input.selection_color,
                     );
                 }
             }
@@ -477,7 +460,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 content.x,
                 content_y,
                 SMALL_FONT_SIZE,
-                self.config.input_text_color,
+                self.config.input.text_color,
             );
 
             // Cursor
@@ -487,7 +470,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     content,
                     self.state.input_cursor,
                     SMALL_FONT_SIZE,
-                    self.config.input_cursor_color,
+                    self.config.input.cursor_color,
                 );
             }
         }

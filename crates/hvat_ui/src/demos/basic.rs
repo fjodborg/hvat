@@ -1,6 +1,7 @@
 //! Basic button counter demo
 
-use crate::Element;
+use crate::element::Element;
+use crate::prelude::*;
 
 /// Basic demo state
 #[derive(Default)]
@@ -21,7 +22,7 @@ impl BasicDemo {
 
     pub fn view<M: Clone + 'static>(&self, wrap: impl Fn(BasicMessage) -> M + Clone + 'static) -> Element<M> {
         let click_count = self.click_count;
-        crate::col(move |c| {
+        col(move |c| {
             c.text("Basic Demo");
             c.text_sized("A simple button counter example", 12.0);
 

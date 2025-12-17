@@ -335,6 +335,124 @@ pub fn draw_cursor(
 }
 
 // =============================================================================
+// Input Field Drawing Helpers
+// =============================================================================
+
+use crate::layout::Padding;
+use crate::widgets::config::BaseInputConfig;
+
+/// Calculate content bounds from outer bounds and padding
+///
+/// This is the standard formula used by text input widgets to get the
+/// drawable content area inside padding.
+pub fn content_bounds(bounds: Bounds, padding: &Padding) -> Bounds {
+    Bounds::new(
+        bounds.x + padding.left,
+        bounds.y + padding.top,
+        bounds.width - padding.horizontal(),
+        bounds.height - padding.vertical(),
+    )
+}
+
+/// Draw standard input field background and border
+///
+/// Draws the background fill and border stroke based on focus state,
+/// using colors from the BaseInputConfig.
+pub fn draw_input_background(
+    renderer: &mut Renderer,
+    bounds: Bounds,
+    is_focused: bool,
+    config: &BaseInputConfig,
+) {
+    renderer.fill_rect(bounds, config.background(is_focused));
+    renderer.stroke_rect(bounds, config.border(is_focused), 1.0);
+}
+
+/// Draw the complete input field visuals (background, selection, text, cursor)
+///
+/// This consolidates the common drawing sequence used by text input widgets.
+///
+/// # Arguments
+/// * `renderer` - The renderer to draw with
+/// * `bounds` - The outer widget bounds
+/// * `content` - The content bounds (inside padding)
+/// * `text` - The text to display
+/// * `cursor` - Cursor position (character index)
+/// * `selection` - Optional selection range
+/// * `is_focused` - Whether the input is focused
+/// * `font_size` - Font size for text rendering
+/// * `config` - Color configuration
+pub fn draw_input_field(
+    renderer: &mut Renderer,
+    bounds: Bounds,
+    content: Bounds,
+    text: &str,
+    cursor: usize,
+    selection: Option<(usize, usize)>,
+    is_focused: bool,
+    font_size: f32,
+    config: &BaseInputConfig,
+) {
+    // Draw background and border
+    draw_input_background(renderer, bounds, is_focused, config);
+
+    // Draw selection if present and focused
+    if is_focused {
+        if let Some(sel) = selection {
+            draw_selection(renderer, content, sel, font_size, config.selection_color);
+        }
+    }
+
+    // Draw text
+    let text_y = content.y + (content.height - font_size) / 2.0;
+    renderer.text(text, content.x, text_y, font_size, config.text_color);
+
+    // Draw cursor if focused
+    if is_focused {
+        draw_cursor(renderer, content, cursor, font_size, config.cursor_color);
+    }
+}
+
+// =============================================================================
+// Focus/Blur Handling Helpers
+// =============================================================================
+
+/// Handle blur when clicking outside the input bounds
+///
+/// Returns true if focus state changed (was focused and clicked outside).
+pub fn handle_blur_on_outside_click(
+    is_focused: &mut bool,
+    selection: &mut Option<(usize, usize)>,
+    position: (f32, f32),
+    bounds: Bounds,
+) -> bool {
+    if *is_focused {
+        let (x, y) = position;
+        if !bounds.contains(x, y) {
+            *is_focused = false;
+            *selection = None;
+            return true;
+        }
+    }
+    false
+}
+
+/// Handle blur when window loses focus
+///
+/// Returns true if focus state changed (was focused).
+pub fn handle_focus_lost(
+    is_focused: &mut bool,
+    selection: &mut Option<(usize, usize)>,
+) -> bool {
+    if *is_focused {
+        *is_focused = false;
+        *selection = None;
+        return true;
+    }
+    false
+}
+
+// =============================================================================
 // Number Input Validation
 // =============================================================================
 
