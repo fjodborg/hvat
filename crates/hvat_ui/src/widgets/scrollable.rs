@@ -290,7 +290,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
 
     fn has_active_drag(&self) -> bool {
         // Either the scrollbar itself is being dragged, or a child widget is being dragged
-        self.state.dragging || self.content.has_active_drag()
+        self.state.drag.is_dragging() || self.content.has_active_drag()
     }
 
     fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
@@ -425,7 +425,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
 
             // Draw thumb
             if let Some(thumb) = self.v_scrollbar_thumb(bounds) {
-                let color = if self.state.dragging {
+                let color = if self.state.drag.is_dragging() {
                     self.scrollbar_config.thumb_drag_color
                 } else if self.hover_v_scrollbar {
                     self.scrollbar_config.thumb_hover_color
@@ -455,7 +455,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
 
             // Draw thumb
             if let Some(thumb) = self.h_scrollbar_thumb(bounds) {
-                let color = if self.state.dragging {
+                let color = if self.state.drag.is_dragging() {
                     self.scrollbar_config.thumb_drag_color
                 } else if self.hover_h_scrollbar {
                     self.scrollbar_config.thumb_hover_color
@@ -501,8 +501,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 // Check vertical scrollbar
                 if let Some(thumb) = self.v_scrollbar_thumb(bounds) {
                     if thumb.contains(position.0, position.1) {
-                        self.state.dragging = true;
-                        self.state.drag_start_offset = Some(position.1 - thumb.y);
+                        self.state.drag.start_drag(position.1 - thumb.y);
                         return self.emit_change();
                     }
 
@@ -535,8 +534,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 // Check horizontal scrollbar
                 if let Some(thumb) = self.h_scrollbar_thumb(bounds) {
                     if thumb.contains(position.0, position.1) {
-                        self.state.dragging = true;
-                        self.state.drag_start_offset = Some(position.0 - thumb.x);
+                        self.state.drag.start_drag(position.0 - thumb.x);
                         return self.emit_change();
                     }
 
@@ -571,18 +569,16 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.state.dragging {
-                    self.state.dragging = false;
-                    self.state.drag_start_offset = None;
+                if self.state.drag.is_dragging() {
+                    self.state.drag.stop_drag();
                     return self.emit_change();
                 }
             }
 
             Event::CursorLeft => {
                 // Cursor left window - release any drag state
-                if self.state.dragging {
-                    self.state.dragging = false;
-                    self.state.drag_start_offset = None;
+                if self.state.drag.is_dragging() {
+                    self.state.drag.stop_drag();
                     log::debug!("Scrollable: stopped dragging (cursor left window)");
                     return self.emit_change();
                 }
@@ -598,53 +594,51 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     .map_or(false, |t| t.contains(position.0, position.1));
 
                 // Handle scrollbar drag
-                if self.state.dragging {
-                    if let Some(drag_offset) = self.state.drag_start_offset {
-                        // Vertical scrollbar drag
-                        if self.show_vertical_scrollbar() && !self.hover_h_scrollbar {
-                            if let Some(thumb) = self.v_scrollbar_thumb(bounds) {
-                                let track_height = bounds.height
-                                    - if self.show_horizontal_scrollbar() {
-                                        self.scrollbar_config.width
-                                    } else {
-                                        0.0
-                                    };
-                                let thumb_height = thumb.height;
-                                let available_travel = track_height - thumb_height;
+                if let Some(drag_offset) = self.state.drag.thumb_offset() {
+                    // Vertical scrollbar drag
+                    if self.show_vertical_scrollbar() && !self.hover_h_scrollbar {
+                        if let Some(thumb) = self.v_scrollbar_thumb(bounds) {
+                            let track_height = bounds.height
+                                - if self.show_horizontal_scrollbar() {
+                                    self.scrollbar_config.width
+                                } else {
+                                    0.0
+                                };
+                            let thumb_height = thumb.height;
+                            let available_travel = track_height - thumb_height;
 
-                                if available_travel > 0.0 {
-                                    let thumb_y = position.1 - bounds.y - drag_offset;
-                                    let scroll_ratio = (thumb_y / available_travel).clamp(0.0, 1.0);
-                                    let max_scroll =
-                                        (self.content_size.height - self.viewport_size.height).max(0.0);
-                                    self.state.offset.1 = scroll_ratio * max_scroll;
-                                    self.clamp_scroll();
-                                    return self.emit_change();
-                                }
+                            if available_travel > 0.0 {
+                                let thumb_y = position.1 - bounds.y - drag_offset;
+                                let scroll_ratio = (thumb_y / available_travel).clamp(0.0, 1.0);
+                                let max_scroll =
+                                    (self.content_size.height - self.viewport_size.height).max(0.0);
+                                self.state.offset.1 = scroll_ratio * max_scroll;
+                                self.clamp_scroll();
+                                return self.emit_change();
                             }
                         }
+                    }
 
-                        // Horizontal scrollbar drag
-                        if self.show_horizontal_scrollbar() && !self.hover_v_scrollbar {
-                            if let Some(thumb) = self.h_scrollbar_thumb(bounds) {
-                                let track_width = bounds.width
-                                    - if self.show_vertical_scrollbar() {
-                                        self.scrollbar_config.width
-                                    } else {
-                                        0.0
-                                    };
-                                let thumb_width = thumb.width;
-                                let available_travel = track_width - thumb_width;
+                    // Horizontal scrollbar drag
+                    if self.show_horizontal_scrollbar() && !self.hover_v_scrollbar {
+                        if let Some(thumb) = self.h_scrollbar_thumb(bounds) {
+                            let track_width = bounds.width
+                                - if self.show_vertical_scrollbar() {
+                                    self.scrollbar_config.width
+                                } else {
+                                    0.0
+                                };
+                            let thumb_width = thumb.width;
+                            let available_travel = track_width - thumb_width;
 
-                                if available_travel > 0.0 {
-                                    let thumb_x = position.0 - bounds.x - drag_offset;
-                                    let scroll_ratio = (thumb_x / available_travel).clamp(0.0, 1.0);
-                                    let max_scroll =
-                                        (self.content_size.width - self.viewport_size.width).max(0.0);
-                                    self.state.offset.0 = scroll_ratio * max_scroll;
-                                    self.clamp_scroll();
-                                    return self.emit_change();
-                                }
+                            if available_travel > 0.0 {
+                                let thumb_x = position.0 - bounds.x - drag_offset;
+                                let scroll_ratio = (thumb_x / available_travel).clamp(0.0, 1.0);
+                                let max_scroll =
+                                    (self.content_size.width - self.viewport_size.width).max(0.0);
+                                self.state.offset.0 = scroll_ratio * max_scroll;
+                                self.clamp_scroll();
+                                return self.emit_change();
                             }
                         }
                     }
@@ -722,7 +716,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
         // Forward events to content if within viewport
         // Note: MouseRelease must always be forwarded to children (e.g., for buttons)
         // regardless of position, to handle cases where mouse moves slightly during click
-        if !self.state.dragging {
+        if !self.state.drag.is_dragging() {
             // Check if content has an active overlay that might extend outside viewport
             let content_bounds = Bounds::new(
                 viewport_bounds.x,
@@ -798,6 +792,18 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     } else {
                         None
                     }
+                }
+                Event::GlobalMousePress { button, position } => {
+                    // Adjust GlobalMousePress position for scroll offset so that
+                    // child widgets (like dropdowns) can correctly determine if
+                    // the click is inside/outside their bounds
+                    Some(Event::GlobalMousePress {
+                        button: *button,
+                        position: (
+                            position.0 + self.state.offset.0,
+                            position.1 + self.state.offset.1,
+                        ),
+                    })
                 }
                 _ => Some(event.clone()),
             };

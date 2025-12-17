@@ -5,6 +5,7 @@ use crate::constants::{
     COLLAPSIBLE_ICON_SIZE, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING, SCROLLBAR_WIDTH_COMPACT,
     SCROLL_SPEED,
 };
+use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
 use crate::element::Element;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
@@ -256,14 +257,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                     self.content_size.height,
                 );
                 if let Some(content_capture) = content.capture_bounds(content_bounds) {
-                    // Translate content capture bounds to screen space (adjusting for scroll)
-                    let screen_capture = Bounds::new(
-                        content_capture.x,
-                        content_capture.y - self.scroll_state.offset.1,
-                        content_capture.width,
-                        content_capture.height,
-                    );
-                    return Some(layout_bounds.union(&screen_capture));
+                    // Return capture bounds in content space (same as event dispatch space)
+                    // The scroll offset is applied to event positions before dispatch,
+                    // so capture bounds should NOT subtract scroll offset here
+                    return Some(layout_bounds.union(&content_capture));
                 }
             }
         }
@@ -737,17 +734,13 @@ impl<M: 'static> Collapsible<M> {
     fn draw_scrollbar(&self, renderer: &mut Renderer, viewport_bounds: Bounds) {
         let track_bounds = self.scrollbar_track_bounds(viewport_bounds);
 
-        // Draw track
-        renderer.fill_rect(track_bounds, Color::SCROLLBAR_TRACK);
-
-        // Draw thumb if scrolling is needed
-        let max_scroll = (self.content_size.height - self.visible_content_height).max(0.0);
-        if max_scroll > 0.0 {
-            let thumb_height = self.thumb_height(track_bounds.height);
-            let thumb_y = self.thumb_y(track_bounds);
-
-            let thumb_bounds = Bounds::new(track_bounds.x, thumb_y, SCROLLBAR_WIDTH_COMPACT, thumb_height);
-            renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
-        }
+        draw_simple_vertical_scrollbar(
+            renderer,
+            track_bounds,
+            self.content_size.height,
+            self.visible_content_height,
+            self.scroll_state.offset.1,
+            SCROLLBAR_WIDTH_COMPACT,
+        );
     }
 }

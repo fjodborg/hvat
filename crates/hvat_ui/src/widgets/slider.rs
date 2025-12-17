@@ -411,7 +411,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
 
         // Draw thumb
         let thumb = self.thumb_bounds(slider_bounds);
-        let thumb_color = if self.state.dragging {
+        let thumb_color = if self.state.drag.is_dragging() {
             self.config.thumb_active_color
         } else if self.hovered {
             self.config.thumb_hover_color
@@ -511,7 +511,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 self.hovered = dist_sq <= hit_radius.powi(2);
 
                 // Handle drag
-                if self.state.dragging {
+                if self.state.drag.is_dragging() {
                     let new_value = self.position_to_value(x, &track);
                     if (new_value - self.state.value).abs() > f32::EPSILON {
                         self.state.value = new_value;
@@ -599,7 +599,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         log::debug!("Slider: calling on_undo_point (drag start)");
                         on_undo_point();
                     }
-                    self.state.dragging = true;
+                    self.state.drag.start_drag();
                     log::debug!("Slider: started dragging");
                     return self.emit_change();
                 } else if slider_bounds.contains(x, y) {
@@ -610,7 +610,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                     let new_value = self.position_to_value(x, &track);
                     self.state.value = new_value;
-                    self.state.dragging = true;
+                    self.state.drag.start_drag();
                     self.sync_input_from_value();
                     log::debug!("Slider: clicked track, value = {}", new_value);
                     return self.emit_change();
@@ -623,8 +623,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.state.dragging {
-                    self.state.dragging = false;
+                if self.state.drag.is_dragging() {
+                    self.state.drag.stop_drag();
                     log::debug!("Slider: stopped dragging");
                     return self.emit_change();
                 }
@@ -897,8 +897,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
 
             Event::CursorLeft => {
                 // Cursor left window - release any drag state
-                if self.state.dragging {
-                    self.state.dragging = false;
+                if self.state.drag.is_dragging() {
+                    self.state.drag.stop_drag();
                     log::debug!("Slider: stopped dragging (cursor left window)");
                     return self.emit_change();
                 }
@@ -910,6 +910,6 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
     }
 
     fn has_active_drag(&self) -> bool {
-        self.state.dragging
+        self.state.drag.is_dragging()
     }
 }

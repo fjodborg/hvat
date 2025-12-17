@@ -234,9 +234,9 @@ pub struct ScrollbarColors {
 impl Default for ScrollbarColors {
     fn default() -> Self {
         Self {
-            track: Color::rgba(0.15, 0.15, 0.18, 0.5),
-            thumb: Color::rgba(0.4, 0.4, 0.45, 0.8),
-            thumb_hover: Color::rgba(0.5, 0.5, 0.55, 0.9),
+            track: Color::SCROLLBAR_TRACK,
+            thumb: Color::SCROLLBAR_THUMB,
+            thumb_hover: Color::rgba(0.55, 0.55, 0.6, 0.9),
             thumb_drag: Color::rgba(0.6, 0.6, 0.65, 1.0),
         }
     }
@@ -290,6 +290,36 @@ pub fn draw_horizontal_scrollbar(
     // Track is horizontal, at the bottom
     renderer.fill_rect(track_bounds, colors.track);
     draw_thumb(renderer, thumb.bounds, colors, is_hovered, is_dragging);
+}
+
+/// Draw a simple vertical scrollbar with default colors (no hover/drag states)
+///
+/// This is a convenience function for widgets that don't need interactive scrollbar states
+/// (like dropdown and collapsible which handle scrolling via other means).
+pub fn draw_simple_vertical_scrollbar(
+    renderer: &mut Renderer,
+    track_bounds: Bounds,
+    content_size: f32,
+    viewport_size: f32,
+    scroll_offset: f32,
+    bar_width: f32,
+) {
+    // Draw track
+    renderer.fill_rect(track_bounds, Color::SCROLLBAR_TRACK);
+
+    // Calculate and draw thumb if scrolling is needed
+    let max_scroll = (content_size - viewport_size).max(0.0);
+    if max_scroll > 0.0 && content_size > 0.0 {
+        let visible_ratio = (viewport_size / content_size).min(1.0);
+        let thumb_height = (track_bounds.height * visible_ratio).max(SCROLLBAR_MIN_THUMB);
+
+        let scroll_ratio = (scroll_offset / max_scroll).clamp(0.0, 1.0);
+        let available_travel = track_bounds.height - thumb_height;
+        let thumb_y = track_bounds.y + scroll_ratio * available_travel;
+
+        let thumb_bounds = Bounds::new(track_bounds.x, thumb_y, bar_width, thumb_height);
+        renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
+    }
 }
 
 // =============================================================================

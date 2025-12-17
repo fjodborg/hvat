@@ -1,9 +1,10 @@
 //! Dropdown/select widget
 
 use crate::constants::{
-    DROPDOWN_ARROW_WIDTH, DROPDOWN_TEXT_PADDING_X, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING,
+    DROPDOWN_ARROW_WIDTH, DROPDOWN_TEXT_PADDING_X, SCROLLBAR_PADDING,
     SCROLLBAR_WIDTH_COMPACT,
 };
+use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
@@ -818,29 +819,20 @@ impl<M: 'static> Dropdown<M> {
             popup_bounds.height - options_y_offset - SCROLLBAR_PADDING * 2.0,
         );
 
-        // Draw track background
-        renderer.fill_rect(scrollbar_track_bounds, Color::SCROLLBAR_TRACK);
-
-        // Calculate thumb size and position
+        // Convert item-based scrolling to pixel-based for the shared utility
+        // Using total_items and visible_items as proxy for content/viewport size
         let max_scroll = total_items.saturating_sub(visible_items);
         if max_scroll == 0 {
             return;
         }
 
-        let thumb_ratio = visible_items as f32 / total_items as f32;
-        let thumb_height = (scrollbar_track_bounds.height * thumb_ratio).max(SCROLLBAR_MIN_THUMB);
-        let scroll_range = scrollbar_track_bounds.height - thumb_height;
-        let scroll_progress = self.state.scroll_offset as f32 / max_scroll as f32;
-        let thumb_y = scrollbar_track_bounds.y + scroll_range * scroll_progress;
-
-        let thumb_bounds = Bounds::new(
-            scrollbar_track_bounds.x,
-            thumb_y,
-            scrollbar_track_bounds.width,
-            thumb_height,
+        draw_simple_vertical_scrollbar(
+            renderer,
+            scrollbar_track_bounds,
+            total_items as f32,
+            visible_items as f32,
+            self.state.scroll_offset as f32,
+            SCROLLBAR_WIDTH_COMPACT,
         );
-
-        // Draw thumb
-        renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
     }
 }

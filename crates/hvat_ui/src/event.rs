@@ -298,8 +298,12 @@ pub enum Event {
     /// Widget lost focus
     FocusLost,
 
-    /// Global mouse press event - sent to all widgets regardless of bounds
-    /// Used to blur focused widgets when clicking elsewhere
+    /// Global mouse press event - sent to all widgets regardless of bounds.
+    /// Used to blur focused widgets when clicking elsewhere.
+    ///
+    /// Note: The position is in content-space (adjusted by containers like Scrollable),
+    /// consistent with other mouse events. Widgets can compare this position against
+    /// their bounds without needing to know if they're inside a scrollable container.
     GlobalMousePress {
         button: MouseButton,
         position: (f32, f32),

@@ -441,7 +441,7 @@ enum ControlButton {
 
 impl<M: 'static> Widget<M> for ImageViewer<M> {
     fn has_active_drag(&self) -> bool {
-        self.state.dragging
+        self.state.drag.is_dragging()
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -726,8 +726,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 }
 
                 if self.pannable {
-                    self.state.dragging = true;
-                    self.state.last_drag_pos = Some(*position);
+                    self.state.drag.start_drag(*position);
                     // Emit change to persist dragging state
                     return self.emit_change_with_bounds(&bounds);
                 }
@@ -738,9 +737,8 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 button: MouseButton::Middle,
                 ..
             } => {
-                if self.state.dragging {
-                    self.state.dragging = false;
-                    self.state.last_drag_pos = None;
+                if self.state.drag.is_dragging() {
+                    self.state.drag.stop_drag();
                     // Emit change to persist state
                     return self.emit_change_with_bounds(&bounds);
                 }
@@ -766,8 +764,8 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 }
 
                 // Handle pan drag move (middle mouse)
-                if self.state.dragging && self.pannable {
-                    if let Some((last_x, last_y)) = self.state.last_drag_pos {
+                if let Some((last_x, last_y)) = self.state.drag.last_pos() {
+                    if self.pannable {
                         let delta_x = position.0 - last_x;
                         let delta_y = position.1 - last_y;
 
@@ -776,7 +774,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         let clip_delta_y = -delta_y / (bounds.height / 2.0);
 
                         self.state.pan_by(clip_delta_x, clip_delta_y);
-                        self.state.last_drag_pos = Some(*position);
+                        self.state.drag.update_pos(*position);
 
                         return self.emit_change_with_bounds(&bounds);
                     }
@@ -860,9 +858,8 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
             Event::CursorLeft => {
                 // Cursor left window - release any drag states
                 let mut changed = false;
-                if self.state.dragging {
-                    self.state.dragging = false;
-                    self.state.last_drag_pos = None;
+                if self.state.drag.is_dragging() {
+                    self.state.drag.stop_drag();
                     changed = true;
                     log::debug!("ImageViewer: stopped dragging (cursor left window)");
                 }

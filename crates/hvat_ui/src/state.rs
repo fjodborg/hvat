@@ -113,6 +113,48 @@ impl<T: Clone> UndoStack<T> {
     }
 }
 
+/// Pan drag interaction state for image viewer
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum PanDragState {
+    /// Not dragging
+    #[default]
+    Idle,
+    /// Dragging with last mouse position (screen space)
+    Dragging { last_pos: (f32, f32) },
+}
+
+impl PanDragState {
+    /// Check if currently dragging
+    pub fn is_dragging(&self) -> bool {
+        matches!(self, PanDragState::Dragging { .. })
+    }
+
+    /// Get the last drag position if dragging
+    pub fn last_pos(&self) -> Option<(f32, f32)> {
+        match self {
+            PanDragState::Dragging { last_pos } => Some(*last_pos),
+            PanDragState::Idle => None,
+        }
+    }
+
+    /// Start dragging with the given position
+    pub fn start_drag(&mut self, pos: (f32, f32)) {
+        *self = PanDragState::Dragging { last_pos: pos };
+    }
+
+    /// Update last position during drag
+    pub fn update_pos(&mut self, pos: (f32, f32)) {
+        if let PanDragState::Dragging { last_pos } = self {
+            *last_pos = pos;
+        }
+    }
+
+    /// Stop dragging
+    pub fn stop_drag(&mut self) {
+        *self = PanDragState::Idle;
+    }
+}
+
 /// State for the image viewer widget
 #[derive(Debug, Clone)]
 pub struct ImageViewerState {
@@ -123,10 +165,8 @@ pub struct ImageViewerState {
     /// Current fit mode - used temporarily when switching modes
     /// After the ImageViewer processes this, fit_mode is set back to Manual
     pub fit_mode: FitMode,
-    /// Whether the widget is currently being dragged
-    pub dragging: bool,
-    /// Last mouse position during drag (screen space)
-    pub last_drag_pos: Option<(f32, f32)>,
+    /// Drag interaction state for panning
+    pub drag: PanDragState,
     /// Cached view bounds from last render (width, height)
     /// Used to calculate 1:1 zoom from outside the widget
     pub cached_view_size: Option<(f32, f32)>,
@@ -141,8 +181,7 @@ impl Default for ImageViewerState {
             pan: (0.0, 0.0),
             zoom: 1.0,
             fit_mode: FitMode::FitToView,
-            dragging: false,
-            last_drag_pos: None,
+            drag: PanDragState::default(),
             cached_view_size: None,
             cached_texture_size: None,
         }
@@ -257,6 +296,41 @@ pub enum FitMode {
     OneToOne,
 }
 
+/// Scroll thumb drag interaction state
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ScrollDragState {
+    /// Not dragging
+    #[default]
+    Idle,
+    /// Dragging the scrollbar thumb, with offset within thumb where drag started
+    Dragging { thumb_offset: f32 },
+}
+
+impl ScrollDragState {
+    /// Check if currently dragging
+    pub fn is_dragging(&self) -> bool {
+        matches!(self, ScrollDragState::Dragging { .. })
+    }
+
+    /// Get the thumb offset if dragging
+    pub fn thumb_offset(&self) -> Option<f32> {
+        match self {
+            ScrollDragState::Dragging { thumb_offset } => Some(*thumb_offset),
+            ScrollDragState::Idle => None,
+        }
+    }
+
+    /// Start dragging with the given thumb offset
+    pub fn start_drag(&mut self, offset: f32) {
+        *self = ScrollDragState::Dragging { thumb_offset: offset };
+    }
+
+    /// Stop dragging
+    pub fn stop_drag(&mut self) {
+        *self = ScrollDragState::Idle;
+    }
+}
+
 /// State for scrollable containers
 #[derive(Debug, Clone, Default)]
 pub struct ScrollState {
@@ -264,10 +338,8 @@ pub struct ScrollState {
     pub offset: (f32, f32),
     /// Velocity for momentum scrolling
     pub(crate) velocity: (f32, f32),
-    /// Whether currently being dragged
-    pub(crate) dragging: bool,
-    /// Offset within thumb where drag started
-    pub(crate) drag_start_offset: Option<f32>,
+    /// Drag interaction state for scrollbar thumb
+    pub(crate) drag: ScrollDragState,
 }
 
 impl ScrollState {
@@ -420,6 +492,33 @@ pub struct TextSnapshot {
     pub cursor: usize,
 }
 
+/// Slider thumb drag interaction state
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SliderDragState {
+    /// Not dragging
+    #[default]
+    Idle,
+    /// Dragging the slider thumb
+    Dragging,
+}
+
+impl SliderDragState {
+    /// Check if currently dragging
+    pub fn is_dragging(&self) -> bool {
+        matches!(self, SliderDragState::Dragging)
+    }
+
+    /// Start dragging
+    pub fn start_drag(&mut self) {
+        *self = SliderDragState::Dragging;
+    }
+
+    /// Stop dragging
+    pub fn stop_drag(&mut self) {
+        *self = SliderDragState::Idle;
+    }
+}
+
 /// State for slider widgets
 ///
 /// Note: Undo/redo is handled externally via `UndoStack<T>`. Use the `on_undo_point`
@@ -428,8 +527,8 @@ pub struct TextSnapshot {
 pub struct SliderState {
     /// Current value
     pub value: f32,
-    /// Whether currently being dragged
-    pub dragging: bool,
+    /// Drag interaction state
+    pub drag: SliderDragState,
     /// Input field focus state (when show_input is enabled)
     pub input_focused: bool,
     /// Input field text (when show_input is enabled)
@@ -448,7 +547,7 @@ impl Default for SliderState {
     fn default() -> Self {
         Self {
             value: 0.0,
-            dragging: false,
+            drag: SliderDragState::default(),
             input_focused: false,
             input_text: String::new(),
             input_cursor: 0,
@@ -465,7 +564,7 @@ impl SliderState {
         let cursor = text.len();
         Self {
             value,
-            dragging: false,
+            drag: SliderDragState::default(),
             input_focused: false,
             input_text: text,
             input_cursor: cursor,
