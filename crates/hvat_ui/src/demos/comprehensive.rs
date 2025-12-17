@@ -11,7 +11,8 @@ use crate::event::{Event, KeyCode};
 use crate::layout::Length;
 use crate::prelude::*;
 use crate::state::{
-    CollapsibleState, DropdownState, NumberInputState, SliderState, TextInputState, UndoStack,
+    CollapsibleState, DropdownState, NumberInputState, SliderState, TextInputState, UndoContext,
+    UndoStack,
 };
 use crate::widgets::{Column, Row, Scrollable, ScrollDirection, ScrollbarVisibility};
 use crate::Context;
@@ -403,6 +404,9 @@ impl ComprehensiveDemo {
         let wrap_notes = wrap.clone();
         let wrap_notes_submit = wrap.clone();
 
+        // Create UndoContext for clean on_undo_point callbacks
+        let undo_ctx = UndoContext::new(undo_stack, notes_undo_snapshot);
+
         // Build sidebar content
         let mut sidebar_ctx = Context::new();
 
@@ -444,7 +448,8 @@ impl ComprehensiveDemo {
                         .range(-2.0, 2.0)
                         .step(0.01)
                         .width(Length::Fixed(80.0))
-                        .on_change(move |v, s| wrap_x(ComprehensiveMessage::XOffsetChanged(v, s)));
+                        .on_change(move |v, s| wrap_x(ComprehensiveMessage::XOffsetChanged(v, s)))
+                        .build();
                 });
 
                 c.row(|r| {
@@ -454,7 +459,8 @@ impl ComprehensiveDemo {
                         .range(-2.0, 2.0)
                         .step(0.01)
                         .width(Length::Fixed(80.0))
-                        .on_change(move |v, s| wrap_y(ComprehensiveMessage::YOffsetChanged(v, s)));
+                        .on_change(move |v, s| wrap_y(ComprehensiveMessage::YOffsetChanged(v, s)))
+                        .build();
                 });
             });
         sidebar_ctx.add(Element::new(collapsible_vs));
@@ -537,14 +543,7 @@ impl ComprehensiveDemo {
                     .on_submit(move |text| {
                         wrap_notes_submit(ComprehensiveMessage::NotesSubmitted(text))
                     })
-                    .on_undo_point({
-                        let stack = Rc::clone(&undo_stack);
-                        let snap = notes_undo_snapshot.clone();
-                        move || {
-                            log::debug!("on_undo_point: saving snapshot for notes input");
-                            stack.borrow_mut().push(snap.clone());
-                        }
-                    })
+                    .on_undo_point(undo_ctx.callback_with_label("notes"))
                     .build();
                 c.text_sized(format!("Text: \"{}\"", notes_text), 9.0);
             });
@@ -636,15 +635,8 @@ impl ComprehensiveDemo {
         let wrap_scroll = wrap.clone();
         let wrap_reset = wrap.clone();
 
-        // Clone undo stack for each slider's on_undo_point closure
-        let undo_stack1 = Rc::clone(&undo_stack);
-        let undo_stack2 = Rc::clone(&undo_stack);
-        let undo_stack3 = Rc::clone(&undo_stack);
-        let undo_stack4 = Rc::clone(&undo_stack);
-        let snap1 = slider_undo_snapshot.clone();
-        let snap2 = slider_undo_snapshot.clone();
-        let snap3 = slider_undo_snapshot.clone();
-        let snap4 = slider_undo_snapshot.clone();
+        // Create UndoContext for clean on_undo_point callbacks
+        let undo_ctx = UndoContext::new(undo_stack, slider_undo_snapshot);
 
         let mut sidebar_ctx = Context::new();
 
@@ -658,7 +650,8 @@ impl ComprehensiveDemo {
             .step(1.0)
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-            .on_change(move |s| wrap_zoom(ComprehensiveMessage::ZoomSliderChanged(s)));
+            .on_change(move |s| wrap_zoom(ComprehensiveMessage::ZoomSliderChanged(s)))
+            .build();
         sidebar_ctx.text("");
 
         // Separator
@@ -675,14 +668,7 @@ impl ComprehensiveDemo {
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
             .on_change(move |s| wrap_brightness(ComprehensiveMessage::BrightnessChanged(s)))
-            .on_undo_point({
-                let stack = undo_stack1;
-                let snap = snap1;
-                move || {
-                    log::debug!("on_undo_point: saving snapshot for brightness slider");
-                    stack.borrow_mut().push(snap.clone());
-                }
-            })
+            .on_undo_point(undo_ctx.callback_with_label("brightness"))
             .build();
         sidebar_ctx.text("");
 
@@ -694,14 +680,7 @@ impl ComprehensiveDemo {
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
             .on_change(move |s| wrap_contrast(ComprehensiveMessage::ContrastChanged(s)))
-            .on_undo_point({
-                let stack = undo_stack2;
-                let snap = snap2;
-                move || {
-                    log::debug!("on_undo_point: saving snapshot for contrast slider");
-                    stack.borrow_mut().push(snap.clone());
-                }
-            })
+            .on_undo_point(undo_ctx.callback_with_label("contrast"))
             .build();
         sidebar_ctx.text("");
 
@@ -713,14 +692,7 @@ impl ComprehensiveDemo {
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
             .on_change(move |s| wrap_gamma(ComprehensiveMessage::GammaChanged(s)))
-            .on_undo_point({
-                let stack = undo_stack3;
-                let snap = snap3;
-                move || {
-                    log::debug!("on_undo_point: saving snapshot for gamma slider");
-                    stack.borrow_mut().push(snap.clone());
-                }
-            })
+            .on_undo_point(undo_ctx.callback_with_label("gamma"))
             .build();
         sidebar_ctx.text("");
 
@@ -732,14 +704,7 @@ impl ComprehensiveDemo {
             .show_input(true)
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
             .on_change(move |s| wrap_saturation(ComprehensiveMessage::SaturationChanged(s)))
-            .on_undo_point({
-                let stack = undo_stack4;
-                let snap = snap4;
-                move || {
-                    log::debug!("on_undo_point: saving snapshot for saturation slider");
-                    stack.borrow_mut().push(snap.clone());
-                }
-            })
+            .on_undo_point(undo_ctx.callback_with_label("saturation"))
             .build();
         sidebar_ctx.text("");
 

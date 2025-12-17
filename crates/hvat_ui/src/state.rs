@@ -1,6 +1,8 @@
 //! Widget state types for stateful widgets
 
 use crate::constants::{format_number, UNDO_STACK_LIMIT, ZOOM_FACTOR, ZOOM_MAX, ZOOM_MIN};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Generic undo stack for any value type
 ///
@@ -678,5 +680,76 @@ impl NumberInputState {
     pub fn clear_history(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
+    }
+}
+
+// =============================================================================
+// Undo Context Helper
+// =============================================================================
+
+/// Helper for creating `on_undo_point` callbacks in view functions.
+///
+/// This eliminates the need to manually clone `Rc<RefCell<UndoStack<T>>>` and
+/// snapshot values multiple times when building widget trees.
+///
+/// # Example
+///
+/// **Before (verbose):**
+/// ```ignore
+/// let undo_stack1 = Rc::clone(&self.undo_stack);
+/// let undo_stack2 = Rc::clone(&self.undo_stack);
+/// let snap1 = snapshot.clone();
+/// let snap2 = snapshot.clone();
+///
+/// slider().on_undo_point({
+///     let stack = undo_stack1;
+///     let snap = snap1;
+///     move || stack.borrow_mut().push(snap.clone())
+/// })
+/// ```
+///
+/// **After (clean):**
+/// ```ignore
+/// let undo_ctx = UndoContext::new(Rc::clone(&self.undo_stack), self.snapshot());
+///
+/// slider().on_undo_point(undo_ctx.callback())
+/// ```
+#[derive(Clone)]
+pub struct UndoContext<T: Clone + 'static> {
+    stack: Rc<RefCell<UndoStack<T>>>,
+    snapshot: T,
+}
+
+impl<T: Clone + 'static> UndoContext<T> {
+    /// Create a new undo context with the given stack and snapshot.
+    ///
+    /// The snapshot should represent the current state BEFORE any edits.
+    /// Each call to `callback()` will create a closure that pushes a clone
+    /// of this snapshot to the undo stack.
+    pub fn new(stack: Rc<RefCell<UndoStack<T>>>, snapshot: T) -> Self {
+        Self { stack, snapshot }
+    }
+
+    /// Create an `on_undo_point` callback.
+    ///
+    /// This can be called multiple times - each call creates a new closure
+    /// that captures clones of the stack and snapshot.
+    pub fn callback(&self) -> impl Fn() + 'static {
+        let stack = Rc::clone(&self.stack);
+        let snap = self.snapshot.clone();
+        move || {
+            log::debug!("UndoContext: pushing undo snapshot");
+            stack.borrow_mut().push(snap.clone());
+        }
+    }
+
+    /// Create a callback with a custom message for logging.
+    pub fn callback_with_label(&self, label: &'static str) -> impl Fn() + 'static {
+        let stack = Rc::clone(&self.stack);
+        let snap = self.snapshot.clone();
+        move || {
+            log::debug!("UndoContext [{}]: pushing undo snapshot", label);
+            stack.borrow_mut().push(snap.clone());
+        }
     }
 }

@@ -1,15 +1,10 @@
 //! Text widget
 
+use crate::constants::{char_width, line_height, DEFAULT_FONT_SIZE};
 use crate::event::Event;
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::widget::Widget;
-
-/// Default font size in pixels
-const DEFAULT_FONT_SIZE: f32 = 14.0;
-
-/// Approximate character width ratio for monospace-ish text
-const CHAR_WIDTH_RATIO: f32 = 0.6;
 
 /// A text display widget
 pub struct Text {
@@ -50,10 +45,9 @@ impl Text {
 
     /// Calculate approximate text dimensions
     fn measure(&self) -> Size {
-        // Simple approximation - real implementation would use text metrics
-        let char_width = self.size * CHAR_WIDTH_RATIO;
-        let width = self.content.len() as f32 * char_width;
-        let height = self.size * 1.2; // Line height
+        // Simple approximation using centralized constants
+        let width = self.content.len() as f32 * char_width(self.size);
+        let height = line_height(self.size);
         Size::new(width, height)
     }
 }

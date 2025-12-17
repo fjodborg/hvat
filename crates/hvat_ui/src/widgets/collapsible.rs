@@ -1,5 +1,10 @@
 //! Collapsible/expandable section widget
 
+use crate::constants::{
+    COLLAPSIBLE_HEADER_HEIGHT, COLLAPSIBLE_HEADER_PADDING_X, COLLAPSIBLE_ICON_MARGIN,
+    COLLAPSIBLE_ICON_SIZE, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING, SCROLLBAR_WIDTH_COMPACT,
+    SCROLL_SPEED,
+};
 use crate::element::Element;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
@@ -8,13 +13,6 @@ use crate::state::{CollapsibleState, ScrollState};
 use crate::widget::Widget;
 // Note: Scrollable not used directly here - we handle scrolling manually
 use crate::Context;
-
-// Layout constants
-const HEADER_HEIGHT: f32 = 32.0;
-const HEADER_PADDING_X: f32 = 8.0;
-const ICON_SIZE: f32 = 12.0;
-const ICON_MARGIN_RIGHT: f32 = 8.0;
-const SCROLL_SPEED: f32 = 1.0;
 
 /// Configuration for collapsible widget appearance
 #[derive(Debug, Clone)]
@@ -46,7 +44,7 @@ impl Default for CollapsibleConfig {
             content_bg: Color::rgba(0.12, 0.12, 0.14, 1.0),
             border_color: Color::BORDER,
             header_font_size: 14.0,
-            header_height: HEADER_HEIGHT,
+            header_height: COLLAPSIBLE_HEADER_HEIGHT,
             max_content_height: None,
         }
     }
@@ -188,12 +186,12 @@ impl<M: 'static> Collapsible<M> {
 
     /// Get scrollbar track bounds relative to viewport
     fn scrollbar_track_bounds(&self, viewport_bounds: Bounds) -> Bounds {
-        let scrollbar_x = viewport_bounds.right() - SCROLLBAR_WIDTH - SCROLLBAR_PADDING;
+        let scrollbar_x = viewport_bounds.right() - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING;
         let scrollbar_height = viewport_bounds.height - SCROLLBAR_PADDING * 2.0;
         Bounds::new(
             scrollbar_x,
             viewport_bounds.y + SCROLLBAR_PADDING,
-            SCROLLBAR_WIDTH,
+            SCROLLBAR_WIDTH_COMPACT,
             scrollbar_height,
         )
     }
@@ -201,7 +199,7 @@ impl<M: 'static> Collapsible<M> {
     /// Get thumb height for scrollbar
     fn thumb_height(&self, track_height: f32) -> f32 {
         let thumb_ratio = self.visible_content_height / self.content_size.height;
-        (track_height * thumb_ratio).max(MIN_THUMB_HEIGHT)
+        (track_height * thumb_ratio).max(SCROLLBAR_MIN_THUMB)
     }
 
     /// Get current thumb Y position
@@ -336,18 +334,18 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
         // Draw chevron icon
         let icon = if self.state.is_expanded { "▼" } else { "▶" };
-        let icon_x = header_bounds.x + HEADER_PADDING_X;
-        let icon_y = header_bounds.y + (self.config.header_height - ICON_SIZE) / 2.0;
+        let icon_x = header_bounds.x + COLLAPSIBLE_HEADER_PADDING_X;
+        let icon_y = header_bounds.y + (self.config.header_height - COLLAPSIBLE_ICON_SIZE) / 2.0;
         renderer.text(
             icon,
             icon_x,
             icon_y,
-            ICON_SIZE,
+            COLLAPSIBLE_ICON_SIZE,
             self.config.header_text_color,
         );
 
         // Draw header text
-        let text_x = icon_x + ICON_SIZE + ICON_MARGIN_RIGHT;
+        let text_x = icon_x + COLLAPSIBLE_ICON_SIZE + COLLAPSIBLE_ICON_MARGIN;
         let text_y = header_bounds.y + (self.config.header_height - self.config.header_font_size) / 2.0;
         renderer.text(
             &self.header_text,
@@ -780,10 +778,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
     }
 }
 
-// Scrollbar drawing constants
-const SCROLLBAR_WIDTH: f32 = 6.0;
-const SCROLLBAR_PADDING: f32 = 2.0;
-const MIN_THUMB_HEIGHT: f32 = 20.0;
+// Scrollbar colors (TODO: consider moving to theme system)
 const SCROLLBAR_TRACK_COLOR: Color = Color::rgba(0.1, 0.1, 0.12, 0.5);
 const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.5, 0.5, 0.55, 0.8);
 
@@ -801,7 +796,7 @@ impl<M: 'static> Collapsible<M> {
             let thumb_height = self.thumb_height(track_bounds.height);
             let thumb_y = self.thumb_y(track_bounds);
 
-            let thumb_bounds = Bounds::new(track_bounds.x, thumb_y, SCROLLBAR_WIDTH, thumb_height);
+            let thumb_bounds = Bounds::new(track_bounds.x, thumb_y, SCROLLBAR_WIDTH_COMPACT, thumb_height);
             renderer.fill_rect(thumb_bounds, SCROLLBAR_THUMB_COLOR);
         }
     }

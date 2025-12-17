@@ -1,20 +1,10 @@
 //! Button widget
 
+use crate::constants::{char_width, line_height, BUTTON_PADDING, DEFAULT_FONT_SIZE};
 use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::widget::Widget;
-
-/// Default button padding
-const DEFAULT_PADDING: Padding = Padding {
-    top: 8.0,
-    right: 16.0,
-    bottom: 8.0,
-    left: 16.0,
-};
-
-/// Default font size
-const DEFAULT_FONT_SIZE: f32 = 14.0;
 
 /// Button state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -43,7 +33,7 @@ impl<M> Button<M> {
             on_click: None,
             width: Length::Shrink,
             height: Length::Shrink,
-            padding: DEFAULT_PADDING,
+            padding: BUTTON_PADDING,
             state: ButtonState::Normal,
         }
     }
@@ -74,10 +64,9 @@ impl<M> Button<M> {
 
     /// Calculate content size
     fn content_size(&self) -> Size {
-        // Approximate text size
-        let char_width = DEFAULT_FONT_SIZE * 0.6;
-        let text_width = self.label.len() as f32 * char_width;
-        let text_height = DEFAULT_FONT_SIZE * 1.2;
+        // Approximate text size using centralized constants
+        let text_width = self.label.len() as f32 * char_width(DEFAULT_FONT_SIZE);
+        let text_height = line_height(DEFAULT_FONT_SIZE);
         Size::new(text_width, text_height)
     }
 

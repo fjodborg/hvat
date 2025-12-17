@@ -37,7 +37,7 @@ impl<M: 'static> Context<M> {
     }
 
     /// Add a button widget
-    pub fn button(&mut self, label: impl Into<String>) -> ButtonBuilder<M> {
+    pub fn button(&mut self, label: impl Into<String>) -> ButtonBuilder<'_, M> {
         ButtonBuilder {
             ctx: self,
             button: Button::new(label),
@@ -66,7 +66,7 @@ impl<M: 'static> Context<M> {
         texture_id: TextureId,
         width: u32,
         height: u32,
-    ) -> ImageViewerBuilder<M> {
+    ) -> ImageViewerBuilder<'_, M> {
         ImageViewerBuilder {
             ctx: self,
             viewer: ImageViewer::new(texture_id, width, height),
@@ -74,7 +74,7 @@ impl<M: 'static> Context<M> {
     }
 
     /// Add an empty image viewer (no texture yet)
-    pub fn image_viewer_empty(&mut self) -> ImageViewerBuilder<M> {
+    pub fn image_viewer_empty(&mut self) -> ImageViewerBuilder<'_, M> {
         ImageViewerBuilder {
             ctx: self,
             viewer: ImageViewer::empty(),
@@ -88,7 +88,7 @@ impl<M: 'static> Context<M> {
     }
 
     /// Add a slider widget
-    pub fn slider(&mut self, min: f32, max: f32) -> SliderBuilder<M> {
+    pub fn slider(&mut self, min: f32, max: f32) -> SliderBuilder<'_, M> {
         SliderBuilder {
             ctx: self,
             slider: Slider::new(min, max),
@@ -96,7 +96,7 @@ impl<M: 'static> Context<M> {
     }
 
     /// Add a text input widget
-    pub fn text_input(&mut self) -> TextInputBuilder<M> {
+    pub fn text_input(&mut self) -> TextInputBuilder<'_, M> {
         TextInputBuilder {
             ctx: self,
             input: TextInput::new(),
@@ -104,7 +104,7 @@ impl<M: 'static> Context<M> {
     }
 
     /// Add a number input widget
-    pub fn number_input(&mut self) -> NumberInputBuilder<M> {
+    pub fn number_input(&mut self) -> NumberInputBuilder<'_, M> {
         NumberInputBuilder {
             ctx: self,
             input: NumberInput::new(),
@@ -124,6 +124,7 @@ impl<M: 'static> Default for Context<M> {
 }
 
 /// Builder for button widgets
+#[must_use = "ButtonBuilder does nothing unless .on_click() or .build() is called"]
 pub struct ButtonBuilder<'a, M> {
     ctx: &'a mut Context<M>,
     button: Button<M>,
@@ -161,6 +162,7 @@ impl<'a, M: 'static> ButtonBuilder<'a, M> {
 }
 
 /// Builder for image viewer widgets
+#[must_use = "ImageViewerBuilder does nothing unless .build() is called"]
 pub struct ImageViewerBuilder<'a, M> {
     ctx: &'a mut Context<M>,
     viewer: ImageViewer<M>,
@@ -241,6 +243,7 @@ impl<'a, M: 'static + Clone> ImageViewerBuilder<'a, M> {
 }
 
 /// Builder for slider widgets
+#[must_use = "SliderBuilder does nothing unless .build() is called"]
 pub struct SliderBuilder<'a, M> {
     ctx: &'a mut Context<M>,
     slider: Slider<M>,
@@ -306,6 +309,7 @@ impl<'a, M: Clone + 'static> SliderBuilder<'a, M> {
 }
 
 /// Builder for text input widgets
+#[must_use = "TextInputBuilder does nothing unless .build() is called"]
 pub struct TextInputBuilder<'a, M> {
     ctx: &'a mut Context<M>,
     input: TextInput<M>,
@@ -374,6 +378,7 @@ impl<'a, M: Clone + 'static> TextInputBuilder<'a, M> {
 }
 
 /// Builder for number input widgets
+#[must_use = "NumberInputBuilder does nothing unless .build() is called"]
 pub struct NumberInputBuilder<'a, M> {
     ctx: &'a mut Context<M>,
     input: NumberInput<M>,

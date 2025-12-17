@@ -1,5 +1,6 @@
 //! Scrollable container widget
 
+use crate::constants::{SCROLLBAR_MIN_THUMB, SCROLLBAR_WIDTH, SCROLL_SPEED};
 use crate::element::Element;
 use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
@@ -51,8 +52,8 @@ pub struct ScrollbarConfig {
 impl Default for ScrollbarConfig {
     fn default() -> Self {
         Self {
-            width: 8.0,
-            min_thumb_size: 20.0,
+            width: SCROLLBAR_WIDTH,
+            min_thumb_size: SCROLLBAR_MIN_THUMB,
             track_color: Color::rgba(0.15, 0.15, 0.18, 0.5),
             thumb_color: Color::rgba(0.4, 0.4, 0.45, 0.8),
             thumb_hover_color: Color::rgba(0.5, 0.5, 0.55, 0.9),
@@ -60,9 +61,6 @@ impl Default for ScrollbarConfig {
         }
     }
 }
-
-/// Scroll speed configuration
-const SCROLL_SPEED: f32 = 1.0;
 
 /// A scrollable container widget
 ///

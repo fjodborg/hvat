@@ -83,7 +83,8 @@ impl InputWidgetsDemo {
                     .on_change({
                         let w = wrap1.clone();
                         move |s| w(InputWidgetsMessage::SliderChanged(s))
-                    });
+                    })
+                    .build();
                 r.text(format!("Value: {:.1}", slider_value));
             });
             c.text("");
@@ -98,7 +99,8 @@ impl InputWidgetsDemo {
                     .on_change({
                         let w = wrap2.clone();
                         move |s| w(InputWidgetsMessage::SliderInputChanged(s))
-                    });
+                    })
+                    .build();
                 r.text(format!("Value: {:.1}", slider_input_value));
             });
             c.text("");
@@ -115,7 +117,8 @@ impl InputWidgetsDemo {
                     .on_change({
                         let w = wrap3.clone();
                         move |s| w(InputWidgetsMessage::SteppedSliderChanged(s))
-                    });
+                    })
+                    .build();
                 r.text(format!("Value: {}", stepped_slider_value as i32));
             });
             c.text("");
@@ -135,7 +138,8 @@ impl InputWidgetsDemo {
                     .on_change({
                         let w = wrap5.clone();
                         move |s, state| w(InputWidgetsMessage::TextInputChanged(s, state))
-                    });
+                    })
+                    .build();
             });
             c.text(format!("Entered: \"{}\"", text_value));
             c.text("");
@@ -151,7 +155,8 @@ impl InputWidgetsDemo {
                     .on_change({
                         let w = wrap6.clone();
                         move |v, s| w(InputWidgetsMessage::NumberInputChanged(v, s))
-                    });
+                    })
+                    .build();
                 r.text("Use +/- buttons, arrow keys, or scroll");
             });
             c.text("");
@@ -167,7 +172,8 @@ impl InputWidgetsDemo {
                     .on_change({
                         let w = wrap7.clone();
                         move |v, s| w(InputWidgetsMessage::NumberInput2Changed(v, s))
-                    });
+                    })
+                    .build();
                 r.text("Type directly or use arrow keys");
             });
             c.text("");

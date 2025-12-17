@@ -1,24 +1,16 @@
 //! Dropdown/select widget
 
+use crate::constants::{
+    DROPDOWN_ARROW_WIDTH, DROPDOWN_TEXT_PADDING_X, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING,
+    SCROLLBAR_WIDTH_COMPACT,
+};
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::DropdownState;
 use crate::widget::Widget;
 
-// Layout constants
-/// Horizontal padding for text inside dropdown elements
-const TEXT_PADDING_X: f32 = 8.0;
-/// Width reserved for the arrow indicator
-const ARROW_INDICATOR_WIDTH: f32 = 20.0;
-/// Width of the scrollbar in the popup
-const SCROLLBAR_WIDTH: f32 = 6.0;
-/// Padding around the scrollbar
-const SCROLLBAR_PADDING: f32 = 2.0;
-/// Minimum scrollbar thumb height
-const MIN_THUMB_HEIGHT: f32 = 20.0;
-
-// Color constants for scrollbar
+// Color constants for scrollbar (TODO: consider moving to theme system)
 const SCROLLBAR_TRACK_COLOR: Color = Color::rgba(0.1, 0.1, 0.12, 0.5);
 const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.5, 0.5, 0.55, 0.8);
 const SEARCH_BOX_BG_COLOR: Color = Color::rgba(0.12, 0.12, 0.15, 1.0);
@@ -312,7 +304,7 @@ impl<M: 'static> Dropdown<M> {
 
     /// Calculate text position within bounds (left-padded, vertically centered)
     fn text_position(&self, bounds: Bounds) -> (f32, f32) {
-        let x = bounds.x + TEXT_PADDING_X;
+        let x = bounds.x + DROPDOWN_TEXT_PADDING_X;
         let y = bounds.y + (bounds.height - self.config.font_size) / 2.0;
         (x, y)
     }
@@ -444,7 +436,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
 
         // Draw arrow indicator
         let arrow = if self.state.is_open { "▲" } else { "▼" };
-        let arrow_x = button_bounds.right() - ARROW_INDICATOR_WIDTH;
+        let arrow_x = button_bounds.right() - DROPDOWN_ARROW_WIDTH;
         renderer.text(
             arrow,
             arrow_x,
@@ -691,7 +683,7 @@ impl<M: 'static> Dropdown<M> {
 
         // Calculate content width (narrower if scrollbar present)
         let content_width = if needs_scrollbar {
-            popup_bounds.width - SCROLLBAR_WIDTH - SCROLLBAR_PADDING * 2.0
+            popup_bounds.width - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING * 2.0
         } else {
             popup_bounds.width
         };
@@ -786,9 +778,9 @@ impl<M: 'static> Dropdown<M> {
     ) {
         let options_y_offset = self.options_y_offset();
         let scrollbar_track_bounds = Bounds::new(
-            popup_bounds.right() - SCROLLBAR_WIDTH - SCROLLBAR_PADDING,
+            popup_bounds.right() - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING,
             popup_bounds.y + options_y_offset + SCROLLBAR_PADDING,
-            SCROLLBAR_WIDTH,
+            SCROLLBAR_WIDTH_COMPACT,
             popup_bounds.height - options_y_offset - SCROLLBAR_PADDING * 2.0,
         );
 
@@ -802,7 +794,7 @@ impl<M: 'static> Dropdown<M> {
         }
 
         let thumb_ratio = visible_items as f32 / total_items as f32;
-        let thumb_height = (scrollbar_track_bounds.height * thumb_ratio).max(MIN_THUMB_HEIGHT);
+        let thumb_height = (scrollbar_track_bounds.height * thumb_ratio).max(SCROLLBAR_MIN_THUMB);
         let scroll_range = scrollbar_track_bounds.height - thumb_height;
         let scroll_progress = self.state.scroll_offset as f32 / max_scroll as f32;
         let thumb_y = scrollbar_track_bounds.y + scroll_range * scroll_progress;

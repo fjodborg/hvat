@@ -1,7 +1,7 @@
 //! Demo showcasing undo/redo functionality with counter, slider, and text input
 
 use crate::event::{Event, KeyCode};
-use crate::state::{SliderState, TextInputState, UndoStack};
+use crate::state::{SliderState, TextInputState, UndoContext, UndoStack};
 use crate::{col, Element, Length};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -129,12 +129,8 @@ impl UndoDemo {
         let wrap6 = wrap.clone();
         let wrap7 = wrap.clone();
 
-        // Create snapshot closures that capture the Rc<RefCell<>>
-        let snapshot = self.snapshot();
-        let undo_stack1 = Rc::clone(&self.global_undo);
-        let snapshot1 = snapshot.clone();
-        let undo_stack2 = Rc::clone(&self.global_undo);
-        let snapshot2 = snapshot.clone();
+        // Create UndoContext for clean on_undo_point callbacks
+        let undo_ctx = UndoContext::new(Rc::clone(&self.global_undo), self.snapshot());
 
         col(move |c| {
             c.text("Undo/Redo Demo (Global)");
@@ -165,14 +161,7 @@ impl UndoDemo {
                         let w = wrap3.clone();
                         move |s| w(UndoMessage::SliderChanged(s))
                     })
-                    .on_undo_point({
-                        let undo_stack = Rc::clone(&undo_stack1);
-                        let snap = snapshot1.clone();
-                        move || {
-                            log::debug!("on_undo_point: saving snapshot for slider");
-                            undo_stack.borrow_mut().push(snap.clone());
-                        }
-                    })
+                    .on_undo_point(undo_ctx.callback_with_label("slider"))
                     .build();
                 r.text(format!("Value: {:.1}", slider_value));
             });
@@ -190,14 +179,7 @@ impl UndoDemo {
                         let w = wrap7.clone();
                         move |s, state| w(UndoMessage::TextInputChanged(s, state))
                     })
-                    .on_undo_point({
-                        let undo_stack = Rc::clone(&undo_stack2);
-                        let snap = snapshot2.clone();
-                        move || {
-                            log::debug!("on_undo_point: saving snapshot for text input");
-                            undo_stack.borrow_mut().push(snap.clone());
-                        }
-                    })
+                    .on_undo_point(undo_ctx.callback_with_label("text_input"))
                     .build();
             });
             c.text(format!("Text: \"{}\"", text_value));
