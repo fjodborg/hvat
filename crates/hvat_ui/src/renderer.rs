@@ -37,6 +37,10 @@ impl Color {
     pub const ACCENT: Color = Color::rgb(0.4, 0.6, 1.0);
     pub const BORDER: Color = Color::rgb(0.3, 0.3, 0.35);
 
+    // Scrollbar colors
+    pub const SCROLLBAR_TRACK: Color = Color::rgba(0.1, 0.1, 0.12, 0.5);
+    pub const SCROLLBAR_THUMB: Color = Color::rgba(0.5, 0.5, 0.55, 0.8);
+
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }

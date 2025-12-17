@@ -215,6 +215,13 @@ impl<M> TextInput<M> {
             false
         }
     }
+
+    /// Emit a state change if handler is set
+    fn emit_change(&self) -> Option<M> {
+        self.on_change
+            .as_ref()
+            .map(|f| f(self.value.clone(), self.state.clone()))
+    }
 }
 
 impl<M> Default for TextInput<M> {
@@ -342,17 +349,13 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         }
                     }
 
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.value.clone(), self.state.clone()));
-                    }
+                    return self.emit_change();
                 } else if self.state.is_focused {
                     // Clicked outside - blur
                     self.state.is_focused = false;
                     self.state.selection = None;
                     log::debug!("TextInput: blurred");
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.value.clone(), self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
 
                 None
@@ -360,10 +363,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
             Event::TextInput { text } if self.state.is_focused => {
                 self.insert_text(text);
-                if let Some(ref on_change) = self.on_change {
-                    return Some(on_change(self.value.clone(), self.state.clone()));
-                }
-                None
+                self.emit_change()
             }
 
             Event::KeyPress { key, modifiers, .. } if self.state.is_focused => {
@@ -371,17 +371,13 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     KeyCode::Backspace => {
                         if self.handle_backspace() {
                             log::debug!("TextInput: backspace, value = '{}'", self.value);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.value.clone(), self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Delete => {
                         if self.handle_delete() {
                             log::debug!("TextInput: delete, value = '{}'", self.value);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.value.clone(), self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Left => {
@@ -438,9 +434,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         self.state.is_focused = false;
                         self.state.selection = None;
                         log::debug!("TextInput: escape, blurred");
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.value.clone(), self.state.clone()));
-                        }
+                        return self.emit_change();
                     }
                     _ => {}
                 }
@@ -456,9 +450,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         self.state.is_focused = false;
                         self.state.selection = None;
                         log::debug!("TextInput: GlobalMousePress outside, blurred");
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.value.clone(), self.state.clone()));
-                        }
+                        return self.emit_change();
                     }
                 }
                 None
@@ -470,9 +462,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     self.state.is_focused = false;
                     self.state.selection = None;
                     log::debug!("TextInput: FocusLost, blurred");
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.value.clone(), self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
                 None
             }

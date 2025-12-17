@@ -732,17 +732,13 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
     }
 }
 
-// Scrollbar colors (TODO: consider moving to theme system)
-const SCROLLBAR_TRACK_COLOR: Color = Color::rgba(0.1, 0.1, 0.12, 0.5);
-const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.5, 0.5, 0.55, 0.8);
-
 impl<M: 'static> Collapsible<M> {
     /// Draw the scrollbar for scrollable content
     fn draw_scrollbar(&self, renderer: &mut Renderer, viewport_bounds: Bounds) {
         let track_bounds = self.scrollbar_track_bounds(viewport_bounds);
 
         // Draw track
-        renderer.fill_rect(track_bounds, SCROLLBAR_TRACK_COLOR);
+        renderer.fill_rect(track_bounds, Color::SCROLLBAR_TRACK);
 
         // Draw thumb if scrolling is needed
         let max_scroll = (self.content_size.height - self.visible_content_height).max(0.0);
@@ -751,7 +747,7 @@ impl<M: 'static> Collapsible<M> {
             let thumb_y = self.thumb_y(track_bounds);
 
             let thumb_bounds = Bounds::new(track_bounds.x, thumb_y, SCROLLBAR_WIDTH_COMPACT, thumb_height);
-            renderer.fill_rect(thumb_bounds, SCROLLBAR_THUMB_COLOR);
+            renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
         }
     }
 }

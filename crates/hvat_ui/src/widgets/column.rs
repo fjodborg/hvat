@@ -1,5 +1,6 @@
 //! Column layout widget
 
+use crate::constants::DEFAULT_SPACING;
 use crate::element::Element;
 use crate::event::Event;
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
@@ -7,9 +8,6 @@ use crate::renderer::Renderer;
 use crate::widget::Widget;
 
 use super::container_helpers;
-
-/// Default spacing between children
-const DEFAULT_SPACING: f32 = 8.0;
 
 /// A vertical column layout widget
 pub struct Column<M> {

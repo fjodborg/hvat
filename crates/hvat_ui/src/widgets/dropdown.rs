@@ -10,9 +10,6 @@ use crate::renderer::{Color, Renderer};
 use crate::state::DropdownState;
 use crate::widget::Widget;
 
-// Color constants for scrollbar (TODO: consider moving to theme system)
-const SCROLLBAR_TRACK_COLOR: Color = Color::rgba(0.1, 0.1, 0.12, 0.5);
-const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.5, 0.5, 0.55, 0.8);
 const SEARCH_BOX_BG_COLOR: Color = Color::rgba(0.12, 0.12, 0.15, 1.0);
 
 /// Placeholder text for searchable dropdowns
@@ -822,7 +819,7 @@ impl<M: 'static> Dropdown<M> {
         );
 
         // Draw track background
-        renderer.fill_rect(scrollbar_track_bounds, SCROLLBAR_TRACK_COLOR);
+        renderer.fill_rect(scrollbar_track_bounds, Color::SCROLLBAR_TRACK);
 
         // Calculate thumb size and position
         let max_scroll = total_items.saturating_sub(visible_items);
@@ -844,6 +841,6 @@ impl<M: 'static> Dropdown<M> {
         );
 
         // Draw thumb
-        renderer.fill_rect(thumb_bounds, SCROLLBAR_THUMB_COLOR);
+        renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
     }
 }

@@ -358,6 +358,15 @@ impl<M> NumberInput<M> {
             None
         }
     }
+
+    /// Emit a state change if handler is set and value is valid
+    fn emit_change(&self) -> Option<M> {
+        self.state.value().and_then(|value| {
+            self.on_change
+                .as_ref()
+                .map(|f| f(value, self.state.clone()))
+        })
+    }
 }
 
 impl<M> Default for NumberInput<M> {
@@ -527,11 +536,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = None;
                         if self.increment() {
                             log::debug!("NumberInput: increment, value = {}", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                         return None;
                     }
@@ -544,11 +549,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = None;
                         if self.decrement() {
                             log::debug!("NumberInput: decrement, value = {}", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                         return None;
                     }
@@ -593,21 +594,14 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         }
                     }
 
-                    if let Some(ref on_change) = self.on_change {
-                        if let Some(value) = self.state.value() {
-                            return Some(on_change(value, self.state.clone()));
-                        }
-                    }
-                    return None;
+                    return self.emit_change();
                 } else if self.state.is_focused {
                     // Clicked outside - blur and validate
                     self.state.is_focused = false;
                     self.state.selection = None;
                     if let Some(value) = self.validate_value() {
                         log::debug!("NumberInput: blurred, validated value = {}", value);
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(value, self.state.clone()));
-                        }
+                        return self.emit_change();
                     }
                 }
 
@@ -624,11 +618,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 }
                 if changed {
                     log::debug!("NumberInput: text input, value = '{}'", self.state.text);
-                    if let Some(ref on_change) = self.on_change {
-                        if let Some(value) = self.state.value() {
-                            return Some(on_change(value, self.state.clone()));
-                        }
-                    }
+                    return self.emit_change();
                 }
                 None
             }
@@ -639,54 +629,34 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     KeyCode::Z if modifiers.ctrl && !modifiers.shift => {
                         if self.state.undo() {
                             log::debug!("NumberInput: undo, value = '{}'", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     // Redo: Ctrl+Y or Ctrl+Shift+Z
                     KeyCode::Y if modifiers.ctrl => {
                         if self.state.redo() {
                             log::debug!("NumberInput: redo, value = '{}'", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Z if modifiers.ctrl && modifiers.shift => {
                         if self.state.redo() {
                             log::debug!("NumberInput: redo (Ctrl+Shift+Z), value = '{}'", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Backspace => {
                         // handle_backspace manages undo internally
                         if self.handle_backspace() {
                             log::debug!("NumberInput: backspace, value = '{}'", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Delete => {
                         // handle_delete manages undo internally
                         if self.handle_delete() {
                             log::debug!("NumberInput: delete, value = '{}'", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Left => {
@@ -735,21 +705,13 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     KeyCode::Up => {
                         if self.increment() {
                             log::debug!("NumberInput: up arrow increment, value = {}", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Down => {
                         if self.decrement() {
                             log::debug!("NumberInput: down arrow decrement, value = {}", self.state.text);
-                            if let Some(ref on_change) = self.on_change {
-                                if let Some(value) = self.state.value() {
-                                    return Some(on_change(value, self.state.clone()));
-                                }
-                            }
+                            return self.emit_change();
                         }
                     }
                     KeyCode::Enter | KeyCode::Escape => {
@@ -757,9 +719,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = None;
                         if let Some(value) = self.validate_value() {
                             log::debug!("NumberInput: enter/escape, validated value = {}", value);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(value, self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                     }
                     _ => {}
@@ -774,19 +734,11 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 if bounds.contains(position.0, position.1) {
                     let steps = delta.1.signum() as i32;
                     if steps > 0 {
-                        for _ in 0..steps.abs() {
-                            self.increment();
-                        }
+                        (0..steps.abs()).for_each(|_| { self.increment(); });
                     } else {
-                        for _ in 0..steps.abs() {
-                            self.decrement();
-                        }
+                        (0..steps.abs()).for_each(|_| { self.decrement(); });
                     }
-                    if let Some(ref on_change) = self.on_change {
-                        if let Some(value) = self.state.value() {
-                            return Some(on_change(value, self.state.clone()));
-                        }
-                    }
+                    return self.emit_change();
                 }
                 None
             }
@@ -799,11 +751,8 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.is_focused = false;
                         self.state.selection = None;
                         log::debug!("NumberInput: GlobalMousePress outside, blurred");
-                        if let Some(value) = self.validate_value() {
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(value, self.state.clone()));
-                            }
-                        }
+                        self.validate_value();
+                        return self.emit_change();
                     }
                 }
                 None
@@ -815,11 +764,8 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     self.state.is_focused = false;
                     self.state.selection = None;
                     log::debug!("NumberInput: FocusLost, blurred");
-                    if let Some(value) = self.validate_value() {
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(value, self.state.clone()));
-                        }
-                    }
+                    self.validate_value();
+                    return self.emit_change();
                 }
                 None
             }

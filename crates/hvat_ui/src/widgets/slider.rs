@@ -380,6 +380,11 @@ impl<M> Slider<M> {
             self.state.input_cursor = self.state.input_text.len();
         }
     }
+
+    /// Emit a state change if handler is set
+    fn emit_change(&self) -> Option<M> {
+        self.on_change.as_ref().map(|f| f(self.state.clone()))
+    }
 }
 
 impl<M: Clone + 'static> Widget<M> for Slider<M> {
@@ -512,9 +517,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         self.state.value = new_value;
                         self.sync_input_from_value();
                         log::debug!("Slider drag: value = {}", new_value);
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.state.clone()));
-                        }
+                        return self.emit_change();
                     }
                 }
 
@@ -570,10 +573,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         }
 
                         // Emit message to trigger redraw (selection highlight)
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.state.clone()));
-                        }
-                        return None;
+                        return self.emit_change();
                     }
                 }
 
@@ -584,9 +584,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     self.apply_input_value();
                     log::debug!("Slider input: blurred by clicking elsewhere");
                     // Always emit to trigger redraw (clears visual focus)
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
 
                 // Check if clicking on thumb (with expanded hit area)
@@ -603,9 +601,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                     self.state.dragging = true;
                     log::debug!("Slider: started dragging");
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 } else if slider_bounds.contains(x, y) {
                     // Click on track - call on_undo_point to save snapshot before changes
                     if let Some(ref on_undo_point) = self.on_undo_point {
@@ -617,9 +613,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     self.state.dragging = true;
                     self.sync_input_from_value();
                     log::debug!("Slider: clicked track, value = {}", new_value);
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
 
                 None
@@ -632,9 +626,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 if self.state.dragging {
                     self.state.dragging = false;
                     log::debug!("Slider: stopped dragging");
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
                 None
             }
@@ -653,9 +645,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         if (clamped - self.state.value).abs() > f32::EPSILON {
                             self.state.value = clamped;
                             log::debug!("Slider input: live update value = {}", clamped);
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                     }
                 }
@@ -671,9 +661,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 if let Ok(value) = self.state.input_text.parse::<f32>() {
                                     let clamped = value.clamp(self.min, self.max);
                                     self.state.value = clamped;
-                                    if let Some(ref on_change) = self.on_change {
-                                        return Some(on_change(self.state.clone()));
-                                    }
+                                    return self.emit_change();
                                 }
                             }
                         }
@@ -682,9 +670,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 if let Ok(value) = self.state.input_text.parse::<f32>() {
                                     let clamped = value.clamp(self.min, self.max);
                                     self.state.value = clamped;
-                                    if let Some(ref on_change) = self.on_change {
-                                        return Some(on_change(self.state.clone()));
-                                    }
+                                    return self.emit_change();
                                 }
                             }
                         }
@@ -739,9 +725,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 if let Ok(value) = self.state.input_text.parse::<f32>() {
                                     self.state.value = value.clamp(self.min, self.max);
                                 }
-                                if let Some(ref on_change) = self.on_change {
-                                    return Some(on_change(self.state.clone()));
-                                }
+                                return self.emit_change();
                             }
                             return None;
                         }
@@ -753,9 +737,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 if let Ok(value) = self.state.input_text.parse::<f32>() {
                                     self.state.value = value.clamp(self.min, self.max);
                                 }
-                                if let Some(ref on_change) = self.on_change {
-                                    return Some(on_change(self.state.clone()));
-                                }
+                                return self.emit_change();
                             }
                             return None;
                         }
@@ -767,9 +749,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 if let Ok(value) = self.state.input_text.parse::<f32>() {
                                     self.state.value = value.clamp(self.min, self.max);
                                 }
-                                if let Some(ref on_change) = self.on_change {
-                                    return Some(on_change(self.state.clone()));
-                                }
+                                return self.emit_change();
                             }
                             return None;
                         }
@@ -779,9 +759,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             self.apply_input_value();
                             log::debug!("Slider input: confirmed value = {}", self.state.value);
                             // Always emit to trigger redraw (clears visual selection)
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                         KeyCode::Up => {
                             let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
@@ -791,9 +769,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 self.state.input_text = self.format_value_for_input(new_value);
                                 self.state.input_cursor = self.state.input_text.len();
                                 self.state.input_selection = Some((0, self.state.input_text.len()));
-                                if let Some(ref on_change) = self.on_change {
-                                    return Some(on_change(self.state.clone()));
-                                }
+                                return self.emit_change();
                             }
                         }
                         KeyCode::Down => {
@@ -804,9 +780,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 self.state.input_text = self.format_value_for_input(new_value);
                                 self.state.input_cursor = self.state.input_text.len();
                                 self.state.input_selection = Some((0, self.state.input_text.len()));
-                                if let Some(ref on_change) = self.on_change {
-                                    return Some(on_change(self.state.clone()));
-                                }
+                                return self.emit_change();
                             }
                         }
                         _ => {}
@@ -830,18 +804,12 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     KeyCode::Home => {
                         self.state.value = self.min;
                         self.sync_input_from_value();
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.state.clone()));
-                        }
-                        return None;
+                        return self.emit_change();
                     }
                     KeyCode::End => {
                         self.state.value = self.max;
                         self.sync_input_from_value();
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.state.clone()));
-                        }
-                        return None;
+                        return self.emit_change();
                     }
                     _ => None,
                 };
@@ -853,9 +821,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         self.state.value = new_value;
                         self.sync_input_from_value();
                         log::debug!("Slider key: value = {}", new_value);
-                        if let Some(ref on_change) = self.on_change {
-                            return Some(on_change(self.state.clone()));
-                        }
+                        return self.emit_change();
                     }
                 }
 
@@ -874,9 +840,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         if (new_value - self.state.value).abs() > f32::EPSILON {
                             self.state.value = new_value;
                             self.sync_input_from_value();
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                         return None;
                     }
@@ -895,9 +859,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     self.state.value = new_value;
                     self.sync_input_from_value();
                     log::debug!("Slider scroll: value = {}", new_value);
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
 
                 None
@@ -910,9 +872,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     self.state.input_selection = None;
                     self.apply_input_value();
                     log::debug!("Slider input: blurred due to window focus loss");
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
                 None
             }
@@ -928,9 +888,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             self.state.input_selection = None;
                             self.apply_input_value();
                             log::debug!("Slider input: blurred by global click outside");
-                            if let Some(ref on_change) = self.on_change {
-                                return Some(on_change(self.state.clone()));
-                            }
+                            return self.emit_change();
                         }
                     }
                 }
@@ -942,9 +900,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 if self.state.dragging {
                     self.state.dragging = false;
                     log::debug!("Slider: stopped dragging (cursor left window)");
-                    if let Some(ref on_change) = self.on_change {
-                        return Some(on_change(self.state.clone()));
-                    }
+                    return self.emit_change();
                 }
                 None
             }
