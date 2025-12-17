@@ -651,7 +651,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 }
             }
 
-            Event::MouseScroll { delta, position, modifiers } => {
+            Event::MouseScroll { delta, position, modifiers, overlay_hint } => {
                 let content_bounds = Bounds::new(
                     viewport_bounds.x,
                     viewport_bounds.y,
@@ -659,12 +659,8 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     self.content_size.height,
                 );
 
-                // Check if a child has an active overlay (e.g., open dropdown)
-                let has_overlay = self.content.has_active_overlay();
-
-                // If child has overlay, ALWAYS forward scroll so it can close
-                // This is critical: scroll anywhere in the window should close dropdowns
-                if has_overlay {
+                // If event is for an overlay, forward to children so they can handle it
+                if *overlay_hint {
                     let adjusted_event = Event::MouseScroll {
                         delta: *delta,
                         position: (
@@ -672,11 +668,13 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             position.1 + self.state.offset.1,
                         ),
                         modifiers: *modifiers,
+                        overlay_hint: *overlay_hint,
                     };
                     if let Some(msg) = self.content.on_event(&adjusted_event, content_bounds) {
-                        // Child consumed the scroll event (e.g., dropdown closed)
                         return Some(msg);
                     }
+                    // Overlay handled it (even without message)
+                    return None;
                 }
 
                 // Only handle scroll within bounds for normal scrolling behavior
@@ -684,26 +682,8 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     // Check if position is within viewport (for forwarding to children)
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
 
-                    // Check if there's an active overlay that should capture scroll
-                    let in_overlay = if has_overlay {
-                        if let Some(cap) = self.content.capture_bounds(content_bounds) {
-                            // Translate capture bounds from content space to screen space
-                            let screen_cap = Bounds::new(
-                                cap.x - self.state.offset.0,
-                                cap.y - self.state.offset.1,
-                                cap.width,
-                                cap.height,
-                            );
-                            screen_cap.contains(position.0, position.1)
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-
-                    // Forward to children if within viewport (and overlay didn't already handle it)
-                    if !has_overlay && in_viewport {
+                    // Forward to children if within viewport
+                    if in_viewport {
                         let adjusted_event = Event::MouseScroll {
                             delta: *delta,
                             position: (
@@ -711,16 +691,12 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                                 position.1 + self.state.offset.1,
                             ),
                             modifiers: *modifiers,
+                            overlay_hint: *overlay_hint,
                         };
                         if let Some(msg) = self.content.on_event(&adjusted_event, content_bounds) {
                             // Child consumed the scroll event
                             return Some(msg);
                         }
-                    }
-
-                    // If child has an overlay that should capture scroll, don't scroll ourselves
-                    if in_overlay {
-                        return None;
                     }
 
                     // Apply scroll based on direction (only if child didn't consume it)
@@ -767,21 +743,12 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     position,
                     modifiers,
                     screen_position,
+                    overlay_hint,
                 } => {
-                    // Allow if within viewport OR within overlay's capture bounds (translated to screen space)
+                    // Allow if within viewport OR if event is for an overlay
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
-                    let in_overlay = overlay_capture.map_or(false, |cap| {
-                        // Translate capture bounds from content space to screen space
-                        let screen_cap = Bounds::new(
-                            cap.x - self.state.offset.0,
-                            cap.y - self.state.offset.1,
-                            cap.width,
-                            cap.height,
-                        );
-                        screen_cap.contains(position.0, position.1)
-                    });
 
-                    if in_viewport || in_overlay {
+                    if in_viewport || *overlay_hint {
                         Some(Event::MousePress {
                             button: *button,
                             position: (
@@ -791,6 +758,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             modifiers: *modifiers,
                             // Preserve or set the original screen position
                             screen_position: screen_position.or(Some(*position)),
+                            overlay_hint: *overlay_hint,
                         })
                     } else {
                         None
@@ -800,6 +768,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     button,
                     position,
                     modifiers,
+                    overlay_hint,
                 } => {
                     // Always forward MouseRelease to children - they may need it
                     // even if mouse moved outside (e.g., button clicks)
@@ -810,28 +779,21 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             position.1 + self.state.offset.1,
                         ),
                         modifiers: *modifiers,
+                        overlay_hint: *overlay_hint,
                     })
                 }
-                Event::MouseMove { position, modifiers } => {
-                    // Allow if within viewport OR within overlay's capture bounds
+                Event::MouseMove { position, modifiers, overlay_hint } => {
+                    // Allow if within viewport OR if event is for an overlay
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
-                    let in_overlay_move = overlay_capture.map_or(false, |cap| {
-                        let screen_cap = Bounds::new(
-                            cap.x - self.state.offset.0,
-                            cap.y - self.state.offset.1,
-                            cap.width,
-                            cap.height,
-                        );
-                        screen_cap.contains(position.0, position.1)
-                    });
 
-                    if in_viewport || in_overlay_move {
+                    if in_viewport || *overlay_hint {
                         Some(Event::MouseMove {
                             position: (
                                 position.0 + self.state.offset.0,
                                 position.1 + self.state.offset.1,
                             ),
                             modifiers: *modifiers,
+                            overlay_hint: *overlay_hint,
                         })
                     } else {
                         None

@@ -8,6 +8,7 @@ mod context;
 mod element;
 mod event;
 mod layout;
+mod overlay;
 mod renderer;
 mod state;
 pub mod theme;

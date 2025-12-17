@@ -240,6 +240,19 @@ impl<A: Application> AppState<A> {
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
+        // Set overlay hint if the event position is within a registered overlay
+        // This allows widgets to know if an event is meant for an overlay
+        let event = if let Some((x, y)) = event.position() {
+            if self.renderer.has_overlay_at(x, y) {
+                log::trace!("Event at ({}, {}) is in overlay", x, y);
+                event.with_overlay_hint(true)
+            } else {
+                event
+            }
+        } else {
+            event
+        };
+
         // First, let the application handle the event (for global shortcuts)
         if let Some(message) = self.app.on_event(&event) {
             self.app.update(message);
@@ -337,6 +350,9 @@ impl<A: Application> AppState<A> {
 
         // Draw UI
         if let Some(root) = &self.root {
+            // Clear overlay registry before drawing so widgets can re-register
+            self.renderer.clear_overlay_registry();
+
             let bounds = Bounds::new(
                 0.0,
                 0.0,
@@ -610,6 +626,7 @@ fn handle_window_event<A: Application>(
             state.handle_event(Event::MouseMove {
                 position: state.cursor_position,
                 modifiers: state.modifiers,
+                overlay_hint: false, // Set by handle_event if needed
             });
             // Always request redraw on mouse move for hover effects and drag operations
             // Widgets may update internal state (e.g., scrollbar dragging) without producing messages
@@ -636,12 +653,14 @@ fn handle_window_event<A: Application>(
                     position: state.cursor_position,
                     modifiers: state.modifiers,
                     screen_position: Some(state.cursor_position),
+                    overlay_hint: false, // Set by handle_event if needed
                 }
             } else {
                 Event::MouseRelease {
                     button,
                     position: state.cursor_position,
                     modifiers: state.modifiers,
+                    overlay_hint: false, // Set by handle_event if needed
                 }
             };
             state.handle_event(event);
@@ -656,6 +675,7 @@ fn handle_window_event<A: Application>(
                 delta,
                 position: state.cursor_position,
                 modifiers: state.modifiers,
+                overlay_hint: false, // Set by handle_event if needed
             });
             // Always request redraw for scroll events - widgets may update internal scroll state
             // without producing a message (e.g., Scrollable, Collapsible with scroll)

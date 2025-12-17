@@ -1,6 +1,7 @@
 //! Renderer for drawing UI elements using hvat_gpu
 
 use crate::layout::Bounds;
+use crate::overlay::OverlayRegistry;
 use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
@@ -164,6 +165,8 @@ pub struct Renderer {
     vertex_buffer_capacity: usize,
     /// Capacity of pre-allocated index buffer
     index_buffer_capacity: usize,
+    /// Overlay registry for tracking active overlays (cleared each frame)
+    overlay_registry: OverlayRegistry,
 }
 
 /// Embedded font for WASM compatibility (no system font access)
@@ -240,6 +243,7 @@ impl Renderer {
             color_index_buffer: None,
             vertex_buffer_capacity: 0,
             index_buffer_capacity: 0,
+            overlay_registry: OverlayRegistry::new(),
         }
     }
 
@@ -269,12 +273,24 @@ impl Renderer {
         self.text_requests.clear();
         self.overlay_text_requests.clear();
         self.texture_requests.clear();
+        // NOTE: We intentionally do NOT clear overlay_registry here.
+        // The registry is cleared at the start of the next frame's draw phase
+        // so that event handlers can query it before the new frame is rendered.
+        // This allows the overlay hint to work correctly.
 
         // Clean up unused text buffers from cache (remove entries not used this frame)
         if !self.text_cache_used_keys.is_empty() {
             self.text_buffer_cache.retain(|k, _| self.text_cache_used_keys.contains(k));
             self.text_cache_used_keys.clear();
         }
+    }
+
+    /// Clear overlay registry (called at start of draw phase)
+    ///
+    /// This should be called before widgets start drawing so they can
+    /// re-register their overlays for the current frame.
+    pub fn clear_overlay_registry(&mut self) {
+        self.overlay_registry.clear();
     }
 
     /// Start drawing to the overlay layer (rendered after textures)
@@ -285,6 +301,29 @@ impl Renderer {
     /// Stop drawing to the overlay layer
     pub fn end_overlay(&mut self) {
         self.drawing_overlay = false;
+    }
+
+    /// Register an overlay's capture bounds
+    ///
+    /// Call this during `draw()` when rendering an overlay (dropdown popup, tooltip, etc.)
+    /// The overlay registry is cleared each frame, so overlays must re-register every frame.
+    pub fn register_overlay(&mut self, bounds: Bounds) {
+        self.overlay_registry.register(bounds);
+    }
+
+    /// Register an overlay with explicit z-order
+    pub fn register_overlay_with_z_order(&mut self, bounds: Bounds, z_order: u32) {
+        self.overlay_registry.register_with_z_order(bounds, z_order);
+    }
+
+    /// Check if a position is within any registered overlay
+    pub fn has_overlay_at(&self, x: f32, y: f32) -> bool {
+        self.overlay_registry.has_overlay_at(x, y)
+    }
+
+    /// Get a reference to the overlay registry
+    pub fn overlay_registry(&self) -> &OverlayRegistry {
+        &self.overlay_registry
     }
 
     /// Get the current vertices and indices based on overlay mode

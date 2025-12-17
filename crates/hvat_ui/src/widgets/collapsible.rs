@@ -422,9 +422,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 button: MouseButton::Left,
                 position,
                 screen_position,
+                overlay_hint,
                 ..
             } => {
-                if header_bounds.contains(position.0, position.1) {
+                // Check header click - but skip if this event is for an overlay (e.g., dropdown popup)
+                // The overlay hint is set by the application based on the overlay registry
+                if header_bounds.contains(position.0, position.1) && !overlay_hint {
                     log::debug!("Collapsible header clicked - toggling");
                     self.state.toggle();
                     return self.emit_change();
@@ -469,7 +472,6 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                 // Forward to content if expanded
                 if self.state.is_expanded {
-                    // Check if within viewport OR within overlay capture bounds
                     let content_bounds = Bounds::new(
                         bounds.x,
                         header_bounds.bottom(),
@@ -477,27 +479,9 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         self.content_size.height,
                     );
 
+                    // Forward if within viewport OR if event is for an overlay (e.g., dropdown popup)
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
-                    let in_overlay = self.content.as_ref().map_or(false, |c| {
-                        if c.has_active_overlay() {
-                            if let Some(cap) = c.capture_bounds(content_bounds) {
-                                // Translate to screen space
-                                let screen_cap = Bounds::new(
-                                    cap.x,
-                                    cap.y - self.scroll_state.offset.1,
-                                    cap.width,
-                                    cap.height,
-                                );
-                                screen_cap.contains(position.0, position.1)
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    });
-
-                    if in_viewport || in_overlay {
+                    if in_viewport || *overlay_hint {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
                         let scroll_offset = self.scroll_state.offset.1;
@@ -510,12 +494,13 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                                 *position
                             };
 
-                            // Create adjusted event, preserving original screen_position
+                            // Create adjusted event, preserving original screen_position and overlay_hint
                             let adjusted_event = Event::MousePress {
                                 button: MouseButton::Left,
                                 position: adjusted_pos,
                                 modifiers: event.modifiers(),
                                 screen_position: *screen_position,
+                                overlay_hint: *overlay_hint,
                             };
 
                             return content.on_event(&adjusted_event, content_bounds);
@@ -524,8 +509,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
             }
 
-            Event::MouseMove { position, .. } => {
-                self.hover_header = header_bounds.contains(position.0, position.1);
+            Event::MouseMove { position, overlay_hint, .. } => {
+                // Only show header hover if not in an overlay area
+                // The overlay hint tells us if the cursor is over an overlay (e.g., dropdown popup)
+                self.hover_header = header_bounds.contains(position.0, position.1) && !overlay_hint;
 
                 // Handle scrollbar dragging
                 if self.scrollbar_dragging && self.state.is_expanded && self.needs_scrolling() {
@@ -545,7 +532,6 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                 // Forward to content if expanded
                 if self.state.is_expanded {
-                    // Check if within viewport OR within overlay capture bounds
                     let content_bounds = Bounds::new(
                         bounds.x,
                         header_bounds.bottom(),
@@ -553,27 +539,9 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         self.content_size.height,
                     );
 
+                    // Forward if within viewport OR if event is for an overlay
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
-                    let in_overlay = self.content.as_ref().map_or(false, |c| {
-                        if c.has_active_overlay() {
-                            if let Some(cap) = c.capture_bounds(content_bounds) {
-                                // Translate to screen space
-                                let screen_cap = Bounds::new(
-                                    cap.x,
-                                    cap.y - self.scroll_state.offset.1,
-                                    cap.width,
-                                    cap.height,
-                                );
-                                screen_cap.contains(position.0, position.1)
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    });
-
-                    if in_viewport || in_overlay {
+                    if in_viewport || *overlay_hint {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
                         let scroll_offset = self.scroll_state.offset.1;
@@ -588,6 +556,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             let adjusted_event = Event::MouseMove {
                                 position: adjusted_pos,
                                 modifiers: event.modifiers(),
+                                overlay_hint: *overlay_hint,
                             };
 
                             return content.on_event(&adjusted_event, content_bounds);
@@ -596,9 +565,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
             }
 
-            Event::MouseScroll { delta, position, modifiers } => {
+            Event::MouseScroll { delta, position, modifiers, overlay_hint } => {
                 if self.state.is_expanded {
-                    // First check if a child has an active overlay that should receive the scroll
                     let content_bounds = Bounds::new(
                         bounds.x,
                         header_bounds.bottom(),
@@ -606,26 +574,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         self.content_size.height,
                     );
 
-                    let has_overlay = self.content.as_ref().map_or(false, |c| c.has_active_overlay());
-
-                    let in_overlay = has_overlay && self.content.as_ref().map_or(false, |c| {
-                        if let Some(cap) = c.capture_bounds(content_bounds) {
-                            // Translate to screen space
-                            let screen_cap = Bounds::new(
-                                cap.x,
-                                cap.y - self.scroll_state.offset.1,
-                                cap.width,
-                                cap.height,
-                            );
-                            screen_cap.contains(position.0, position.1)
-                        } else {
-                            false
-                        }
-                    });
-
-                    // If child has overlay, ALWAYS forward scroll so it can close
-                    // This is critical: scroll anywhere should close dropdowns
-                    if has_overlay {
+                    // Forward scroll to content if it's for an overlay or within viewport
+                    // This allows overlays (dropdowns) to close on scroll
+                    let in_viewport = viewport_bounds.contains(position.0, position.1);
+                    if *overlay_hint || in_viewport {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
                         let scroll_offset = self.scroll_state.offset.1;
@@ -641,21 +593,21 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                                 delta: *delta,
                                 position: adjusted_pos,
                                 modifiers: *modifiers,
+                                overlay_hint: *overlay_hint,
                             };
 
                             if let Some(msg) = content.on_event(&adjusted_event, content_bounds) {
                                 return Some(msg);
                             }
-                            // If we're inside the overlay, it handled it (even with no message)
-                            if in_overlay {
+                            // If event was for an overlay, it was handled
+                            if *overlay_hint {
                                 return None;
                             }
-                            // Otherwise fall through to normal scroll handling
                         }
                     }
 
-                    // Handle scrolling in content area (only if no overlay captured it)
-                    if self.needs_scrolling() && viewport_bounds.contains(position.0, position.1) {
+                    // Handle scrolling in content area (only if not for an overlay)
+                    if !overlay_hint && self.needs_scrolling() && viewport_bounds.contains(position.0, position.1) {
                         let max_scroll = (self.content_size.height - self.visible_content_height).max(0.0);
                         // Negative delta.1 means scroll down (content moves up), positive means scroll up
                         let scroll_amount = -delta.1 * SCROLL_SPEED;
@@ -692,7 +644,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 return None;
             }
 
-            Event::MouseRelease { button, position, .. } => {
+            Event::MouseRelease { button, position, overlay_hint, .. } => {
                 // Stop scrollbar dragging
                 if self.scrollbar_dragging {
                     self.scrollbar_dragging = false;
@@ -701,7 +653,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
 
                 // Forward to content if expanded
-                if self.state.is_expanded && viewport_bounds.contains(position.0, position.1) {
+                let in_viewport = viewport_bounds.contains(position.0, position.1);
+                if self.state.is_expanded && (in_viewport || *overlay_hint) {
                     // Extract values before mutable borrow
                     let needs_scroll = self.needs_scrolling();
                     let scroll_offset = self.scroll_state.offset.1;
@@ -725,6 +678,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             button: *button,
                             position: adjusted_pos,
                             modifiers: event.modifiers(),
+                            overlay_hint: *overlay_hint,
                         };
 
                         return content.on_event(&adjusted_event, content_bounds);

@@ -246,6 +246,9 @@ pub enum Event {
         /// Original screen position (before any transformations like scroll offset)
         /// Used for determining popup direction in scrollable containers
         screen_position: Option<(f32, f32)>,
+        /// Hint that this position is within an overlay (dropdown popup, tooltip, etc.)
+        /// Widgets should check this before handling clicks to avoid capturing overlay events
+        overlay_hint: bool,
     },
 
     /// Mouse button released
@@ -253,12 +256,16 @@ pub enum Event {
         button: MouseButton,
         position: (f32, f32),
         modifiers: KeyModifiers,
+        /// Hint that this position is within an overlay
+        overlay_hint: bool,
     },
 
     /// Mouse moved
     MouseMove {
         position: (f32, f32),
         modifiers: KeyModifiers,
+        /// Hint that this position is within an overlay
+        overlay_hint: bool,
     },
 
     /// Mouse scroll wheel
@@ -266,6 +273,8 @@ pub enum Event {
         delta: (f32, f32),
         position: (f32, f32),
         modifiers: KeyModifiers,
+        /// Hint that this position is within an overlay
+        overlay_hint: bool,
     },
 
     /// Key pressed
@@ -323,6 +332,71 @@ impl Event {
             | Event::KeyPress { modifiers, .. }
             | Event::KeyRelease { modifiers, .. } => *modifiers,
             _ => KeyModifiers::default(),
+        }
+    }
+
+    /// Set the overlay hint for this event
+    ///
+    /// Returns a new event with the overlay hint set. Only affects
+    /// positional events (MousePress, MouseRelease, MouseMove, MouseScroll).
+    pub fn with_overlay_hint(self, hint: bool) -> Self {
+        match self {
+            Event::MousePress {
+                button,
+                position,
+                modifiers,
+                screen_position,
+                ..
+            } => Event::MousePress {
+                button,
+                position,
+                modifiers,
+                screen_position,
+                overlay_hint: hint,
+            },
+            Event::MouseRelease {
+                button,
+                position,
+                modifiers,
+                ..
+            } => Event::MouseRelease {
+                button,
+                position,
+                modifiers,
+                overlay_hint: hint,
+            },
+            Event::MouseMove {
+                position,
+                modifiers,
+                ..
+            } => Event::MouseMove {
+                position,
+                modifiers,
+                overlay_hint: hint,
+            },
+            Event::MouseScroll {
+                delta,
+                position,
+                modifiers,
+                ..
+            } => Event::MouseScroll {
+                delta,
+                position,
+                modifiers,
+                overlay_hint: hint,
+            },
+            other => other, // Non-positional events unchanged
+        }
+    }
+
+    /// Check if this event has the overlay hint set
+    pub fn has_overlay_hint(&self) -> bool {
+        match self {
+            Event::MousePress { overlay_hint, .. }
+            | Event::MouseRelease { overlay_hint, .. }
+            | Event::MouseMove { overlay_hint, .. }
+            | Event::MouseScroll { overlay_hint, .. } => *overlay_hint,
+            _ => false,
         }
     }
 }

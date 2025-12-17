@@ -71,6 +71,32 @@ pub fn dispatch_event_to_children<M: 'static>(
         return result;
     }
 
+    // TextInput and KeyPress should go to children with active overlays first
+    // (e.g., dropdown search needs TextInput, and KeyPress for escape/enter/arrows)
+    // If no overlay consumes it, send to all children
+    if matches!(event, Event::TextInput { .. } | Event::KeyPress { .. }) {
+        // First try children with overlays
+        for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
+            if child.has_active_overlay() {
+                let absolute_bounds = translate_bounds(*bounds, container_bounds);
+                if let Some(msg) = child.on_event(event, absolute_bounds) {
+                    return Some(msg);
+                }
+            }
+        }
+        // Then try all children normally
+        for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
+            if child.has_active_overlay() {
+                continue; // Already tried
+            }
+            let absolute_bounds = translate_bounds(*bounds, container_bounds);
+            if let Some(msg) = child.on_event(event, absolute_bounds) {
+                return Some(msg);
+            }
+        }
+        return None;
+    }
+
     // Check if any child has an active overlay or active drag
     let has_overlay = children.iter().any(|c| c.has_active_overlay());
     let has_drag = children.iter().any(|c| c.has_active_drag());

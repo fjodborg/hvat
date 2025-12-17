@@ -293,9 +293,11 @@ impl<M: 'static> Dropdown<M> {
         (space_below < popup_height && space_above >= popup_height) || prefer_upward
     }
 
-    /// Get the Y offset for options (accounts for search box)
+    /// Get the Y offset for options (accounts for search box position)
+    /// When opening upward, search box is at bottom so options start at top (offset = 0)
+    /// When opening downward, search box is at top so options start below it
     fn options_y_offset(&self) -> f32 {
-        if self.searchable {
+        if self.searchable && !self.state.opens_upward {
             self.config.option_height
         } else {
             0.0
@@ -332,10 +334,27 @@ impl<M: 'static> Dropdown<M> {
     /// Calculate filtered index from a Y position in the popup
     /// Returns None if the position is in the search box area
     fn filtered_index_at_position(&self, popup_bounds: Bounds, y: f32) -> Option<usize> {
+        // Check if in search box area (different position based on open direction)
+        if self.searchable {
+            if self.state.opens_upward {
+                // Search box at bottom
+                let search_top = popup_bounds.bottom() - self.config.option_height;
+                if y >= search_top {
+                    return None;
+                }
+            } else {
+                // Search box at top
+                let search_bottom = popup_bounds.y + self.config.option_height;
+                if y < search_bottom {
+                    return None;
+                }
+            }
+        }
+
         let options_y_offset = self.options_y_offset();
         let relative_y = y - popup_bounds.y - options_y_offset;
 
-        // Check if in search box area
+        // Check if relative_y is negative (shouldn't happen after search box check, but be safe)
         if relative_y < 0.0 {
             return None;
         }
@@ -627,6 +646,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     Some(0)
                 };
                 log::debug!("Dropdown search text: '{}'", self.state.search_text);
+                return self.emit_change();
             }
 
             Event::GlobalMousePress { position, .. } => {
@@ -668,6 +688,10 @@ impl<M: 'static> Dropdown<M> {
         let scroll_offset = self.state.scroll_offset;
         let needs_scrollbar = total_items > visible_items;
         let options_y_offset = self.options_y_offset();
+
+        // Register the popup as an overlay so events can be properly routed
+        // This allows the overlay hint system to know events in this area are for the popup
+        renderer.register_overlay(popup_bounds);
 
         // Start overlay rendering (on top of other content)
         renderer.begin_overlay();
@@ -739,11 +763,19 @@ impl<M: 'static> Dropdown<M> {
         renderer.end_overlay();
     }
 
-    /// Draw the search box at the top of the popup
+    /// Draw the search box (at top when opening down, at bottom when opening up)
     fn draw_search_box(&self, renderer: &mut Renderer, popup_bounds: Bounds) {
+        let search_y = if self.state.opens_upward {
+            // Search box at bottom when opening upward
+            popup_bounds.bottom() - self.config.option_height
+        } else {
+            // Search box at top when opening downward
+            popup_bounds.y
+        };
+
         let search_bounds = Bounds::new(
             popup_bounds.x,
-            popup_bounds.y,
+            search_y,
             popup_bounds.width,
             self.config.option_height,
         );
@@ -761,9 +793,14 @@ impl<M: 'static> Dropdown<M> {
         let (text_x, text_y) = self.text_position(search_bounds);
         renderer.text(search_text, text_x, text_y, self.config.font_size, text_color);
 
-        // Draw separator line below the search box
+        // Draw separator line (above when at bottom, below when at top)
+        let separator_y = if self.state.opens_upward {
+            search_bounds.y
+        } else {
+            search_bounds.bottom() - 1.0
+        };
         renderer.fill_rect(
-            Bounds::new(popup_bounds.x, search_bounds.bottom() - 1.0, popup_bounds.width, 1.0),
+            Bounds::new(popup_bounds.x, separator_y, popup_bounds.width, 1.0),
             self.config.border_color,
         );
     }
