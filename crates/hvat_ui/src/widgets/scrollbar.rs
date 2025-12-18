@@ -3,6 +3,56 @@
 //! This module provides shared functions for scrollbar thumb calculation,
 //! scroll offset mapping, and scrollbar rendering used by Scrollable, Dropdown,
 //! and Collapsible widgets.
+//!
+//! ## Coordinate Space Conventions
+//!
+//! Scrolling involves two coordinate spaces:
+//!
+//! - **Viewport space**: The visible region on screen (what the user sees)
+//! - **Content space**: The full content area (may be larger than viewport)
+//!
+//! ### Converting between spaces:
+//!
+//! - **Event positions** (from mouse events) are in viewport/screen space
+//! - To convert to content space: `content_pos = viewport_pos + scroll_offset`
+//! - **Drawing content** at the correct position:
+//!   - Content is drawn at: `viewport_pos - scroll_offset`
+//!
+//! ### When to add vs subtract scroll offset:
+//!
+//! | Operation | Formula | Reason |
+//! |-----------|---------|--------|
+//! | Event pos → content pos | `+offset` | Scroll down = content moved up, so add to get content position |
+//! | Content pos → draw pos | `-offset` | Drawing higher content means drawing further up (negative Y) |
+//! | capture_bounds | No adjustment | Bounds are already in screen space |
+//!
+//! ## Usage Examples
+//!
+//! ```rust,ignore
+//! use hvat_ui::widgets::scrollbar::{ScrollbarParams, calculate_vertical_thumb};
+//!
+//! // Create params for a scrollable area
+//! let params = ScrollbarParams::new(
+//!     content_height,     // Total content size
+//!     viewport_height,    // Visible area
+//!     scroll_offset,      // Current scroll position
+//!     track_bounds,       // Where to draw scrollbar
+//! );
+//!
+//! // Calculate thumb geometry
+//! if let Some(thumb) = calculate_vertical_thumb(&params) {
+//!     renderer.fill_rect(thumb.bounds, thumb_color);
+//! }
+//!
+//! // Convert mouse drag to scroll offset
+//! let new_offset = thumb_y_to_scroll_offset(
+//!     mouse_y - drag_offset,
+//!     track_bounds,
+//!     thumb_height,
+//!     content_height,
+//!     viewport_height,
+//! );
+//! ```
 
 use crate::constants::{SCROLLBAR_MIN_THUMB, SCROLLBAR_WIDTH};
 use crate::layout::Bounds;

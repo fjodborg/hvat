@@ -65,17 +65,36 @@ pub fn get_selection_anchor(selection: Option<(usize, usize)>, cursor: usize) ->
 // Text Manipulation
 // =============================================================================
 
+/// Convert a character index to a byte index in a UTF-8 string.
+/// Returns the byte position of the nth character, or the string length if
+/// the index is beyond the string.
+#[inline]
+fn char_index_to_byte_index(text: &str, char_idx: usize) -> usize {
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(byte_idx, _)| byte_idx)
+        .unwrap_or(text.len())
+}
+
+/// Get the number of characters in a string (not bytes).
+#[inline]
+pub fn char_count(text: &str) -> usize {
+    text.chars().count()
+}
+
 /// Delete the selected text from a string
 ///
 /// # Arguments
 /// * `text` - The text to modify
-/// * `selection` - The selection range (start, end)
+/// * `selection` - The selection range (start, end) as character indices
 ///
 /// # Returns
-/// The cursor position after deletion (the start of the selection)
+/// The cursor position after deletion (the start of the selection) as character index
 pub fn delete_selection(text: &mut String, selection: (usize, usize)) -> usize {
     let (start, end) = normalize_selection(selection);
-    text.drain(start..end);
+    let start_byte = char_index_to_byte_index(text, start);
+    let end_byte = char_index_to_byte_index(text, end);
+    text.drain(start_byte..end_byte);
     start
 }
 
@@ -83,34 +102,35 @@ pub fn delete_selection(text: &mut String, selection: (usize, usize)) -> usize {
 ///
 /// # Arguments
 /// * `text` - The text to modify
-/// * `cursor` - Current cursor position
-/// * `selection` - Optional selection range to delete first
+/// * `cursor` - Current cursor position (character index)
+/// * `selection` - Optional selection range to delete first (character indices)
 /// * `insert` - The text to insert
 ///
 /// # Returns
-/// The new cursor position (after inserted text)
+/// The new cursor position (after inserted text) as character index
 pub fn insert_text(
     text: &mut String,
     cursor: usize,
     selection: Option<(usize, usize)>,
     insert: &str,
 ) -> usize {
-    let insert_pos = if let Some(sel) = selection {
+    let insert_char_pos = if let Some(sel) = selection {
         delete_selection(text, sel)
     } else {
         cursor
     };
 
-    text.insert_str(insert_pos, insert);
-    insert_pos + insert.len()
+    let insert_byte_pos = char_index_to_byte_index(text, insert_char_pos);
+    text.insert_str(insert_byte_pos, insert);
+    insert_char_pos + insert.chars().count()
 }
 
 /// Handle backspace key
 ///
 /// # Arguments
 /// * `text` - The text to modify
-/// * `cursor` - Current cursor position
-/// * `selection` - Optional selection range
+/// * `cursor` - Current cursor position (character index)
+/// * `selection` - Optional selection range (character indices)
 ///
 /// # Returns
 /// `Some(new_cursor)` if text was modified, `None` if nothing happened
@@ -122,8 +142,10 @@ pub fn handle_backspace(
     if let Some(sel) = selection {
         Some(delete_selection(text, sel))
     } else if cursor > 0 {
-        text.remove(cursor - 1);
-        Some(cursor - 1)
+        let prev_char_idx = cursor - 1;
+        let byte_idx = char_index_to_byte_index(text, prev_char_idx);
+        text.remove(byte_idx);
+        Some(prev_char_idx)
     } else {
         None
     }
@@ -133,8 +155,8 @@ pub fn handle_backspace(
 ///
 /// # Arguments
 /// * `text` - The text to modify
-/// * `cursor` - Current cursor position
-/// * `selection` - Optional selection range
+/// * `cursor` - Current cursor position (character index)
+/// * `selection` - Optional selection range (character indices)
 ///
 /// # Returns
 /// `Some(new_cursor)` if text was modified, `None` if nothing happened
@@ -145,8 +167,9 @@ pub fn handle_delete(
 ) -> Option<usize> {
     if let Some(sel) = selection {
         Some(delete_selection(text, sel))
-    } else if cursor < text.len() {
-        text.remove(cursor);
+    } else if cursor < char_count(text) {
+        let byte_idx = char_index_to_byte_index(text, cursor);
+        text.remove(byte_idx);
         Some(cursor)
     } else {
         None

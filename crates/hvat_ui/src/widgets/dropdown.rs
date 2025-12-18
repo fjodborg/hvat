@@ -1,7 +1,8 @@
 //! Dropdown/select widget
 
+use crate::callback::Callback;
 use crate::constants::{
-    DROPDOWN_ARROW_WIDTH, DROPDOWN_TEXT_PADDING_X, SCROLLBAR_PADDING,
+    DEFAULT_INPUT_WIDTH, DROPDOWN_ARROW_WIDTH, DROPDOWN_TEXT_PADDING_X, SCROLLBAR_PADDING,
     SCROLLBAR_WIDTH_COMPACT,
 };
 use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
@@ -78,9 +79,9 @@ pub struct Dropdown<M> {
     /// Configuration
     config: DropdownConfig,
     /// Callback when an option is selected
-    on_select: Option<Box<dyn Fn(usize) -> M>>,
+    on_select: Callback<usize, M>,
     /// Callback when dropdown state changes (open/close/highlight)
-    on_change: Option<Box<dyn Fn(DropdownState) -> M>>,
+    on_change: Callback<DropdownState, M>,
     /// Internal: cached button bounds
     button_bounds: Bounds,
     /// Internal: is hovering over button
@@ -101,12 +102,12 @@ impl<M: 'static> Dropdown<M> {
             state: DropdownState::new(),
             options: Vec::new(),
             selected: None,
-            width: Length::Fixed(200.0),
+            width: Length::Fixed(DEFAULT_INPUT_WIDTH),
             placeholder: "Select...".to_string(),
             searchable: false,
             config: DropdownConfig::default(),
-            on_select: None,
-            on_change: None,
+            on_select: Callback::none(),
+            on_change: Callback::none(),
             button_bounds: Bounds::ZERO,
             hover_button: false,
             hover_option: None,
@@ -160,7 +161,7 @@ impl<M: 'static> Dropdown<M> {
     where
         F: Fn(usize) -> M + 'static,
     {
-        self.on_select = Some(Box::new(callback));
+        self.on_select = Callback::new(callback);
         self
     }
 
@@ -169,7 +170,7 @@ impl<M: 'static> Dropdown<M> {
     where
         F: Fn(DropdownState) -> M + 'static,
     {
-        self.on_change = Some(Box::new(callback));
+        self.on_change = Callback::new(callback);
         self
     }
 
@@ -209,7 +210,8 @@ impl<M: 'static> Dropdown<M> {
             self.filtered_cache = Some((self.state.search_text.clone(), indices));
         }
 
-        &self.filtered_cache.as_ref().unwrap().1
+        // Safe: we just set filtered_cache to Some above if it wasn't valid
+        &self.filtered_cache.as_ref().expect("filtered_cache should be initialized").1
     }
 
     /// Get filtered options based on search text (read-only version for drawing)
@@ -319,7 +321,7 @@ impl<M: 'static> Dropdown<M> {
 
     /// Emit a state change if handler is set
     fn emit_change(&self) -> Option<M> {
-        self.on_change.as_ref().map(|f| f(self.state.clone()))
+        self.on_change.call(self.state.clone())
     }
 
     /// Get the original option index from a filtered index
@@ -377,7 +379,7 @@ impl<M: 'static> Default for Dropdown<M> {
 
 impl<M: 'static> Widget<M> for Dropdown<M> {
     fn layout(&mut self, available: Size) -> Size {
-        let width = self.width.resolve(available.width, 200.0);
+        let width = self.width.resolve(available.width, DEFAULT_INPUT_WIDTH);
         let height = self.config.option_height;
 
         self.button_bounds = Bounds::new(0.0, 0.0, width, height);
@@ -511,8 +513,8 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                         if let Some(idx) = self.get_original_index(filtered_index) {
                             log::debug!("Click on popup option {}", idx);
                             self.state.close();
-                            if let Some(on_select) = &self.on_select {
-                                return Some(on_select(idx));
+                            if let Some(msg) = self.on_select.call(idx) {
+                                return Some(msg);
                             }
                             return self.emit_change();
                         }
@@ -586,8 +588,8 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                             if let Some(highlighted) = self.state.highlighted {
                                 if let Some(idx) = self.get_original_index(highlighted) {
                                     self.state.close();
-                                    if let Some(on_select) = &self.on_select {
-                                        return Some(on_select(idx));
+                                    if let Some(msg) = self.on_select.call(idx) {
+                                        return Some(msg);
                                     }
                                     return self.emit_change();
                                 }

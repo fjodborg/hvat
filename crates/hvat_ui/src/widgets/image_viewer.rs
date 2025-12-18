@@ -1,5 +1,6 @@
 //! Image viewer widget with pan and zoom
 
+use crate::callback::Callback;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer, TextureId};
@@ -79,9 +80,9 @@ pub struct ImageViewer<M> {
     /// Image adjustments (brightness, contrast, gamma, hue) - applied on GPU
     adjustments: ImageAdjustments,
     /// Change handler
-    on_change: Option<Box<dyn Fn(ImageViewerState) -> M>>,
+    on_change: Callback<ImageViewerState, M>,
     /// Click handler for annotation tools
-    on_click: Option<Box<dyn Fn(ImageClick) -> M>>,
+    on_click: Callback<ImageClick, M>,
     /// Enable panning
     pannable: bool,
     /// Enable zooming
@@ -113,8 +114,8 @@ impl<M> ImageViewer<M> {
             texture_height: height,
             state: ImageViewerState::default(),
             adjustments: ImageAdjustments::default(),
-            on_change: None,
-            on_click: None,
+            on_change: Callback::none(),
+            on_click: Callback::none(),
             pannable: true,
             zoomable: true,
             show_controls: true,
@@ -136,8 +137,8 @@ impl<M> ImageViewer<M> {
             texture_height: 0,
             state: ImageViewerState::default(),
             adjustments: ImageAdjustments::default(),
-            on_change: None,
-            on_click: None,
+            on_change: Callback::none(),
+            on_click: Callback::none(),
             pannable: true,
             zoomable: true,
             show_controls: true,
@@ -170,7 +171,7 @@ impl<M> ImageViewer<M> {
     where
         F: Fn(ImageViewerState) -> M + 'static,
     {
-        self.on_change = Some(Box::new(handler));
+        self.on_change = Callback::new(handler);
         self
     }
 
@@ -209,7 +210,7 @@ impl<M> ImageViewer<M> {
     where
         F: Fn(ImageClick) -> M + 'static,
     {
-        self.on_click = Some(Box::new(handler));
+        self.on_click = Callback::new(handler);
         self
     }
 
@@ -242,30 +243,12 @@ impl<M> ImageViewer<M> {
         // Get clip space coordinates
         let (clip_x, clip_y) = self.screen_to_clip(screen_x, screen_y, bounds);
 
-        // Calculate the transform parameters (same as in calculate_transform)
-        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
-        let view_aspect = bounds.width / bounds.height;
+        // Get zoom (1.0 = 1:1 pixel ratio)
+        let zoom = self.calculate_zoom_for_mode(bounds);
 
-        let (aspect_scale_x, aspect_scale_y) = if image_aspect > view_aspect {
-            (1.0, view_aspect / image_aspect)
-        } else {
-            (image_aspect / view_aspect, 1.0)
-        };
-
-        let zoom = match self.state.fit_mode {
-            FitMode::FitToView => 1.0,
-            FitMode::OneToOne => {
-                if image_aspect > view_aspect {
-                    bounds.width / self.texture_width as f32
-                } else {
-                    bounds.height / self.texture_height as f32
-                }
-            }
-            FitMode::Manual => self.state.zoom,
-        };
-
-        let scale_x = aspect_scale_x * zoom;
-        let scale_y = aspect_scale_y * zoom;
+        // Calculate scale (same as in calculate_transform)
+        let scale_x = (self.texture_width as f32 / bounds.width) * zoom;
+        let scale_y = (self.texture_height as f32 / bounds.height) * zoom;
 
         // Reverse the transform: clip_space = (image_uv * 2 - 1) * scale + pan
         // So: image_uv = ((clip_space - pan) / scale + 1) / 2
@@ -290,30 +273,12 @@ impl<M> ImageViewer<M> {
         let uv_x = image_x / self.texture_width as f32;
         let uv_y = 1.0 - (image_y / self.texture_height as f32); // Flip Y
 
-        // Calculate transform parameters
-        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
-        let view_aspect = bounds.width / bounds.height;
+        // Get zoom (1.0 = 1:1 pixel ratio)
+        let zoom = self.calculate_zoom_for_mode(bounds);
 
-        let (aspect_scale_x, aspect_scale_y) = if image_aspect > view_aspect {
-            (1.0, view_aspect / image_aspect)
-        } else {
-            (image_aspect / view_aspect, 1.0)
-        };
-
-        let zoom = match self.state.fit_mode {
-            FitMode::FitToView => 1.0,
-            FitMode::OneToOne => {
-                if image_aspect > view_aspect {
-                    bounds.width / self.texture_width as f32
-                } else {
-                    bounds.height / self.texture_height as f32
-                }
-            }
-            FitMode::Manual => self.state.zoom,
-        };
-
-        let scale_x = aspect_scale_x * zoom;
-        let scale_y = aspect_scale_y * zoom;
+        // Calculate scale (same as in calculate_transform)
+        let scale_x = (self.texture_width as f32 / bounds.width) * zoom;
+        let scale_y = (self.texture_height as f32 / bounds.height) * zoom;
 
         // Transform UV to clip space
         let clip_x = (uv_x * 2.0 - 1.0) * scale_x + self.state.pan.0;
@@ -330,34 +295,31 @@ impl<M> ImageViewer<M> {
     }
 
     /// Calculate the transform uniform based on current state and bounds
+    ///
+    /// The transform maps the image quad to clip space (-1 to 1).
+    /// Zoom semantics: zoom = screen_pixels_per_image_pixel
+    /// - zoom = 1.0 (100%) means 1:1 pixel ratio
+    /// - zoom = 2.0 (200%) means image appears 2x larger
     fn calculate_transform(&self, bounds: &Bounds) -> TransformUniform {
         if self.texture_width == 0 || self.texture_height == 0 {
             return TransformUniform::new();
         }
 
-        let image_aspect = self.texture_width as f32 / self.texture_height as f32;
-        let view_aspect = bounds.width / bounds.height;
+        // Get the effective zoom for the current mode
+        let zoom = self.calculate_zoom_for_mode(bounds);
 
-        // Calculate aspect ratio correction
-        // The quad is a square (-1 to 1), we need to scale it to match image aspect
-        // relative to the view aspect
-        let (aspect_scale_x, aspect_scale_y) = if image_aspect > view_aspect {
-            // Image is wider than view - fit to width, scale down height
-            (1.0, view_aspect / image_aspect)
-        } else {
-            // Image is taller than view - fit to height, scale down width
-            (image_aspect / view_aspect, 1.0)
-        };
+        // Calculate the scale that would give 1:1 pixel ratio in clip space
+        // At 1:1: image_pixels * scale = clip_space_size (which is 2.0 for -1 to 1)
+        // So: scale_1to1 = 2.0 / view_pixels (since we want 1 image pixel = 1 screen pixel)
+        // But we also need to account for the image size relative to view
+        //
+        // The quad goes from -1 to 1 (size 2 in clip space)
+        // At 1:1 zoom: tex_width pixels should map to tex_width screen pixels
+        // In clip space: tex_width screen pixels = tex_width / view_width * 2.0 clip units
+        let base_scale_x = (self.texture_width as f32 / bounds.width) * zoom;
+        let base_scale_y = (self.texture_height as f32 / bounds.height) * zoom;
 
-        // Use state.zoom directly - it's the single source of truth
-        // zoom = 1.0 means "fit to view" (image fills the view bounds)
-        let zoom = self.state.zoom;
-
-        // Apply zoom to aspect-corrected scale
-        let scale_x = aspect_scale_x * zoom;
-        let scale_y = aspect_scale_y * zoom;
-
-        TransformUniform::from_transform_xy(self.state.pan.0, self.state.pan.1, scale_x, scale_y)
+        TransformUniform::from_transform_xy(self.state.pan.0, self.state.pan.1, base_scale_x, base_scale_y)
     }
 
     /// Convert screen position to clip space relative to widget bounds
@@ -402,30 +364,36 @@ impl<M> ImageViewer<M> {
     }
 
     /// Calculate the appropriate zoom value based on fit mode
+    /// Returns zoom where 1.0 = 1:1 pixel ratio (100%)
     fn calculate_zoom_for_mode(&self, bounds: &Bounds) -> f32 {
         match self.state.fit_mode {
-            FitMode::FitToView => 1.0,
-            FitMode::OneToOne => ImageViewerState::calculate_one_to_one_zoom(
+            FitMode::FitToView => ImageViewerState::calculate_fit_zoom(
                 bounds.width,
                 bounds.height,
                 self.texture_width,
                 self.texture_height,
             ),
+            FitMode::OneToOne => 1.0, // 1:1 is zoom = 1.0 (100%)
             FitMode::Manual => self.state.zoom,
         }
     }
 
     /// Emit a state change with zoom updated based on current fit mode
     fn emit_change_with_bounds(&mut self, bounds: &Bounds) -> Option<M> {
-        // Cache the view and texture sizes so external code can calculate 1:1 zoom
+        // Cache the view and texture sizes so external code can calculate fit zoom
         self.state.cached_view_size = Some((bounds.width, bounds.height));
         self.state.cached_texture_size = Some((self.texture_width, self.texture_height));
 
-        // Update state.zoom based on fit_mode so it's always the single source of truth
-        // After this, fit_mode is set to Manual since we now have the actual zoom value
+        // Calculate zoom based on fit_mode
         self.state.zoom = self.calculate_zoom_for_mode(bounds);
-        self.state.fit_mode = FitMode::Manual;
-        self.on_change.as_ref().map(|f| f(self.state.clone()))
+
+        // Convert temporary modes (FitToView, OneToOne) to Manual after applying
+        // This makes Fit/1:1 a one-time action rather than a persistent mode
+        if self.state.fit_mode != FitMode::Manual {
+            self.state.fit_mode = FitMode::Manual;
+        }
+
+        self.on_change.call(self.state.clone())
     }
 }
 
@@ -443,9 +411,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // Use texture dimensions as content size fallback for Shrink mode
+        let content_width = self.texture_width as f32;
+        let content_height = self.texture_height as f32;
         Size::new(
-            self.width.resolve(available.width, available.width),
-            self.height.resolve(available.height, available.height),
+            self.width.resolve(available.width, content_width),
+            self.height.resolve(available.height, content_height),
         )
     }
 
@@ -592,8 +563,9 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
             }
         }
 
-        // Draw zoom info
-        let zoom_text = format!("{:.0}%", self.state.zoom * 100.0);
+        // Draw zoom info - use calculated zoom for current mode/bounds
+        let display_zoom = self.calculate_zoom_for_mode(&bounds);
+        let zoom_text = format!("{:.0}%", display_zoom * 100.0);
         renderer.text(
             &zoom_text,
             bounds.x + bounds.width - 60.0,
@@ -670,20 +642,18 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
 
                 // In annotation mode, emit click events for drawing
                 if self.annotation_mode {
-                    if let Some(ref on_click) = self.on_click {
-                        let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                        self.left_dragging = true;
-                        self.last_left_drag_pos = Some(*position);
-                        return Some(on_click(ImageClick {
-                            image_x,
-                            image_y,
-                            screen_x: position.0,
-                            screen_y: position.1,
-                            is_drag_start: true,
-                            is_drag_move: false,
-                            is_drag_end: false,
-                        }));
-                    }
+                    let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                    self.left_dragging = true;
+                    self.last_left_drag_pos = Some(*position);
+                    return self.on_click.call(ImageClick {
+                        image_x,
+                        image_y,
+                        screen_x: position.0,
+                        screen_y: position.1,
+                        is_drag_start: true,
+                        is_drag_move: false,
+                        is_drag_end: false,
+                    });
                 }
                 None
             }
@@ -697,18 +667,16 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 if self.left_dragging && self.annotation_mode {
                     self.left_dragging = false;
                     self.last_left_drag_pos = None;
-                    if let Some(ref on_click) = self.on_click {
-                        let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                        return Some(on_click(ImageClick {
-                            image_x,
-                            image_y,
-                            screen_x: position.0,
-                            screen_y: position.1,
-                            is_drag_start: false,
-                            is_drag_move: false,
-                            is_drag_end: true,
-                        }));
-                    }
+                    let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                    return self.on_click.call(ImageClick {
+                        image_x,
+                        image_y,
+                        screen_x: position.0,
+                        screen_y: position.1,
+                        is_drag_start: false,
+                        is_drag_move: false,
+                        is_drag_end: true,
+                    });
                 }
                 None
             }
@@ -748,19 +716,17 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
             Event::MouseMove { position, .. } => {
                 // Handle annotation drag move
                 if self.left_dragging && self.annotation_mode {
-                    if let Some(ref on_click) = self.on_click {
-                        let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                        self.last_left_drag_pos = Some(*position);
-                        return Some(on_click(ImageClick {
-                            image_x,
-                            image_y,
-                            screen_x: position.0,
-                            screen_y: position.1,
-                            is_drag_start: false,
-                            is_drag_move: true,
-                            is_drag_end: false,
-                        }));
-                    }
+                    let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                    self.last_left_drag_pos = Some(*position);
+                    return self.on_click.call(ImageClick {
+                        image_x,
+                        image_y,
+                        screen_x: position.0,
+                        screen_y: position.1,
+                        is_drag_start: false,
+                        is_drag_move: true,
+                        is_drag_end: false,
+                    });
                 }
 
                 // Handle pan drag move (middle mouse)

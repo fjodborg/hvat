@@ -197,22 +197,26 @@ impl PanDragExt for PanDragState {
 }
 
 /// State for the image viewer widget
+///
+/// ## Zoom semantics
+/// The zoom value represents `screen_pixels / image_pixel`:
+/// - zoom = 1.0 (100%) means 1:1 pixel ratio (1 image pixel = 1 screen pixel)
+/// - zoom = 2.0 (200%) means 1 image pixel = 2 screen pixels (enlarged)
+/// - zoom = 0.5 (50%) means 2 image pixels = 1 screen pixel (shrunk)
 #[derive(Debug, Clone)]
 pub struct ImageViewerState {
     /// Pan offset in clip space (-1 to 1)
     pub pan: (f32, f32),
-    /// Zoom level (1.0 = fit to view, actual pixel ratio depends on image/view size)
+    /// Zoom level where 1.0 = 1:1 pixel ratio (100%)
+    /// zoom = screen_pixels_per_image_pixel
     pub zoom: f32,
-    /// Current fit mode - used temporarily when switching modes
-    /// After the ImageViewer processes this, fit_mode is set back to Manual
+    /// Current fit mode
     pub fit_mode: FitMode,
     /// Drag interaction state for panning
     pub drag: PanDragState,
     /// Cached view bounds from last render (width, height)
-    /// Used to calculate 1:1 zoom from outside the widget
     pub cached_view_size: Option<(f32, f32)>,
     /// Cached texture size (width, height)
-    /// Used to calculate 1:1 zoom from outside the widget
     pub cached_texture_size: Option<(u32, u32)>,
 }
 
@@ -220,8 +224,8 @@ impl Default for ImageViewerState {
     fn default() -> Self {
         Self {
             pan: (0.0, 0.0),
-            zoom: 1.0,
-            fit_mode: FitMode::FitToView,
+            zoom: 1.0, // 1:1 pixel ratio (100%)
+            fit_mode: FitMode::FitToView, // Start in fit-to-view mode
             drag: PanDragState::default(),
             cached_view_size: None,
             cached_texture_size: None,
@@ -252,45 +256,70 @@ impl ImageViewerState {
         self.set_fit_to_view();
     }
 
-    /// Set to 1:1 pixel ratio
-    /// If cached view/texture sizes are available, calculates the actual zoom value.
-    /// Otherwise sets fit_mode to OneToOne for the widget to calculate later.
+    /// Set to 1:1 pixel ratio (zoom = 1.0 = 100%)
+    /// This is a one-time action - sets zoom to 1.0 and stays in Manual mode
     pub fn set_one_to_one(&mut self) {
-        self.pan = (0.0, 0.0);
-        if let (Some((view_w, view_h)), Some((tex_w, tex_h))) = (self.cached_view_size, self.cached_texture_size) {
-            // Calculate 1:1 zoom directly
-            self.zoom = Self::calculate_one_to_one_zoom(view_w, view_h, tex_w, tex_h);
-            self.fit_mode = FitMode::Manual;
-        } else {
-            // No cached sizes - let widget calculate on next event
-            self.fit_mode = FitMode::OneToOne;
-        }
-    }
-
-    /// Set to fit to view (zoom = 1.0)
-    pub fn set_fit_to_view(&mut self) {
         self.zoom = 1.0;
         self.fit_mode = FitMode::Manual;
         self.pan = (0.0, 0.0);
     }
 
-    /// Calculate the zoom value for 1:1 pixel mapping (1 image pixel = 1 screen pixel)
-    pub fn calculate_one_to_one_zoom(view_w: f32, view_h: f32, tex_w: u32, tex_h: u32) -> f32 {
+    /// Set to fit to view - one-time action
+    /// Calculates the zoom that makes the image fit, then stays in Manual mode
+    /// Requires cached sizes to calculate the fit zoom
+    pub fn set_fit_to_view(&mut self) {
+        self.pan = (0.0, 0.0);
+        if let (Some((view_w, view_h)), Some((tex_w, tex_h))) =
+            (self.cached_view_size, self.cached_texture_size)
+        {
+            self.zoom = Self::calculate_fit_zoom(view_w, view_h, tex_w, tex_h);
+            self.fit_mode = FitMode::Manual;
+        } else {
+            // No cached sizes yet - use FitToView mode temporarily
+            // The widget will calculate and apply the zoom on first render
+            self.fit_mode = FitMode::FitToView;
+        }
+    }
+
+    /// Calculate the zoom value that makes the image fit the view
+    /// Returns the zoom where the image exactly fills the viewport
+    pub fn calculate_fit_zoom(view_w: f32, view_h: f32, tex_w: u32, tex_h: u32) -> f32 {
         if tex_w == 0 || tex_h == 0 {
             return 1.0;
         }
         let image_aspect = tex_w as f32 / tex_h as f32;
         let view_aspect = view_w / view_h;
 
-        // At zoom=1.0, the image fills the view (fit mode).
-        // For 1:1, we need to zoom so that 1 image pixel = 1 screen pixel.
-        // This is the INVERSE of fit: zoom = texture_size / view_size
+        // Calculate zoom so image fits in view
+        // zoom = screen_pixels_per_image_pixel
+        // At fit: view_size = tex_size * zoom (for the constraining dimension)
         if image_aspect > view_aspect {
-            // Image is wider - would be width-constrained in fit mode
-            tex_w as f32 / view_w
+            // Image is wider - width is the constraint
+            view_w / tex_w as f32
         } else {
-            // Image is taller - would be height-constrained in fit mode
-            tex_h as f32 / view_h
+            // Image is taller - height is the constraint
+            view_h / tex_h as f32
+        }
+    }
+
+    /// Get the effective zoom value based on current fit_mode and cached sizes
+    /// This is useful for UI elements that need to display the current zoom percentage
+    /// Returns the zoom value where 1.0 = 100% (1:1 pixel ratio)
+    pub fn effective_zoom(&self) -> f32 {
+        match self.fit_mode {
+            FitMode::OneToOne => 1.0,
+            FitMode::FitToView => {
+                // FitToView is a temporary mode before the widget has rendered
+                // Calculate fit zoom from cached sizes if available
+                if let (Some((view_w, view_h)), Some((tex_w, tex_h))) =
+                    (self.cached_view_size, self.cached_texture_size)
+                {
+                    Self::calculate_fit_zoom(view_w, view_h, tex_w, tex_h)
+                } else {
+                    self.zoom
+                }
+            }
+            FitMode::Manual => self.zoom,
         }
     }
 
@@ -365,7 +394,9 @@ impl ScrollDragExt for ScrollDragState {
 }
 
 /// State for scrollable containers
-#[derive(Debug, Clone, Default)]
+///
+/// This type is Copy since all fields are Copy.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ScrollState {
     /// Scroll offset (x, y)
     pub offset: (f32, f32),
@@ -461,7 +492,9 @@ impl DropdownState {
 }
 
 /// State for collapsible sections
-#[derive(Debug, Clone, Default)]
+///
+/// This type is Copy since it's just a single bool.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CollapsibleState {
     /// Whether the section is expanded
     pub is_expanded: bool,
@@ -491,7 +524,9 @@ impl CollapsibleState {
 ///
 /// Note: Undo/redo is handled externally via `UndoStack<T>`. Use the `on_undo_point`
 /// callback on the widget to know when to save an undo snapshot.
-#[derive(Debug, Clone, Default)]
+///
+/// This type is Copy since it contains only small primitive types.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TextInputState {
     /// Cursor position (character index)
     pub cursor: usize,
@@ -966,5 +1001,476 @@ impl<T: Clone + 'static> UndoContext<T> {
             log::debug!("UndoContext [{}]: pushing undo snapshot", label);
             stack.borrow_mut().push(snap.clone());
         }
+    }
+}
+
+// =============================================================================
+// Unit Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // UndoStack Tests
+    // =========================================================================
+
+    #[test]
+    fn undo_stack_new_empty() {
+        let stack: UndoStack<i32> = UndoStack::new(10);
+        assert_eq!(stack.undo_count(), 0);
+        assert_eq!(stack.redo_count(), 0);
+        assert!(!stack.can_undo());
+        assert!(!stack.can_redo());
+    }
+
+    #[test]
+    fn undo_stack_push_and_undo() {
+        let mut stack = UndoStack::new(10);
+
+        // Push state 1
+        stack.push(1);
+        assert_eq!(stack.undo_count(), 1);
+        assert!(stack.can_undo());
+
+        // Current state is 2, undo should return 1
+        let prev = stack.undo(2);
+        assert_eq!(prev, Some(1));
+        assert_eq!(stack.undo_count(), 0);
+        assert_eq!(stack.redo_count(), 1);
+    }
+
+    #[test]
+    fn undo_stack_redo() {
+        let mut stack = UndoStack::new(10);
+
+        stack.push(1);
+        let prev = stack.undo(2).unwrap();
+        assert_eq!(prev, 1);
+
+        // Redo should return 2
+        let next = stack.redo(1);
+        assert_eq!(next, Some(2));
+        assert_eq!(stack.undo_count(), 1);
+        assert_eq!(stack.redo_count(), 0);
+    }
+
+    #[test]
+    fn undo_stack_push_clears_redo() {
+        let mut stack = UndoStack::new(10);
+
+        stack.push(1);
+        stack.undo(2);
+        assert!(stack.can_redo());
+
+        // Push a new state - this should clear redo stack
+        stack.push(3);
+        assert!(!stack.can_redo());
+        assert_eq!(stack.redo_count(), 0);
+    }
+
+    #[test]
+    fn undo_stack_max_history() {
+        let mut stack = UndoStack::new(3);
+
+        stack.push(1);
+        stack.push(2);
+        stack.push(3);
+        stack.push(4); // Should remove 1
+
+        assert_eq!(stack.undo_count(), 3);
+
+        // Undo should get 4, then 3, then 2 (1 was removed)
+        assert_eq!(stack.undo(5), Some(4));
+        assert_eq!(stack.undo(4), Some(3));
+        assert_eq!(stack.undo(3), Some(2));
+        assert_eq!(stack.undo(2), None); // 1 was removed due to max_history
+    }
+
+    #[test]
+    fn undo_stack_clear() {
+        let mut stack = UndoStack::new(10);
+
+        stack.push(1);
+        stack.push(2);
+        stack.undo(3);
+
+        assert!(stack.can_undo());
+        assert!(stack.can_redo());
+
+        stack.clear();
+
+        assert!(!stack.can_undo());
+        assert!(!stack.can_redo());
+        assert_eq!(stack.undo_count(), 0);
+        assert_eq!(stack.redo_count(), 0);
+    }
+
+    // =========================================================================
+    // DragState Tests
+    // =========================================================================
+
+    #[test]
+    fn drag_state_default_is_idle() {
+        let drag: DragState<i32> = DragState::default();
+        assert!(!drag.is_dragging());
+        assert_eq!(drag.data(), None);
+    }
+
+    #[test]
+    fn drag_state_start_drag() {
+        let mut drag: DragState<i32> = DragState::Idle;
+        drag.start_drag();
+        assert!(drag.is_dragging());
+        assert_eq!(drag.data(), Some(&0)); // i32::default() is 0
+    }
+
+    #[test]
+    fn drag_state_start_drag_with_data() {
+        let mut drag: DragState<i32> = DragState::Idle;
+        drag.start_drag_with(42);
+        assert!(drag.is_dragging());
+        assert_eq!(drag.data(), Some(&42));
+    }
+
+    #[test]
+    fn drag_state_stop_drag() {
+        let mut drag = DragState::Dragging(100);
+        drag.stop_drag();
+        assert!(!drag.is_dragging());
+        assert_eq!(drag.data(), None);
+    }
+
+    #[test]
+    fn drag_state_data_mut() {
+        let mut drag = DragState::Dragging(10);
+        if let Some(data) = drag.data_mut() {
+            *data = 20;
+        }
+        assert_eq!(drag.data(), Some(&20));
+    }
+
+    // =========================================================================
+    // PanDragState Tests
+    // =========================================================================
+
+    #[test]
+    fn pan_drag_state_last_pos() {
+        let drag = DragState::Dragging(PanDragData {
+            last_pos: (100.0, 200.0),
+        });
+        assert_eq!(drag.last_pos(), Some((100.0, 200.0)));
+    }
+
+    #[test]
+    fn pan_drag_state_update_pos() {
+        let mut drag = DragState::Dragging(PanDragData {
+            last_pos: (0.0, 0.0),
+        });
+        drag.update_pos((50.0, 75.0));
+        assert_eq!(drag.last_pos(), Some((50.0, 75.0)));
+    }
+
+    // =========================================================================
+    // TextUndoHistory Tests
+    // =========================================================================
+
+    #[test]
+    fn text_undo_history_push_and_undo() {
+        let mut history = TextUndoHistory::default();
+
+        let snap1 = TextSnapshot {
+            text: "hello".to_string(),
+            cursor: 5,
+        };
+        history.push(snap1);
+
+        let current = TextSnapshot {
+            text: "hello world".to_string(),
+            cursor: 11,
+        };
+
+        let prev = history.undo(current).unwrap();
+        assert_eq!(prev.text, "hello");
+        assert_eq!(prev.cursor, 5);
+    }
+
+    #[test]
+    fn text_undo_history_redo() {
+        let mut history = TextUndoHistory::default();
+
+        let snap1 = TextSnapshot {
+            text: "a".to_string(),
+            cursor: 1,
+        };
+        history.push(snap1);
+
+        let snap2 = TextSnapshot {
+            text: "ab".to_string(),
+            cursor: 2,
+        };
+
+        let prev = history.undo(snap2.clone()).unwrap();
+        assert_eq!(prev.text, "a");
+
+        let next = history.redo(prev).unwrap();
+        assert_eq!(next.text, "ab");
+        assert_eq!(next.cursor, 2);
+    }
+
+    #[test]
+    fn text_undo_history_max_limit() {
+        let mut history = TextUndoHistory::default();
+
+        // Push more than UNDO_STACK_LIMIT snapshots
+        for i in 0..UNDO_STACK_LIMIT + 5 {
+            history.push(TextSnapshot {
+                text: i.to_string(),
+                cursor: 0,
+            });
+        }
+
+        // Should only keep UNDO_STACK_LIMIT items
+        // The first 5 should have been removed
+        let current = TextSnapshot {
+            text: "current".to_string(),
+            cursor: 0,
+        };
+
+        let mut count = 0;
+        let mut temp_history = history.clone();
+        let mut temp_current = current.clone();
+
+        while temp_history.undo(temp_current.clone()).is_some() {
+            count += 1;
+            temp_current = TextSnapshot {
+                text: format!("temp{}", count),
+                cursor: 0,
+            };
+            if count > UNDO_STACK_LIMIT + 10 {
+                break; // Safety check
+            }
+        }
+
+        assert_eq!(count, UNDO_STACK_LIMIT);
+    }
+
+    // =========================================================================
+    // ImageViewerState Tests
+    // =========================================================================
+
+    #[test]
+    fn image_viewer_state_default() {
+        let state = ImageViewerState::default();
+        assert_eq!(state.pan, (0.0, 0.0));
+        assert_eq!(state.zoom, 1.0);
+        assert_eq!(state.fit_mode, FitMode::FitToView);
+    }
+
+    #[test]
+    fn image_viewer_state_zoom_in() {
+        let mut state = ImageViewerState::new();
+        let original_zoom = state.zoom;
+        state.zoom_in();
+        assert!(state.zoom > original_zoom);
+        assert_eq!(state.fit_mode, FitMode::Manual);
+    }
+
+    #[test]
+    fn image_viewer_state_zoom_out() {
+        let mut state = ImageViewerState::new();
+        state.zoom = 2.0;
+        state.zoom_out();
+        assert!(state.zoom < 2.0);
+        assert_eq!(state.fit_mode, FitMode::Manual);
+    }
+
+    #[test]
+    fn image_viewer_state_zoom_clamp() {
+        let mut state = ImageViewerState::new();
+
+        // Zoom in repeatedly - should clamp to ZOOM_MAX
+        for _ in 0..100 {
+            state.zoom_in();
+        }
+        assert_eq!(state.zoom, ZOOM_MAX);
+
+        // Zoom out repeatedly - should clamp to ZOOM_MIN
+        for _ in 0..100 {
+            state.zoom_out();
+        }
+        assert_eq!(state.zoom, ZOOM_MIN);
+    }
+
+    #[test]
+    fn image_viewer_state_calculate_fit_zoom() {
+        // Image 800x600, view 400x300 -> zoom should be 0.5
+        let zoom = ImageViewerState::calculate_fit_zoom(400.0, 300.0, 800, 600);
+        assert_eq!(zoom, 0.5);
+
+        // Image 200x200, view 400x400 -> zoom should be 2.0
+        let zoom = ImageViewerState::calculate_fit_zoom(400.0, 400.0, 200, 200);
+        assert_eq!(zoom, 2.0);
+
+        // Wide image: 1600x400, view 800x600 -> constrained by width
+        let zoom = ImageViewerState::calculate_fit_zoom(800.0, 600.0, 1600, 400);
+        assert_eq!(zoom, 0.5); // 800 / 1600
+    }
+
+    #[test]
+    fn image_viewer_state_pan_by() {
+        let mut state = ImageViewerState::new();
+        state.pan_by(10.0, 20.0);
+        assert_eq!(state.pan, (10.0, 20.0));
+        assert_eq!(state.fit_mode, FitMode::Manual);
+
+        state.pan_by(5.0, -10.0);
+        assert_eq!(state.pan, (15.0, 10.0));
+    }
+
+    // =========================================================================
+    // CollapsibleState Tests
+    // =========================================================================
+
+    #[test]
+    fn collapsible_state_new() {
+        let expanded = CollapsibleState::new(true);
+        assert!(expanded.is_expanded);
+
+        let collapsed = CollapsibleState::new(false);
+        assert!(!collapsed.is_expanded);
+    }
+
+    #[test]
+    fn collapsible_state_toggle() {
+        let mut state = CollapsibleState::expanded();
+        assert!(state.is_expanded);
+
+        state.toggle();
+        assert!(!state.is_expanded);
+
+        state.toggle();
+        assert!(state.is_expanded);
+    }
+
+    // =========================================================================
+    // DropdownState Tests
+    // =========================================================================
+
+    #[test]
+    fn dropdown_state_open_close() {
+        let mut state = DropdownState::new();
+        assert!(!state.is_open);
+
+        state.open();
+        assert!(state.is_open);
+        assert_eq!(state.highlighted, Some(0));
+
+        state.close();
+        assert!(!state.is_open);
+        assert_eq!(state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn dropdown_state_toggle() {
+        let mut state = DropdownState::new();
+
+        state.toggle();
+        assert!(state.is_open);
+
+        state.toggle();
+        assert!(!state.is_open);
+    }
+
+    #[test]
+    fn dropdown_state_scroll_by() {
+        let mut state = DropdownState::new();
+
+        // 20 items, 10 visible -> max scroll = 10
+        state.scroll_by(5, 20, 10);
+        assert_eq!(state.scroll_offset, 5);
+
+        state.scroll_by(10, 20, 10);
+        assert_eq!(state.scroll_offset, 10); // Clamped to max
+
+        state.scroll_by(-5, 20, 10);
+        assert_eq!(state.scroll_offset, 5);
+
+        state.scroll_by(-20, 20, 10);
+        assert_eq!(state.scroll_offset, 0); // Clamped to min
+    }
+
+    #[test]
+    fn dropdown_state_ensure_highlighted_visible() {
+        let mut state = DropdownState::new();
+        state.scroll_offset = 5;
+        state.highlighted = Some(2); // Above visible area
+
+        state.ensure_highlighted_visible(5);
+        assert_eq!(state.scroll_offset, 2); // Scrolled up
+
+        state.highlighted = Some(10); // Below visible area (5-9 visible)
+        state.ensure_highlighted_visible(5);
+        assert_eq!(state.scroll_offset, 6); // Scrolled down
+    }
+
+    // =========================================================================
+    // NumberInputState Tests
+    // =========================================================================
+
+    #[test]
+    fn number_input_state_new() {
+        let state = NumberInputState::new(42.5);
+        assert!(state.text.contains("42.5"));
+        assert!(!state.is_focused);
+    }
+
+    #[test]
+    fn number_input_state_value() {
+        let state = NumberInputState::new(123.45);
+        assert_eq!(state.value(), Some(123.45));
+
+        let mut invalid = NumberInputState::new(0.0);
+        invalid.text = "not a number".to_string();
+        assert_eq!(invalid.value(), None);
+    }
+
+    #[test]
+    fn number_input_state_set_value() {
+        let mut state = NumberInputState::new(0.0);
+        state.set_value(99.9);
+        assert!(state.text.contains("99.9"));
+        assert_eq!(state.selection, None);
+    }
+
+    #[test]
+    fn number_input_state_focus_blur() {
+        let mut state = NumberInputState::new(0.0);
+
+        state.focus();
+        assert!(state.is_focused);
+        assert!(state.selection.is_some()); // Focuses select all
+
+        state.blur();
+        assert!(!state.is_focused);
+        assert_eq!(state.selection, None);
+    }
+
+    #[test]
+    fn number_input_state_undo_redo() {
+        let mut state = NumberInputState::new(10.0);
+
+        state.push_undo();
+        state.text = "20".to_string();
+        state.cursor = 2;
+
+        let undone = state.undo();
+        assert!(undone);
+        assert!(state.text.contains("10"));
+
+        let redone = state.redo();
+        assert!(redone);
+        assert_eq!(state.text, "20");
     }
 }

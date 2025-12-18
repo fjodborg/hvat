@@ -1,9 +1,11 @@
 //! Slider widget for selecting numeric values
 
+use crate::callback::{Callback, SideEffect};
 use crate::constants::{
-    format_number, BIG_STEP_MULTIPLIER, DEFAULT_STEP_DIVIDER, FINE_STEP_MULTIPLIER,
-    SLIDER_HEIGHT, SLIDER_INPUT_PADDING, SLIDER_INPUT_SPACING, SLIDER_INPUT_WIDTH,
-    SLIDER_THUMB_RADIUS, SLIDER_TRACK_HEIGHT, SMALL_FONT_SIZE, THUMB_HIT_AREA_MULTIPLIER,
+    format_number, BIG_STEP_MULTIPLIER, DEFAULT_INPUT_WIDTH, DEFAULT_STEP_DIVIDER,
+    FINE_STEP_MULTIPLIER, SLIDER_HEIGHT, SLIDER_INPUT_PADDING, SLIDER_INPUT_SPACING,
+    SLIDER_INPUT_WIDTH, SLIDER_THUMB_RADIUS, SLIDER_TRACK_HEIGHT, SMALL_FONT_SIZE,
+    THUMB_HIT_AREA_MULTIPLIER,
 };
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
@@ -74,10 +76,10 @@ pub struct Slider<M> {
     /// Configuration
     config: SliderConfig,
     /// Callback for value changes
-    on_change: Option<Box<dyn Fn(SliderState) -> M>>,
+    on_change: Callback<SliderState, M>,
     /// Side-effect callback for undo point (called when edit starts: drag begins or input focuses)
     /// This is called BEFORE on_change, allowing the app to save a snapshot of current state.
-    on_undo_point: Option<Box<dyn Fn()>>,
+    on_undo_point: SideEffect,
 }
 
 impl<M> Slider<M> {
@@ -95,8 +97,8 @@ impl<M> Slider<M> {
             show_input: false,
             format_value: None,
             config: SliderConfig::default(),
-            on_change: None,
-            on_undo_point: None,
+            on_change: Callback::none(),
+            on_undo_point: SideEffect::none(),
         }
     }
 
@@ -156,7 +158,7 @@ impl<M> Slider<M> {
     where
         F: Fn(SliderState) -> M + 'static,
     {
-        self.on_change = Some(Box::new(callback));
+        self.on_change = Callback::new(callback);
         self
     }
 
@@ -172,7 +174,7 @@ impl<M> Slider<M> {
     where
         F: Fn() + 'static,
     {
-        self.on_undo_point = Some(Box::new(callback));
+        self.on_undo_point = SideEffect::new(callback);
         self
     }
 
@@ -321,7 +323,7 @@ impl<M> Slider<M> {
     fn input_handle_delete(&mut self) -> bool {
         // Check if delete would do anything
         let would_modify = self.state.input_selection.is_some()
-            || self.state.input_cursor < self.state.input_text.len();
+            || self.state.input_cursor < text_core::char_count(&self.state.input_text);
 
         if would_modify {
             // Push undo BEFORE making changes
@@ -347,17 +349,17 @@ impl<M> Slider<M> {
             if (clamped - self.state.value).abs() > f32::EPSILON {
                 self.state.value = clamped;
                 self.state.input_text = self.format_value_for_input(clamped);
-                self.state.input_cursor = self.state.input_text.len();
+                self.state.input_cursor = text_core::char_count(&self.state.input_text);
                 return true;
             } else {
                 // Value same but text may differ - update text to canonical form
                 self.state.input_text = self.format_value_for_input(clamped);
-                self.state.input_cursor = self.state.input_text.len();
+                self.state.input_cursor = text_core::char_count(&self.state.input_text);
             }
         } else {
             // Invalid input - revert to current value
             self.state.input_text = self.format_value_for_input(self.state.value);
-            self.state.input_cursor = self.state.input_text.len();
+            self.state.input_cursor = text_core::char_count(&self.state.input_text);
         }
         false
     }
@@ -366,19 +368,19 @@ impl<M> Slider<M> {
     fn sync_input_from_value(&mut self) {
         if !self.state.input_focused {
             self.state.input_text = self.format_value_for_input(self.state.value);
-            self.state.input_cursor = self.state.input_text.len();
+            self.state.input_cursor = text_core::char_count(&self.state.input_text);
         }
     }
 
     /// Emit a state change if handler is set
     fn emit_change(&self) -> Option<M> {
-        self.on_change.as_ref().map(|f| f(self.state.clone()))
+        self.on_change.call(self.state.clone())
     }
 }
 
 impl<M: Clone + 'static> Widget<M> for Slider<M> {
     fn layout(&mut self, available: Size) -> Size {
-        let width = self.width.resolve(available.width, 200.0);
+        let width = self.width.resolve(available.width, DEFAULT_INPUT_WIDTH);
         let height = self.height.resolve(available.height, SLIDER_HEIGHT);
         Size::new(width, height)
     }
@@ -525,7 +527,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             x,
                             content_x,
                             SMALL_FONT_SIZE,
-                            self.state.input_text.len(),
+                            text_core::char_count(&self.state.input_text),
                         );
 
                         if modifiers.shift && was_focused {
@@ -538,8 +540,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             self.state.input_cursor = new_cursor;
                             if !was_focused && !self.state.input_text.is_empty() {
                                 // Select all on focus
-                                self.state.input_selection = Some((0, self.state.input_text.len()));
-                                self.state.input_cursor = self.state.input_text.len();
+                                self.state.input_selection = Some((0, text_core::char_count(&self.state.input_text)));
+                                self.state.input_cursor = text_core::char_count(&self.state.input_text);
                             } else {
                                 self.state.input_selection = None;
                             }
@@ -549,10 +551,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
 
                         // Call on_undo_point when input field gains focus (for undo tracking)
                         if !was_focused {
-                            if let Some(ref on_undo_point) = self.on_undo_point {
-                                log::debug!("Slider input: calling on_undo_point (focus gained)");
-                                on_undo_point();
-                            }
+                            log::debug!("Slider input: calling on_undo_point (focus gained)");
+                            self.on_undo_point.emit();
                         }
 
                         // Emit message to trigger redraw (selection highlight)
@@ -578,19 +578,15 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
 
                 if dist_sq <= hit_radius.powi(2) {
                     // Start dragging - call on_undo_point to save snapshot before changes
-                    if let Some(ref on_undo_point) = self.on_undo_point {
-                        log::debug!("Slider: calling on_undo_point (drag start)");
-                        on_undo_point();
-                    }
+                    log::debug!("Slider: calling on_undo_point (drag start)");
+                    self.on_undo_point.emit();
                     self.state.drag.start_drag();
                     log::debug!("Slider: started dragging");
                     return self.emit_change();
                 } else if slider_bounds.contains(x, y) {
                     // Click on track - call on_undo_point to save snapshot before changes
-                    if let Some(ref on_undo_point) = self.on_undo_point {
-                        log::debug!("Slider: calling on_undo_point (track click)");
-                        on_undo_point();
-                    }
+                    log::debug!("Slider: calling on_undo_point (track click)");
+                    self.on_undo_point.emit();
                     let new_value = self.position_to_value(x, &track);
                     self.state.value = new_value;
                     self.state.drag.start_drag();
@@ -670,7 +666,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             let result = text_core::handle_right(
                                 self.state.input_cursor,
                                 self.state.input_selection,
-                                self.state.input_text.len(),
+                                text_core::char_count(&self.state.input_text),
                                 modifiers.shift,
                             );
                             self.state.input_cursor = result.cursor;
@@ -689,14 +685,14 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             let result = text_core::handle_end(
                                 self.state.input_cursor,
                                 self.state.input_selection,
-                                self.state.input_text.len(),
+                                text_core::char_count(&self.state.input_text),
                                 modifiers.shift,
                             );
                             self.state.input_cursor = result.cursor;
                             self.state.input_selection = result.selection;
                         }
                         KeyCode::A if modifiers.ctrl => {
-                            let result = text_core::handle_select_all(self.state.input_text.len());
+                            let result = text_core::handle_select_all(text_core::char_count(&self.state.input_text));
                             self.state.input_cursor = result.cursor;
                             self.state.input_selection = result.selection;
                         }
@@ -750,8 +746,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             if (new_value - self.state.value).abs() > f32::EPSILON {
                                 self.state.value = new_value;
                                 self.state.input_text = self.format_value_for_input(new_value);
-                                self.state.input_cursor = self.state.input_text.len();
-                                self.state.input_selection = Some((0, self.state.input_text.len()));
+                                self.state.input_cursor = text_core::char_count(&self.state.input_text);
+                                self.state.input_selection = Some((0, text_core::char_count(&self.state.input_text)));
                                 return self.emit_change();
                             }
                         }
@@ -761,8 +757,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             if (new_value - self.state.value).abs() > f32::EPSILON {
                                 self.state.value = new_value;
                                 self.state.input_text = self.format_value_for_input(new_value);
-                                self.state.input_cursor = self.state.input_text.len();
-                                self.state.input_selection = Some((0, self.state.input_text.len()));
+                                self.state.input_cursor = text_core::char_count(&self.state.input_text);
+                                self.state.input_selection = Some((0, text_core::char_count(&self.state.input_text)));
                                 return self.emit_change();
                             }
                         }

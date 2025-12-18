@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let settings = Settings::new()
         .title("hvat_ui Comprehensive Demo")
-        .size(1400, 900)
+        .size(1400, 700)
         .target_fps(60);
 
     hvat_ui::run_with_settings(app, settings)

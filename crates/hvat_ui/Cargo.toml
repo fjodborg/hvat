@@ -23,6 +23,10 @@ path = "examples/collapsible.rs"
 name = "image_viewer"
 path = "examples/image_viewer.rs"
 
+[[example]]
+name = "comprehensive"
+path = "examples/comprehensive.rs"
+
 [dependencies]
 hvat_gpu = { path = "../hvat_gpu" }
 winit = "0.30"

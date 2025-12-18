@@ -154,10 +154,10 @@ pub const COLLAPSIBLE_ICON_MARGIN: f32 = 8.0;
 /// Zoom factor per scroll step
 pub const ZOOM_FACTOR: f32 = 1.25;
 
-/// Minimum zoom level
+/// Minimum zoom level (10% = 1 image pixel shown as 0.1 screen pixels)
 pub const ZOOM_MIN: f32 = 0.1;
 
-/// Maximum zoom level
+/// Maximum zoom level (5000% = 1 image pixel shown as 50 screen pixels)
 pub const ZOOM_MAX: f32 = 50.0;
 
 /// Pan speed in clip space units per key press
@@ -194,6 +194,15 @@ pub const FINE_STEP_MULTIPLIER: f32 = 0.1;
 
 /// Thumb hit area multiplier for easier clicking
 pub const THUMB_HIT_AREA_MULTIPLIER: f32 = 1.5;
+
+/// Tolerance for detecting fill behavior in flex layout
+/// When a child's size is within this tolerance of the available size,
+/// it's treated as a "fill" child that should expand to fill remaining space.
+pub const FILL_DETECTION_TOLERANCE: f32 = 1.0;
+
+/// Default width for input widgets (slider, text input, etc.)
+/// Used as fallback when Length::Shrink is specified
+pub const DEFAULT_INPUT_WIDTH: f32 = 200.0;
 
 // =============================================================================
 // Helper Functions

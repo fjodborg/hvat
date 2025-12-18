@@ -1,5 +1,6 @@
 //! Number input widget for editable numeric values
 
+use crate::callback::{Callback, SideEffect};
 use crate::constants::{
     line_height, DEFAULT_FONT_SIZE, NUMBER_INPUT_BUTTON_WIDTH, NUMBER_INPUT_DEFAULT_WIDTH,
     TEXT_INPUT_PADDING,
@@ -69,10 +70,10 @@ pub struct NumberInput<M> {
     /// Button hover state
     button_hover: ButtonHover,
     /// Callback for value changes
-    on_change: Option<Box<dyn Fn(f32, NumberInputState) -> M>>,
+    on_change: Callback<(f32, NumberInputState), M>,
     /// Side-effect callback for undo point (called when input gains focus)
     /// This is called BEFORE on_change, allowing the app to save a snapshot.
-    on_undo_point: Option<Box<dyn Fn()>>,
+    on_undo_point: SideEffect,
 }
 
 impl<M> NumberInput<M> {
@@ -90,8 +91,8 @@ impl<M> NumberInput<M> {
             show_buttons: true,
             config: NumberInputConfig::default(),
             button_hover: ButtonHover::None,
-            on_change: None,
-            on_undo_point: None,
+            on_change: Callback::none(),
+            on_undo_point: SideEffect::none(),
         }
     }
 
@@ -167,7 +168,7 @@ impl<M> NumberInput<M> {
     where
         F: Fn(f32, NumberInputState) -> M + 'static,
     {
-        self.on_change = Some(Box::new(callback));
+        self.on_change = Callback::new(move |(value, state)| callback(value, state));
         self
     }
 
@@ -183,7 +184,7 @@ impl<M> NumberInput<M> {
     where
         F: Fn() + 'static,
     {
-        self.on_undo_point = Some(Box::new(callback));
+        self.on_undo_point = SideEffect::new(callback);
         self
     }
 
@@ -288,7 +289,7 @@ impl<M> NumberInput<M> {
     fn handle_delete(&mut self) -> bool {
         // Check if delete would do anything
         let would_modify =
-            self.state.selection.is_some() || self.state.cursor < self.state.text.len();
+            self.state.selection.is_some() || self.state.cursor < text_core::char_count(&self.state.text);
 
         if would_modify {
             // Push undo BEFORE making changes
@@ -345,9 +346,7 @@ impl<M> NumberInput<M> {
     /// Emit a state change if handler is set and value is valid
     fn emit_change(&self) -> Option<M> {
         self.state.value().and_then(|value| {
-            self.on_change
-                .as_ref()
-                .map(|f| f(value, self.state.clone()))
+            self.on_change.call((value, self.state.clone()))
         })
     }
 }
@@ -529,11 +528,12 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 if content.contains(x, y) || bounds.contains(x, y) {
                     let was_focused = self.state.is_focused;
                     self.state.is_focused = true;
+                    let text_chars = text_core::char_count(&self.state.text);
                     let new_cursor = text_core::x_to_char_index(
                         x,
                         content.x,
                         self.font_size,
-                        self.state.text.len(),
+                        text_chars,
                     );
 
                     if modifiers.shift && was_focused {
@@ -547,8 +547,8 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.cursor = new_cursor;
                         // Select all on focus
                         if !was_focused && !self.state.text.is_empty() {
-                            self.state.selection = Some((0, self.state.text.len()));
-                            self.state.cursor = self.state.text.len();
+                            self.state.selection = Some((0, text_chars));
+                            self.state.cursor = text_chars;
                         } else {
                             self.state.selection = None;
                         }
@@ -558,10 +558,8 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
                     // Call on_undo_point when input gains focus (for undo tracking)
                     if !was_focused {
-                        if let Some(ref on_undo_point) = self.on_undo_point {
-                            log::debug!("NumberInput: calling on_undo_point (focus gained)");
-                            on_undo_point();
-                        }
+                        log::debug!("NumberInput: calling on_undo_point (focus gained)");
+                        self.on_undo_point.emit();
                     }
 
                     return self.emit_change();
@@ -642,7 +640,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         let result = text_core::handle_right(
                             self.state.cursor,
                             self.state.selection,
-                            self.state.text.len(),
+                            text_core::char_count(&self.state.text),
                             modifiers.shift,
                         );
                         self.state.cursor = result.cursor;
@@ -661,14 +659,14 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         let result = text_core::handle_end(
                             self.state.cursor,
                             self.state.selection,
-                            self.state.text.len(),
+                            text_core::char_count(&self.state.text),
                             modifiers.shift,
                         );
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }
                     KeyCode::A if modifiers.ctrl => {
-                        let result = text_core::handle_select_all(self.state.text.len());
+                        let result = text_core::handle_select_all(text_core::char_count(&self.state.text));
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }

@@ -174,12 +174,7 @@ pub fn dispatch_event_to_children<M: 'static>(
 /// Translate relative child bounds to absolute bounds within the container.
 #[inline]
 fn translate_bounds(child_bounds: Bounds, container_bounds: Bounds) -> Bounds {
-    Bounds::new(
-        container_bounds.x + child_bounds.x,
-        container_bounds.y + child_bounds.y,
-        child_bounds.width,
-        child_bounds.height,
-    )
+    child_bounds.translate_to(container_bounds)
 }
 
 /// Draw children at their cached bounds positions.

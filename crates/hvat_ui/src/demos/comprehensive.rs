@@ -356,13 +356,36 @@ impl ComprehensiveDemo {
             Rc::clone(&self.undo_stack),
         );
 
-        log::debug!("ComprehensiveDemo: Building main layout with 3 children");
+        log::debug!("ComprehensiveDemo: Building main layout with topbar and 3 children");
 
-        // Build the main layout: Row with [LeftSidebar | ImageViewer | RightSidebar]
-        // Set the Row to fill the available space
-        let mut row = Row::new(vec![left_sidebar, center_viewer, right_sidebar]);
-        row = row.width(Length::Fill(1.0)).height(Length::Fill(1.0));
-        Element::new(row)
+        // Build the topbar
+        let topbar = self.build_topbar();
+
+        // Build the main content: Row with [LeftSidebar | ImageViewer | RightSidebar]
+        let mut content_row = Row::new(vec![left_sidebar, center_viewer, right_sidebar]);
+        content_row = content_row.width(Length::Fill(1.0)).height(Length::Fill(1.0));
+
+        // Build the main layout: Column with [Topbar | ContentRow]
+        let mut main_column = Column::new(vec![topbar, Element::new(content_row)]);
+        main_column = main_column.width(Length::Fill(1.0)).height(Length::Fill(1.0));
+        Element::new(main_column)
+    }
+
+    fn build_topbar<M: Clone + 'static>(&self) -> Element<M> {
+        let zoom_text = format!("Zoom: {:.0}%", self.viewer_state.effective_zoom() * 100.0);
+
+        // Build topbar content
+        let mut ctx = Context::new();
+        ctx.text_sized("HVAT Image Viewer", 18.0);
+        ctx.text_sized("  |  File: example.png  |  ", 12.0);
+        ctx.text_sized(&zoom_text, 12.0);
+
+        // Build topbar as a row with fixed height
+        let topbar_row = Row::new(ctx.take())
+            .width(Length::Fill(1.0))
+            .height(Length::Fixed(40.0));
+
+        Element::new(topbar_row)
     }
 
     fn build_left_sidebar<M: Clone + 'static>(
@@ -754,31 +777,31 @@ impl ComprehensiveDemo {
             }
             ComprehensiveMessage::ResetView => {
                 // Reset to fit-to-view mode
-                // The actual zoom value (1.0 for fit) will be applied when the viewer processes it
                 self.viewer_state.reset();
-                // For FitToView, zoom is always 1.0 (100%)
-                self.zoom_slider.set_value(100.0);
-                self.x_offset_input.set_value(0.0);
-                self.y_offset_input.set_value(0.0);
-                log::info!("View reset (FitToView mode, zoom=100%)");
-            }
-            ComprehensiveMessage::FitToWindow => {
-                // Fit to window - zoom is 1.0 (100% of view)
-                self.viewer_state.set_fit_to_view();
-                self.zoom_slider.set_value(100.0);
-                self.x_offset_input.set_value(0.0);
-                self.y_offset_input.set_value(0.0);
-                log::info!("Fit to window (zoom=100%)");
-            }
-            ComprehensiveMessage::ZoomToActual => {
-                // 1:1 pixel mapping - set_one_to_one will calculate zoom if cached sizes available
-                self.viewer_state.set_one_to_one();
-                // Update slider with calculated zoom (if available from cached sizes)
-                let zoom_percent = (self.viewer_state.zoom * 100.0).clamp(10.0, 500.0);
+                // Update slider with effective zoom (calculated from cached sizes)
+                let zoom_percent = (self.viewer_state.effective_zoom() * 100.0).clamp(10.0, 500.0);
                 self.zoom_slider.set_value(zoom_percent);
                 self.x_offset_input.set_value(0.0);
                 self.y_offset_input.set_value(0.0);
-                log::info!("Zoom to 1:1 (zoom={:.0}%)", zoom_percent);
+                log::info!("View reset (FitToView mode, zoom={:.0}%)", zoom_percent);
+            }
+            ComprehensiveMessage::FitToWindow => {
+                // Fit to window - zoom depends on image/view size ratio
+                self.viewer_state.set_fit_to_view();
+                // Update slider with effective zoom (calculated from cached sizes)
+                let zoom_percent = (self.viewer_state.effective_zoom() * 100.0).clamp(10.0, 500.0);
+                self.zoom_slider.set_value(zoom_percent);
+                self.x_offset_input.set_value(0.0);
+                self.y_offset_input.set_value(0.0);
+                log::info!("Fit to window (zoom={:.0}%)", zoom_percent);
+            }
+            ComprehensiveMessage::ZoomToActual => {
+                // 1:1 pixel mapping - zoom is always 100%
+                self.viewer_state.set_one_to_one();
+                self.zoom_slider.set_value(100.0);
+                self.x_offset_input.set_value(0.0);
+                self.y_offset_input.set_value(0.0);
+                log::info!("Zoom to 1:1 (zoom=100%)");
             }
 
             // Left sidebar collapsibles

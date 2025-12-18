@@ -3,7 +3,7 @@
 //! This module provides a unified implementation for both Row and Column layouts,
 //! reducing code duplication while maintaining the same API.
 
-use crate::constants::DEFAULT_SPACING;
+use crate::constants::{DEFAULT_SPACING, FILL_DETECTION_TOLERANCE};
 use crate::element::Element;
 use crate::event::Event;
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
@@ -90,6 +90,15 @@ impl<M> FlexLayout<M> {
     pub fn align_x(self, align: Alignment) -> Self {
         self.cross_align(align)
     }
+
+    /// Calculate the inner available space after padding is subtracted
+    #[inline]
+    fn inner_available(&self, available: Size) -> Size {
+        Size::new(
+            (available.width - self.padding.horizontal()).max(0.0),
+            (available.height - self.padding.vertical()).max(0.0),
+        )
+    }
 }
 
 impl<M: 'static> Widget<M> for FlexLayout<M> {
@@ -151,10 +160,7 @@ impl<M: 'static> FlexLayout<M> {
     fn layout_horizontal(&mut self, available: Size) -> Size {
         log::debug!("Row layout: available={:?}", available);
 
-        let inner_available = Size::new(
-            available.width - self.padding.horizontal(),
-            available.height - self.padding.vertical(),
-        );
+        let inner_available = self.inner_available(available);
 
         // First pass: layout children with full available size and detect fill children
         let mut total_fixed_width = 0.0;
@@ -167,7 +173,7 @@ impl<M: 'static> FlexLayout<M> {
             let child_size = child.layout(Size::new(inner_available.width, inner_available.height));
 
             // A child is considered "fill" if it returns the full available width
-            let is_fill = child_size.width >= inner_available.width - 1.0;
+            let is_fill = child_size.width >= inner_available.width - FILL_DETECTION_TOLERANCE;
 
             if is_fill {
                 fill_indices.push(i);
@@ -196,23 +202,31 @@ impl<M: 'static> FlexLayout<M> {
             0.0
         };
 
-        // Update fill children widths
-        for &idx in &fill_indices {
-            let fill_width = fill_width_per_unit;
-            child_widths[idx] = fill_width;
+        // Update fill children widths and re-layout all children with final dimensions
+        // We need to re-layout all children because the available height may have changed
+        // (e.g., when a parent Column distributes remaining space to Fill children)
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let child_width = if fill_indices.contains(&idx) {
+                child_widths[idx] = fill_width_per_unit;
+                fill_width_per_unit
+            } else {
+                child_widths[idx]
+            };
 
-            let child_size =
-                self.children[idx].layout(Size::new(fill_width, inner_available.height));
+            let child_size = child.layout(Size::new(child_width, inner_available.height));
             max_height = max_height.max(child_size.height);
-            log::debug!(
-                "  Row child {} FILL allocated: width={}, got={:?}",
-                idx,
-                fill_width,
-                child_size
-            );
+
+            if fill_indices.contains(&idx) {
+                log::debug!(
+                    "  Row child {} FILL allocated: width={}, got={:?}",
+                    idx,
+                    child_width,
+                    child_size
+                );
+            }
         }
 
-        // Second pass: calculate actual positions
+        // Third pass: calculate actual positions
         self.child_bounds.clear();
         let mut x = self.padding.left;
 
@@ -228,13 +242,20 @@ impl<M: 'static> FlexLayout<M> {
             x += child_width + self.spacing;
         }
 
-        let content_width = inner_available.width;
-        let content_height = max_height + self.padding.vertical();
+        // Calculate content dimensions (without padding - padding added in resolve)
+        // x currently points past the last child, so subtract last spacing and starting padding
+        let children_width = if self.children.is_empty() {
+            0.0
+        } else {
+            x - self.spacing - self.padding.left
+        };
 
+        // Resolve final size, adding padding to content dimensions
         Size::new(
             self.width
-                .resolve(available.width, content_width + self.padding.horizontal()),
-            self.height.resolve(available.height, content_height),
+                .resolve(available.width, children_width + self.padding.horizontal()),
+            self.height
+                .resolve(available.height, max_height + self.padding.vertical()),
         )
     }
 
@@ -242,18 +263,62 @@ impl<M: 'static> FlexLayout<M> {
     fn layout_vertical(&mut self, available: Size) -> Size {
         log::debug!("Column layout: available={:?}", available);
 
-        let inner_available = Size::new(
-            available.width - self.padding.horizontal(),
-            available.height - self.padding.vertical(),
-        );
+        let inner_available = self.inner_available(available);
 
-        // First pass: layout all children
+        // First pass: layout children to determine fixed vs fill heights
+        let mut total_fixed_height = 0.0;
+        let mut total_fill_weight = 0.0;
         let mut max_width: f32 = 0.0;
+        let mut child_heights: Vec<f32> = Vec::with_capacity(self.children.len());
+        let mut fill_indices: Vec<usize> = Vec::new();
 
         for (i, child) in self.children.iter_mut().enumerate() {
             let child_size = child.layout(Size::new(inner_available.width, inner_available.height));
-            log::debug!("  Column child {} layout: {:?}", i, child_size);
+
+            // A child is considered "fill" if it returns the full available height
+            let is_fill = child_size.height >= inner_available.height - FILL_DETECTION_TOLERANCE;
+
+            if is_fill {
+                fill_indices.push(i);
+                total_fill_weight += 1.0;
+                child_heights.push(0.0);
+                max_width = max_width.max(child_size.width);
+                log::debug!("  Column child {} is FILL: size={:?}", i, child_size);
+            } else {
+                total_fixed_height += child_size.height;
+                child_heights.push(child_size.height);
+                max_width = max_width.max(child_size.width);
+                log::debug!("  Column child {} is FIXED: height={}", i, child_size.height);
+            }
+        }
+
+        // Add spacing
+        if !self.children.is_empty() {
+            total_fixed_height += self.spacing * (self.children.len() - 1) as f32;
+        }
+
+        // Calculate fill space and distribute to fill children
+        let remaining_height = (inner_available.height - total_fixed_height).max(0.0);
+        let fill_height_per_unit = if total_fill_weight > 0.0 {
+            remaining_height / total_fill_weight
+        } else {
+            0.0
+        };
+
+        // Update fill children heights with their proper allocation
+        for &idx in &fill_indices {
+            let fill_height = fill_height_per_unit;
+            child_heights[idx] = fill_height;
+
+            let child_size =
+                self.children[idx].layout(Size::new(inner_available.width, fill_height));
             max_width = max_width.max(child_size.width);
+            log::debug!(
+                "  Column child {} FILL allocated: height={}, got={:?}",
+                idx,
+                fill_height,
+                child_size
+            );
         }
 
         // Second pass: calculate actual positions
@@ -261,32 +326,36 @@ impl<M: 'static> FlexLayout<M> {
         let mut y = self.padding.top;
 
         for (i, child) in self.children.iter().enumerate() {
-            let child_size = child.cached_size();
-            let x_offset = self.cross_align.align(max_width, child_size.width);
+            let child_height = child_heights[i];
+            let child_width = child.cached_size().width;
+            let x_offset = self.cross_align.align(max_width, child_width);
 
             let bounds = Bounds::new(
                 self.padding.left + x_offset,
                 y,
-                child_size.width,
-                child_size.height,
+                child_width,
+                child_height,
             );
             log::debug!("  Column child {} bounds: {:?}", i, bounds);
             self.child_bounds.push(bounds);
 
-            y += child_size.height + self.spacing;
+            y += child_height + self.spacing;
         }
 
-        let content_height = if self.children.is_empty() {
+        // Calculate content dimensions (without padding - padding added in resolve)
+        // y currently points past the last child, so subtract last spacing and starting padding
+        let children_height = if self.children.is_empty() {
             0.0
         } else {
-            y - self.spacing + self.padding.bottom - self.padding.top
+            y - self.spacing - self.padding.top
         };
-        let content_width = max_width + self.padding.horizontal();
 
+        // Resolve final size, adding padding to content dimensions
         Size::new(
-            self.width.resolve(available.width, content_width),
+            self.width
+                .resolve(available.width, max_width + self.padding.horizontal()),
             self.height
-                .resolve(available.height, content_height + self.padding.vertical()),
+                .resolve(available.height, children_height + self.padding.vertical()),
         )
     }
 }

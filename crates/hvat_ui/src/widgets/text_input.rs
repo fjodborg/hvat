@@ -1,5 +1,6 @@
 //! Text input widget for editable text fields
 
+use crate::callback::{Callback, SideEffect};
 use crate::constants::{line_height, DEFAULT_FONT_SIZE, TEXT_INPUT_PADDING};
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
@@ -46,12 +47,12 @@ pub struct TextInput<M> {
     /// Configuration
     config: TextInputConfig,
     /// Callback for value changes
-    on_change: Option<Box<dyn Fn(String, TextInputState) -> M>>,
+    on_change: Callback<(String, TextInputState), M>,
     /// Callback for submit (Enter pressed)
-    on_submit: Option<Box<dyn Fn(String) -> M>>,
+    on_submit: Callback<String, M>,
     /// Side-effect callback for undo point (called when input gains focus)
     /// This is called BEFORE on_change, allowing the app to save a snapshot.
-    on_undo_point: Option<Box<dyn Fn()>>,
+    on_undo_point: SideEffect,
 }
 
 impl<M> TextInput<M> {
@@ -66,9 +67,9 @@ impl<M> TextInput<M> {
             padding: TEXT_INPUT_PADDING,
             font_size: DEFAULT_FONT_SIZE,
             config: TextInputConfig::default(),
-            on_change: None,
-            on_submit: None,
-            on_undo_point: None,
+            on_change: Callback::none(),
+            on_submit: Callback::none(),
+            on_undo_point: SideEffect::none(),
         }
     }
 
@@ -84,9 +85,9 @@ impl<M> TextInput<M> {
         self
     }
 
-    /// Set the state
+    /// Set the state (copies the state)
     pub fn state(mut self, state: &TextInputState) -> Self {
-        self.state = state.clone();
+        self.state = *state;
         self
     }
 
@@ -125,7 +126,7 @@ impl<M> TextInput<M> {
     where
         F: Fn(String, TextInputState) -> M + 'static,
     {
-        self.on_change = Some(Box::new(callback));
+        self.on_change = Callback::new(move |(value, state)| callback(value, state));
         self
     }
 
@@ -134,7 +135,7 @@ impl<M> TextInput<M> {
     where
         F: Fn(String) -> M + 'static,
     {
-        self.on_submit = Some(Box::new(callback));
+        self.on_submit = Callback::new(callback);
         self
     }
 
@@ -150,7 +151,7 @@ impl<M> TextInput<M> {
     where
         F: Fn() + 'static,
     {
-        self.on_undo_point = Some(Box::new(callback));
+        self.on_undo_point = SideEffect::new(callback);
         self
     }
 
@@ -196,9 +197,7 @@ impl<M> TextInput<M> {
 
     /// Emit a state change if handler is set
     fn emit_change(&self) -> Option<M> {
-        self.on_change
-            .as_ref()
-            .map(|f| f(self.value.clone(), self.state.clone()))
+        self.on_change.call((self.value.clone(), self.state))
     }
 }
 
@@ -290,7 +289,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     let was_focused = self.state.is_focused;
                     self.state.is_focused = true;
                     let new_cursor =
-                        text_core::x_to_char_index(x, content.x, self.font_size, self.value.len());
+                        text_core::x_to_char_index(x, content.x, self.font_size, text_core::char_count(&self.value));
 
                     if modifiers.shift && was_focused {
                         // Extend selection
@@ -308,10 +307,8 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
                     // Call on_undo_point when input gains focus (for undo tracking)
                     if !was_focused {
-                        if let Some(ref on_undo_point) = self.on_undo_point {
-                            log::debug!("TextInput: calling on_undo_point (focus gained)");
-                            on_undo_point();
-                        }
+                        log::debug!("TextInput: calling on_undo_point (focus gained)");
+                        self.on_undo_point.emit();
                     }
 
                     return self.emit_change();
@@ -358,7 +355,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         let result = text_core::handle_right(
                             self.state.cursor,
                             self.state.selection,
-                            self.value.len(),
+                            text_core::char_count(&self.value),
                             modifiers.shift,
                         );
                         self.state.cursor = result.cursor;
@@ -377,22 +374,22 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         let result = text_core::handle_end(
                             self.state.cursor,
                             self.state.selection,
-                            self.value.len(),
+                            text_core::char_count(&self.value),
                             modifiers.shift,
                         );
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }
                     KeyCode::A if modifiers.ctrl => {
-                        let result = text_core::handle_select_all(self.value.len());
+                        let result = text_core::handle_select_all(text_core::char_count(&self.value));
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }
                     // Note: Ctrl+Z/Y (undo/redo) is handled at application level via UndoStack<T>
                     KeyCode::Enter => {
-                        if let Some(ref on_submit) = self.on_submit {
+                        if let Some(msg) = self.on_submit.call(self.value.clone()) {
                             log::debug!("TextInput: submit '{}'", self.value);
-                            return Some(on_submit(self.value.clone()));
+                            return Some(msg);
                         }
                     }
                     KeyCode::Escape => {

@@ -342,6 +342,114 @@ impl Renderer {
 
     /// Fill a rectangle
     pub fn fill_rect(&mut self, bounds: Bounds, color: Color) {
+        // Apply CPU-side clipping if there's an active clip region
+        let clipped_bounds = if let Some(clip) = self.clip_stack.last() {
+            match bounds.intersect(clip) {
+                Some(b) if b.width > 0.0 && b.height > 0.0 => b,
+                _ => return, // Completely clipped out
+            }
+        } else {
+            bounds
+        };
+
+        let (w, h) = self.window_size;
+        let (vertices, indices) = self.get_current_buffers();
+        ColorPipeline::append_rect(
+            vertices,
+            indices,
+            clipped_bounds.x,
+            clipped_bounds.y,
+            clipped_bounds.width,
+            clipped_bounds.height,
+            color.to_array(),
+            w as f32,
+            h as f32,
+        );
+    }
+
+    /// Stroke a rectangle outline
+    pub fn stroke_rect(&mut self, bounds: Bounds, color: Color, thickness: f32) {
+        // Apply CPU-side clipping - draw each edge as a separate clipped rectangle
+        if let Some(clip) = self.clip_stack.last().cloned() {
+            // Skip if completely outside clip region
+            if bounds.intersect(&clip).is_none() {
+                return;
+            }
+
+            let half_thick = thickness / 2.0;
+
+            // Top edge: horizontal line at top of bounds
+            let top_edge = Bounds::new(
+                bounds.x - half_thick,
+                bounds.y - half_thick,
+                bounds.width + thickness,
+                thickness,
+            );
+            if let Some(clipped) = top_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+
+            // Bottom edge: horizontal line at bottom of bounds
+            let bottom_edge = Bounds::new(
+                bounds.x - half_thick,
+                bounds.y + bounds.height - half_thick,
+                bounds.width + thickness,
+                thickness,
+            );
+            if let Some(clipped) = bottom_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+
+            // Left edge: vertical line at left of bounds (excluding corners to avoid overlap)
+            let left_edge = Bounds::new(
+                bounds.x - half_thick,
+                bounds.y + half_thick,
+                thickness,
+                bounds.height - thickness,
+            );
+            if let Some(clipped) = left_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+
+            // Right edge: vertical line at right of bounds (excluding corners to avoid overlap)
+            let right_edge = Bounds::new(
+                bounds.x + bounds.width - half_thick,
+                bounds.y + half_thick,
+                thickness,
+                bounds.height - thickness,
+            );
+            if let Some(clipped) = right_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+        } else {
+            // No clip - use the GPU stroke_rect directly
+            let (w, h) = self.window_size;
+            let (vertices, indices) = self.get_current_buffers();
+            ColorPipeline::append_stroke_rect(
+                vertices,
+                indices,
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
+                color.to_array(),
+                thickness,
+                w as f32,
+                h as f32,
+            );
+        }
+    }
+
+    /// Internal fill_rect that doesn't apply clipping (for use by stroke_rect which pre-clips)
+    fn fill_rect_no_clip(&mut self, bounds: Bounds, color: Color) {
         let (w, h) = self.window_size;
         let (vertices, indices) = self.get_current_buffers();
         ColorPipeline::append_rect(
@@ -357,26 +465,21 @@ impl Renderer {
         );
     }
 
-    /// Stroke a rectangle outline
-    pub fn stroke_rect(&mut self, bounds: Bounds, color: Color, thickness: f32) {
-        let (w, h) = self.window_size;
-        let (vertices, indices) = self.get_current_buffers();
-        ColorPipeline::append_stroke_rect(
-            vertices,
-            indices,
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-            color.to_array(),
-            thickness,
-            w as f32,
-            h as f32,
-        );
-    }
-
     /// Draw a line
     pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, color: Color, thickness: f32) {
+        // Skip if completely outside clip region
+        if let Some(clip) = self.clip_stack.last() {
+            let line_bounds = Bounds::new(
+                x1.min(x2) - thickness,
+                y1.min(y2) - thickness,
+                (x2 - x1).abs() + thickness * 2.0,
+                (y2 - y1).abs() + thickness * 2.0,
+            );
+            if line_bounds.intersect(clip).is_none() {
+                return; // Completely clipped out
+            }
+        }
+
         let (w, h) = self.window_size;
         let (vertices, indices) = self.get_current_buffers();
         ColorPipeline::append_line(
@@ -395,6 +498,14 @@ impl Renderer {
 
     /// Draw a filled circle
     pub fn fill_circle(&mut self, cx: f32, cy: f32, radius: f32, color: Color) {
+        // Skip if completely outside clip region
+        if let Some(clip) = self.clip_stack.last() {
+            let circle_bounds = Bounds::new(cx - radius, cy - radius, radius * 2.0, radius * 2.0);
+            if circle_bounds.intersect(clip).is_none() {
+                return; // Completely clipped out
+            }
+        }
+
         let (w, h) = self.window_size;
         let (vertices, indices) = self.get_current_buffers();
         ColorPipeline::append_circle(
@@ -433,21 +544,45 @@ impl Renderer {
     pub fn push_clip(&mut self, bounds: Bounds) {
         // If there's already a clip, intersect with it
         let clip = if let Some(current) = self.clip_stack.last() {
-            current.intersect(&bounds)
+            let intersected = current.intersect(&bounds);
+            log::debug!(
+                "Renderer push_clip: requested={:?}, current={:?}, intersected={:?}",
+                bounds,
+                current,
+                intersected
+            );
+            intersected
         } else {
+            log::debug!("Renderer push_clip: requested={:?} (no existing clip)", bounds);
             Some(bounds)
         };
 
         if let Some(c) = clip {
+            log::debug!(
+                "Renderer: clip stack depth {} -> {}, active clip={:?}",
+                self.clip_stack.len(),
+                self.clip_stack.len() + 1,
+                c
+            );
             self.clip_stack.push(c);
         } else {
             // Empty intersection - push a zero-size clip
+            log::debug!(
+                "Renderer: clip stack depth {} -> {} (EMPTY clip - no intersection!)",
+                self.clip_stack.len(),
+                self.clip_stack.len() + 1
+            );
             self.clip_stack.push(Bounds::new(bounds.x, bounds.y, 0.0, 0.0));
         }
     }
 
     /// Pop the current clip rectangle
     pub fn pop_clip(&mut self) {
+        log::debug!(
+            "Renderer pop_clip: depth {} -> {}",
+            self.clip_stack.len(),
+            self.clip_stack.len().saturating_sub(1)
+        );
         self.clip_stack.pop();
     }
 
