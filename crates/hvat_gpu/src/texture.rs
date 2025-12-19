@@ -97,4 +97,67 @@ impl Texture {
     pub fn aspect_ratio(&self) -> f32 {
         self.width as f32 / self.height as f32
     }
+
+    /// Create an empty render target texture that can be rendered to and sampled from.
+    ///
+    /// This is useful for offscreen rendering where a pipeline renders to this texture,
+    /// and then another pipeline samples from it.
+    pub fn render_target(ctx: &GpuContext, width: u32, height: u32) -> Result<Self> {
+        Self::render_target_with_config(ctx, width, height, TextureConfig::default())
+    }
+
+    /// Create an empty render target texture with custom configuration.
+    pub fn render_target_with_config(
+        ctx: &GpuContext,
+        width: u32,
+        height: u32,
+        config: TextureConfig,
+    ) -> Result<Self> {
+        if width == 0 || height == 0 {
+            return Err(GpuError::Texture(format!(
+                "Invalid render target size: {}x{}",
+                width, height
+            )));
+        }
+
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        // Create texture with both RENDER_ATTACHMENT and TEXTURE_BINDING usage
+        // Use the same format as the surface for compatibility
+        let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Render Target Texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: ctx.surface_config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Render Target Sampler"),
+            address_mode_u: config.address_mode_u,
+            address_mode_v: config.address_mode_v,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: config.mag_filter,
+            min_filter: config.min_filter,
+            mipmap_filter: config.mipmap_filter,
+            ..Default::default()
+        });
+
+        Ok(Self {
+            texture,
+            view,
+            sampler,
+            width,
+            height,
+        })
+    }
 }

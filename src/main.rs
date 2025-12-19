@@ -1,24 +1,25 @@
-/// Main HVAT Application entry point for native builds
+//! HVAT - Hyperspectral Annotation Tool
+//! Native entry point
+
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    use hvat::ui_constants::window;
     use hvat::HvatApp;
-    use hvat_ui::{run, Settings};
+    use hvat_ui::{run_with_settings, ClearColor, Settings};
 
-    // Create and run the application with logging configured in Settings
-    let settings = Settings {
-        window_title: Some("HVAT - Hyperspectral Annotation Tool".to_string()),
-        window_size: window::DEFAULT_SIZE,
-        min_window_size: Some(window::MIN_SIZE),
-        resizable: true,
-        log_level: log::LevelFilter::Debug,
-    };
+    // Note: env_logger is initialized by hvat_ui internally
+    log::info!("HVAT starting...");
 
-    if let Err(e) = run::<HvatApp>(settings) {
-        eprintln!("Application error: {}", e);
+    let settings = Settings::new()
+        .title("HVAT - Hyperspectral Annotation Tool")
+        .size(1400, 900)
+        .background(ClearColor::rgb(0.12, 0.12, 0.15))
+        .target_fps(60);
+
+    if let Err(e) = run_with_settings(HvatApp::new(), settings) {
+        log::error!("Application error: {}", e);
     }
 }
 
-// WASM doesn't use main(), it uses wasm_bindgen's start function
+// WASM uses wasm_bindgen start function, not main()
 #[cfg(target_arch = "wasm32")]
 fn main() {}

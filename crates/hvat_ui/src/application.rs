@@ -514,9 +514,9 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
                 })
                 .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok());
 
-            if let Some(canvas) = canvas {
+            if let Some(ref canvas) = canvas {
                 log::info!("Attaching to canvas element");
-                window_attrs = window_attrs.with_canvas(Some(canvas));
+                window_attrs = window_attrs.with_canvas(Some(canvas.clone()));
             } else {
                 log::error!("Failed to get or create canvas element");
             }
@@ -527,6 +527,12 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
                     .expect("Failed to create window"),
             );
             self.window = Some(window.clone());
+
+            // Set up ResizeObserver for the canvas to handle browser resize
+            if let Some(canvas) = canvas {
+                let window_for_resize = window.clone();
+                setup_canvas_resize_observer(canvas, window_for_resize);
+            }
 
             if let Some(app) = self.app.take() {
                 let settings = self.settings.clone();
@@ -773,4 +779,90 @@ pub fn run<A: Application + 'static>(
     event_loop.run_app(&mut winit_app)?;
 
     Ok(())
+}
+
+/// Set up window resize handling for WASM.
+/// This ensures the canvas resizes properly when the browser window is resized.
+/// Uses debouncing to reduce flashing during resize.
+#[cfg(target_arch = "wasm32")]
+fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc<Window>) {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+    use std::cell::Cell;
+
+    // Get the browser window object
+    let Some(browser_window) = web_sys::window() else {
+        log::error!("Failed to get browser window for resize handling");
+        return;
+    };
+
+    // Shared state for debounce timeout ID (leaked to live forever)
+    let timeout_id: &'static Cell<Option<i32>> = Box::leak(Box::new(Cell::new(None)));
+
+    // Clone window for the closure
+    let window_for_callback = window.clone();
+
+    // The actual resize function that will be called after debounce
+    let do_resize: &'static Closure<dyn Fn()> = Box::leak(Box::new(Closure::<dyn Fn()>::new({
+        let window = window_for_callback.clone();
+        move || {
+            if let Some(bw) = web_sys::window() {
+                let width = bw.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(800.0) as u32;
+                let height = bw.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(600.0) as u32;
+
+                if width > 0 && height > 0 {
+                    log::debug!("Applying resize to {}x{}", width, height);
+                    let _ = window.request_inner_size(winit::dpi::LogicalSize::new(width, height));
+                    window.request_redraw();
+                }
+            }
+        }
+    })));
+
+    // Create the debounced resize callback
+    let resize_callback = Closure::<dyn Fn()>::new(move || {
+        // Clear any pending timeout
+        if let Some(id) = timeout_id.get() {
+            if let Some(bw) = web_sys::window() {
+                bw.clear_timeout_with_handle(id);
+            }
+        }
+
+        // Set a new timeout (50ms debounce)
+        if let Some(bw) = web_sys::window() {
+            match bw.set_timeout_with_callback_and_timeout_and_arguments_0(
+                do_resize.as_ref().unchecked_ref(),
+                50, // 50ms debounce delay
+            ) {
+                Ok(id) => {
+                    timeout_id.set(Some(id));
+                }
+                Err(e) => {
+                    log::error!("Failed to set resize timeout: {:?}", e);
+                }
+            }
+        }
+    });
+
+    // Add the resize event listener to the browser window
+    if let Err(e) = browser_window.add_event_listener_with_callback(
+        "resize",
+        resize_callback.as_ref().unchecked_ref(),
+    ) {
+        log::error!("Failed to add resize event listener: {:?}", e);
+        return;
+    }
+
+    // Keep the closure alive
+    resize_callback.forget();
+    log::info!("Window resize event listener set up with debouncing");
+
+    // Also trigger an initial resize to set the correct size
+    if let Some(bw) = web_sys::window() {
+        let width = bw.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(800.0) as u32;
+        let height = bw.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(600.0) as u32;
+        if width > 0 && height > 0 {
+            let _ = window.request_inner_size(winit::dpi::LogicalSize::new(width, height));
+        }
+    }
 }

@@ -357,18 +357,36 @@ impl HyperspectralPipeline {
         view: &wgpu::TextureView,
         band_bind_group: &wgpu::BindGroup,
     ) {
+        self.render_with_clear(encoder, view, band_bind_group, Some(wgpu::Color {
+            r: 0.1,
+            g: 0.1,
+            b: 0.1,
+            a: 1.0,
+        }));
+    }
+
+    /// Render hyperspectral image to a render target with optional clear.
+    ///
+    /// If `clear_color` is None, the target will not be cleared (Load operation).
+    pub fn render_with_clear(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        band_bind_group: &wgpu::BindGroup,
+        clear_color: Option<wgpu::Color>,
+    ) {
+        let load_op = match clear_color {
+            Some(color) => wgpu::LoadOp::Clear(color),
+            None => wgpu::LoadOp::Load,
+        };
+
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Hyperspectral Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.1,
-                        g: 0.1,
-                        b: 0.1,
-                        a: 1.0,
-                    }),
+                    load: load_op,
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,

@@ -444,7 +444,7 @@ impl ComprehensiveDemo {
                 let fit_msg = wrap_fit(ComprehensiveMessage::FitToWindow);
                 let actual_msg = wrap_actual(ComprehensiveMessage::ZoomToActual);
 
-                c.text(format!("Zoom: {:.0}%", viewer_state.zoom * 100.0));
+                c.text(format!("Zoom: {:.0}%", viewer_state.effective_zoom() * 100.0));
                 c.text(format!(
                     "Pan: ({:.1}, {:.1})",
                     viewer_state.pan.0, viewer_state.pan.1

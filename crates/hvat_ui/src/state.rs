@@ -224,8 +224,8 @@ impl Default for ImageViewerState {
     fn default() -> Self {
         Self {
             pan: (0.0, 0.0),
-            zoom: 1.0, // 1:1 pixel ratio (100%)
-            fit_mode: FitMode::FitToView, // Start in fit-to-view mode
+            zoom: 1.0, // Will be updated by sync_with_bounds on first render
+            fit_mode: FitMode::FitToView, // Indicates zoom needs to be calculated
             drag: PanDragState::default(),
             cached_view_size: None,
             cached_texture_size: None,
@@ -249,6 +249,23 @@ impl ImageViewerState {
     pub fn with_fit_mode(mut self, mode: FitMode) -> Self {
         self.fit_mode = mode;
         self
+    }
+
+    /// Update cached sizes and resolve any pending fit modes.
+    ///
+    /// This should be called by the widget whenever it has access to bounds,
+    /// ensuring that `zoom` always reflects the actual displayed value.
+    /// This fixes the issue where `FitToView` mode leaves `zoom` at a stale value
+    /// until user interaction.
+    pub fn sync_with_bounds(&mut self, view_width: f32, view_height: f32, tex_width: u32, tex_height: u32) {
+        self.cached_view_size = Some((view_width, view_height));
+        self.cached_texture_size = Some((tex_width, tex_height));
+
+        // If we're in a deferred fit mode, resolve it now that we have bounds
+        if self.fit_mode == FitMode::FitToView {
+            self.zoom = Self::calculate_fit_zoom(view_width, view_height, tex_width, tex_height);
+            self.fit_mode = FitMode::Manual;
+        }
     }
 
     /// Reset to default state (fit to view)
@@ -331,7 +348,9 @@ impl ImageViewerState {
         self.fit_mode = FitMode::Manual;
     }
 
-    /// Zoom at a specific point (in clip space)
+    /// Zoom at a specific point (in clip space).
+    ///
+    /// Note: Call `sync_with_bounds()` before this to ensure zoom is properly initialized.
     pub fn zoom_at(&mut self, cursor_x: f32, cursor_y: f32, factor: f32) {
         let new_zoom = (self.zoom * factor).clamp(ZOOM_MIN, ZOOM_MAX);
         let zoom_ratio = new_zoom / self.zoom;
@@ -346,13 +365,17 @@ impl ImageViewerState {
         self.fit_mode = FitMode::Manual;
     }
 
-    /// Zoom in by a standard factor
+    /// Zoom in by a standard factor.
+    ///
+    /// Note: Call `sync_with_bounds()` before this to ensure zoom is properly initialized.
     pub fn zoom_in(&mut self) {
         self.zoom = (self.zoom * ZOOM_FACTOR).clamp(ZOOM_MIN, ZOOM_MAX);
         self.fit_mode = FitMode::Manual;
     }
 
-    /// Zoom out by a standard factor
+    /// Zoom out by a standard factor.
+    ///
+    /// Note: Call `sync_with_bounds()` before this to ensure zoom is properly initialized.
     pub fn zoom_out(&mut self) {
         self.zoom = (self.zoom / ZOOM_FACTOR).clamp(ZOOM_MIN, ZOOM_MAX);
         self.fit_mode = FitMode::Manual;

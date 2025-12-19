@@ -414,10 +414,16 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Use texture dimensions as content size fallback for Shrink mode
         let content_width = self.texture_width as f32;
         let content_height = self.texture_height as f32;
-        Size::new(
+        let size = Size::new(
             self.width.resolve(available.width, content_width),
             self.height.resolve(available.height, content_height),
-        )
+        );
+
+        // Sync state with layout bounds - this resolves any pending FitToView mode
+        // and ensures the zoom value is correct before draw() and before any events.
+        self.state.sync_with_bounds(size.width, size.height, self.texture_width, self.texture_height);
+
+        size
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
@@ -607,6 +613,10 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+        // Sync state with current bounds - this resolves any pending FitToView mode
+        // and ensures zoom operations use the correct base value.
+        self.state.sync_with_bounds(bounds.width, bounds.height, self.texture_width, self.texture_height);
+
         match event {
             // Handle control button clicks (left mouse)
             Event::MousePress {
