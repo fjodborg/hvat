@@ -4,7 +4,7 @@ use crate::callback::Callback;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer, TextureId};
-use crate::state::{FitMode, ImageViewerState, PanDragData, PanDragExt};
+use crate::state::{FitMode, ImageViewerState, InteractionMode, PanDragData, PanDragExt, PointerState};
 use crate::widget::Widget;
 use hvat_gpu::{ImageAdjustments, TransformUniform};
 use std::marker::PhantomData;
@@ -24,9 +24,25 @@ const CONTROL_PADDING: f32 = 8.0;
 /// Control button spacing
 const CONTROL_SPACING: f32 = 4.0;
 
-/// Click event data with image coordinates
-#[derive(Debug, Clone, Copy)]
-pub struct ImageClick {
+/// The kind of pointer event on the image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerEventKind {
+    /// Single click (press without drag)
+    Click,
+    /// Start of a drag operation
+    DragStart,
+    /// Continuation of a drag operation
+    DragMove,
+    /// End of a drag operation
+    DragEnd,
+}
+
+/// Pointer event with image coordinates.
+///
+/// Emitted when the user interacts with the image in annotation mode.
+/// Includes the updated viewer state so the app can persist pointer_state changes.
+#[derive(Debug, Clone)]
+pub struct ImagePointerEvent {
     /// X coordinate in image space (0 to image_width)
     pub image_x: f32,
     /// Y coordinate in image space (0 to image_height)
@@ -35,12 +51,10 @@ pub struct ImageClick {
     pub screen_x: f32,
     /// Y coordinate in screen space
     pub screen_y: f32,
-    /// Whether this is the start of a drag
-    pub is_drag_start: bool,
-    /// Whether this is a drag move
-    pub is_drag_move: bool,
-    /// Whether this is the end of a drag
-    pub is_drag_end: bool,
+    /// The kind of pointer event
+    pub kind: PointerEventKind,
+    /// Updated viewer state (app should use this to persist pointer_state)
+    pub viewer_state: ImageViewerState,
 }
 
 /// Annotation overlay to draw on the image
@@ -81,8 +95,8 @@ pub struct ImageViewer<M> {
     adjustments: ImageAdjustments,
     /// Change handler
     on_change: Callback<ImageViewerState, M>,
-    /// Click handler for annotation tools
-    on_click: Callback<ImageClick, M>,
+    /// Pointer event handler for annotation tools
+    on_pointer: Callback<ImagePointerEvent, M>,
     /// Enable panning
     pannable: bool,
     /// Enable zooming
@@ -95,12 +109,8 @@ pub struct ImageViewer<M> {
     height: Length,
     /// Annotation overlays to draw
     overlays: Vec<AnnotationOverlay>,
-    /// Whether left mouse is being used for annotation drawing
-    annotation_mode: bool,
-    /// Track left mouse drag for annotations
-    left_dragging: bool,
-    /// Last left drag position
-    last_left_drag_pos: Option<(f32, f32)>,
+    /// Interaction mode (View or Annotate)
+    interaction_mode: InteractionMode,
     /// Phantom data for message type
     _phantom: PhantomData<M>,
 }
@@ -115,16 +125,14 @@ impl<M> ImageViewer<M> {
             state: ImageViewerState::default(),
             adjustments: ImageAdjustments::default(),
             on_change: Callback::none(),
-            on_click: Callback::none(),
+            on_pointer: Callback::none(),
             pannable: true,
             zoomable: true,
             show_controls: true,
             width: Length::fill(),
             height: Length::fill(),
             overlays: Vec::new(),
-            annotation_mode: false,
-            left_dragging: false,
-            last_left_drag_pos: None,
+            interaction_mode: InteractionMode::default(),
             _phantom: PhantomData,
         }
     }
@@ -138,16 +146,14 @@ impl<M> ImageViewer<M> {
             state: ImageViewerState::default(),
             adjustments: ImageAdjustments::default(),
             on_change: Callback::none(),
-            on_click: Callback::none(),
+            on_pointer: Callback::none(),
             pannable: true,
             zoomable: true,
             show_controls: true,
             width: Length::fill(),
             height: Length::fill(),
             overlays: Vec::new(),
-            annotation_mode: false,
-            left_dragging: false,
-            last_left_drag_pos: None,
+            interaction_mode: InteractionMode::default(),
             _phantom: PhantomData,
         }
     }
@@ -205,18 +211,18 @@ impl<M> ImageViewer<M> {
         self
     }
 
-    /// Set the click handler for annotation tools
-    pub fn on_click<F>(mut self, handler: F) -> Self
+    /// Set the pointer event handler for annotation tools
+    pub fn on_pointer<F>(mut self, handler: F) -> Self
     where
-        F: Fn(ImageClick) -> M + 'static,
+        F: Fn(ImagePointerEvent) -> M + 'static,
     {
-        self.on_click = Callback::new(handler);
+        self.on_pointer = Callback::new(handler);
         self
     }
 
-    /// Enable annotation mode (left click for drawing instead of panning)
-    pub fn annotation_mode(mut self, enabled: bool) -> Self {
-        self.annotation_mode = enabled;
+    /// Set the interaction mode (View or Annotate)
+    pub fn interaction_mode(mut self, mode: InteractionMode) -> Self {
+        self.interaction_mode = mode;
         self
     }
 
@@ -458,6 +464,9 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Switch to overlay layer for controls (rendered after textures)
         renderer.begin_overlay();
 
+        // Clip all overlay drawing to widget bounds
+        renderer.push_clip(bounds);
+
         // Draw annotation overlays
         for overlay in &self.overlays {
             let color = Color::rgba(overlay.color[0], overlay.color[1], overlay.color[2], overlay.color[3]);
@@ -521,53 +530,55 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     renderer.stroke_rect(point_bounds, Color::WHITE, 1.0);
                 }
                 OverlayShape::Polygon { vertices, closed } => {
-                    if vertices.len() >= 2 {
-                        // Draw polygon edges
-                        let line_color = if overlay.selected { selected_color } else { color };
-                        let screen_verts: Vec<(f32, f32)> = vertices
-                            .iter()
-                            .map(|(x, y)| self.image_to_screen(*x, *y, &bounds))
-                            .collect();
+                    if vertices.is_empty() {
+                        continue;
+                    }
 
-                        for i in 0..screen_verts.len() {
-                            let j = if i + 1 < screen_verts.len() { i + 1 } else if *closed { 0 } else { continue };
-                            let (x1, y1) = screen_verts[i];
-                            let (x2, y2) = screen_verts[j];
+                    let line_color = if overlay.selected { selected_color } else { color };
+                    let screen_verts: Vec<(f32, f32)> = vertices
+                        .iter()
+                        .map(|(x, y)| self.image_to_screen(*x, *y, &bounds))
+                        .collect();
 
-                            // Draw line as thin rectangle
-                            let dx = x2 - x1;
-                            let dy = y2 - y1;
-                            let len = (dx * dx + dy * dy).sqrt();
-                            if len > 0.0 {
-                                let line_width = overlay.line_width;
-                                // Simple line drawing using rectangles
-                                let mid_x = (x1 + x2) / 2.0;
-                                let mid_y = (y1 + y2) / 2.0;
-                                renderer.fill_rect(
-                                    Bounds::new(mid_x - len / 2.0, mid_y - line_width / 2.0, len, line_width),
-                                    line_color,
-                                );
-                            }
-                        }
+                    // Draw edges (need at least 2 vertices)
+                    for i in 0..screen_verts.len().saturating_sub(1) {
+                        let (x1, y1) = screen_verts[i];
+                        let (x2, y2) = screen_verts[i + 1];
+                        renderer.line(x1, y1, x2, y2, line_color, overlay.line_width);
+                    }
+                    // Close the polygon if needed
+                    if *closed && screen_verts.len() >= 2 {
+                        let (x1, y1) = screen_verts[screen_verts.len() - 1];
+                        let (x2, y2) = screen_verts[0];
+                        renderer.line(x1, y1, x2, y2, line_color, overlay.line_width);
+                    }
 
-                        // Draw vertex handles if selected
-                        if overlay.selected {
-                            let handle_size = 6.0;
-                            for (sx, sy) in &screen_verts {
-                                let handle_bounds = Bounds::new(
-                                    sx - handle_size / 2.0,
-                                    sy - handle_size / 2.0,
-                                    handle_size,
-                                    handle_size,
-                                );
-                                renderer.fill_rect(handle_bounds, Color::WHITE);
-                                renderer.stroke_rect(handle_bounds, selected_color, 1.0);
-                            }
+                    // Draw vertex handles if selected OR if polygon is not closed (preview mode)
+                    if overlay.selected || !*closed {
+                        let handle_size = 6.0;
+                        for (i, (sx, sy)) in screen_verts.iter().enumerate() {
+                            let handle_bounds = Bounds::new(
+                                sx - handle_size / 2.0,
+                                sy - handle_size / 2.0,
+                                handle_size,
+                                handle_size,
+                            );
+                            // First vertex gets special color when not closed (to show where to click to close)
+                            let handle_fill = if i == 0 && !*closed && screen_verts.len() >= 3 {
+                                Color::rgba(0.0, 1.0, 0.0, 0.8) // Green - click here to close
+                            } else {
+                                Color::WHITE
+                            };
+                            renderer.fill_rect(handle_bounds, handle_fill);
+                            renderer.stroke_rect(handle_bounds, line_color, 1.0);
                         }
                     }
                 }
             }
         }
+
+        // Pop clip before drawing controls (they should be visible even at edges)
+        renderer.pop_clip();
 
         // Draw zoom info - use calculated zoom for current mode/bounds
         let display_zoom = self.calculate_zoom_for_mode(&bounds);
@@ -650,19 +661,18 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     }
                 }
 
-                // In annotation mode, emit click events for drawing
-                if self.annotation_mode {
+                // In annotation mode, emit pointer events for drawing
+                if self.interaction_mode == InteractionMode::Annotate {
+                    self.state.pointer_state = PointerState::AnnotationDrag;
+                    self.state.sync_with_bounds(bounds.width, bounds.height, self.texture_width, self.texture_height);
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                    self.left_dragging = true;
-                    self.last_left_drag_pos = Some(*position);
-                    return self.on_click.call(ImageClick {
+                    return self.on_pointer.call(ImagePointerEvent {
                         image_x,
                         image_y,
                         screen_x: position.0,
                         screen_y: position.1,
-                        is_drag_start: true,
-                        is_drag_move: false,
-                        is_drag_end: false,
+                        kind: PointerEventKind::DragStart,
+                        viewer_state: self.state.clone(),
                     });
                 }
                 None
@@ -674,18 +684,17 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 position,
                 ..
             } => {
-                if self.left_dragging && self.annotation_mode {
-                    self.left_dragging = false;
-                    self.last_left_drag_pos = None;
+                if self.state.pointer_state == PointerState::AnnotationDrag {
+                    self.state.pointer_state = PointerState::Idle;
+                    self.state.sync_with_bounds(bounds.width, bounds.height, self.texture_width, self.texture_height);
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                    return self.on_click.call(ImageClick {
+                    return self.on_pointer.call(ImagePointerEvent {
                         image_x,
                         image_y,
                         screen_x: position.0,
                         screen_y: position.1,
-                        is_drag_start: false,
-                        is_drag_move: false,
-                        is_drag_end: true,
+                        kind: PointerEventKind::DragEnd,
+                        viewer_state: self.state.clone(),
                     });
                 }
                 None
@@ -724,28 +733,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
             }
 
             Event::MouseMove { position, .. } => {
-                // Handle annotation drag move
-                if self.left_dragging && self.annotation_mode {
-                    let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                    self.last_left_drag_pos = Some(*position);
-                    return self.on_click.call(ImageClick {
-                        image_x,
-                        image_y,
-                        screen_x: position.0,
-                        screen_y: position.1,
-                        is_drag_start: false,
-                        is_drag_move: true,
-                        is_drag_end: false,
-                    });
-                }
-
-                // Handle pan drag move (middle mouse)
+                // Handle pan drag move (middle mouse) - check first, works regardless of annotation mode
                 if let Some((last_x, last_y)) = self.state.drag.last_pos() {
                     if self.pannable {
                         let delta_x = position.0 - last_x;
                         let delta_y = position.1 - last_y;
 
-                        // Convert screen delta to clip space delta
                         let clip_delta_x = delta_x / (bounds.width / 2.0);
                         let clip_delta_y = -delta_y / (bounds.height / 2.0);
 
@@ -755,6 +748,20 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         return self.emit_change_with_bounds(&bounds);
                     }
                 }
+
+                // Handle annotation drag move (left mouse)
+                if self.state.pointer_state == PointerState::AnnotationDrag {
+                    let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                    return self.on_pointer.call(ImagePointerEvent {
+                        image_x,
+                        image_y,
+                        screen_x: position.0,
+                        screen_y: position.1,
+                        kind: PointerEventKind::DragMove,
+                        viewer_state: self.state.clone(),
+                    });
+                }
+
                 None
             }
 
@@ -837,13 +844,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 if self.state.drag.is_dragging() {
                     self.state.drag.stop_drag();
                     changed = true;
-                    log::debug!("ImageViewer: stopped dragging (cursor left window)");
+                    log::debug!("ImageViewer: stopped panning (cursor left window)");
                 }
-                if self.left_dragging {
-                    self.left_dragging = false;
-                    self.last_left_drag_pos = None;
+                if self.state.pointer_state != PointerState::Idle {
+                    self.state.pointer_state = PointerState::Idle;
                     changed = true;
-                    log::debug!("ImageViewer: stopped left dragging (cursor left window)");
+                    log::debug!("ImageViewer: stopped annotation dragging (cursor left window)");
                 }
                 if changed {
                     return self.emit_change_with_bounds(&bounds);

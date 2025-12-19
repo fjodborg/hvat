@@ -22,7 +22,7 @@ pub use collapsible::{Collapsible, CollapsibleConfig};
 pub use column::Column;
 pub use config::BaseInputConfig;
 pub use dropdown::{Dropdown, DropdownConfig};
-pub use image_viewer::{ImageViewer, ImageClick, AnnotationOverlay, OverlayShape};
+pub use image_viewer::{AnnotationOverlay, ImagePointerEvent, ImageViewer, OverlayShape, PointerEventKind};
 pub use number_input::{NumberInput, NumberInputConfig};
 pub use row::Row;
 pub use scrollable::{Scrollable, ScrollDirection, ScrollbarVisibility, ScrollbarConfig};

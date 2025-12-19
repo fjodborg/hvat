@@ -465,35 +465,55 @@ impl Renderer {
         );
     }
 
-    /// Draw a line
+    /// Draw a line (clipped to current clip region using Liang-Barsky algorithm)
     pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, color: Color, thickness: f32) {
-        // Skip if completely outside clip region
-        if let Some(clip) = self.clip_stack.last() {
-            let line_bounds = Bounds::new(
-                x1.min(x2) - thickness,
-                y1.min(y2) - thickness,
-                (x2 - x1).abs() + thickness * 2.0,
-                (y2 - y1).abs() + thickness * 2.0,
-            );
-            if line_bounds.intersect(clip).is_none() {
-                return; // Completely clipped out
+        let (cx1, cy1, cx2, cy2) = if let Some(clip) = self.clip_stack.last() {
+            match Self::clip_line(x1, y1, x2, y2, clip) {
+                Some((cx1, cy1, cx2, cy2)) => (cx1, cy1, cx2, cy2),
+                None => return, // Line completely outside clip region
             }
-        }
+        } else {
+            (x1, y1, x2, y2)
+        };
 
         let (w, h) = self.window_size;
         let (vertices, indices) = self.get_current_buffers();
         ColorPipeline::append_line(
             vertices,
             indices,
-            x1,
-            y1,
-            x2,
-            y2,
+            cx1,
+            cy1,
+            cx2,
+            cy2,
             color.to_array(),
             thickness,
             w as f32,
             h as f32,
         );
+    }
+
+    /// Clip line to rectangle using Liang-Barsky algorithm.
+    fn clip_line(x1: f32, y1: f32, x2: f32, y2: f32, clip: &Bounds) -> Option<(f32, f32, f32, f32)> {
+        let (dx, dy) = (x2 - x1, y2 - y1);
+        let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+
+        for (p, q) in [
+            (-dx, x1 - clip.x),                  // left
+            (dx, clip.x + clip.width - x1),      // right
+            (-dy, y1 - clip.y),                  // top
+            (dy, clip.y + clip.height - y1),     // bottom
+        ] {
+            if p == 0.0 {
+                if q < 0.0 { return None; }
+            } else {
+                let t = q / p;
+                if p < 0.0 { t0 = t0.max(t); }
+                else { t1 = t1.min(t); }
+                if t0 > t1 { return None; }
+            }
+        }
+
+        Some((x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy))
     }
 
     /// Draw a filled circle

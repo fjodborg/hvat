@@ -22,7 +22,10 @@ use hvat_ui::{Application, Column, Element, Event, KeyCode, Resources, Row};
 use crate::constants::{DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH};
 use crate::data::HyperspectralData;
 use crate::message::Message;
-use crate::model::{AnnotationTool, Category};
+use crate::model::{
+    Annotation, AnnotationId, AnnotationShape, AnnotationTool, Category, DrawingState,
+    MIN_POLYGON_VERTICES, POLYGON_CLOSE_THRESHOLD,
+};
 use crate::state::{AppSnapshot, GpuRenderState, LoadedImage, ProjectState};
 use crate::test_image::generate_test_hyperspectral;
 
@@ -83,6 +86,11 @@ pub struct HvatApp {
 
     // Tool selection
     pub(crate) selected_tool: AnnotationTool,
+
+    // Annotations
+    pub(crate) annotations: Vec<Annotation>,
+    pub(crate) drawing_state: DrawingState,
+    pub(crate) next_annotation_id: AnnotationId,
 
     // Categories
     pub(crate) categories: Vec<Category>,
@@ -150,6 +158,10 @@ impl HvatApp {
 
             selected_tool: AnnotationTool::default(),
 
+            annotations: Vec::new(),
+            drawing_state: DrawingState::default(),
+            next_annotation_id: 1,
+
             categories: vec![
                 Category::new(1, "Background", [100, 100, 100]),
                 Category::new(2, "Object", [255, 100, 100]),
@@ -204,9 +216,10 @@ impl HvatApp {
         self.needs_gpu_render = true;
     }
 
-    /// Handle keyboard events for undo/redo shortcuts.
+    /// Handle keyboard events for undo/redo and annotation shortcuts.
     fn handle_key_event(event: &Event) -> Option<Message> {
         if let Event::KeyPress { key, modifiers, .. } = event {
+            // Ctrl+key shortcuts
             if modifiers.ctrl {
                 match key {
                     KeyCode::Z if modifiers.shift => return Some(Message::Redo),
@@ -214,6 +227,14 @@ impl HvatApp {
                     KeyCode::Y => return Some(Message::Redo),
                     _ => {}
                 }
+            }
+
+            // Non-modifier shortcuts for annotations
+            match key {
+                KeyCode::Escape => return Some(Message::CancelAnnotation),
+                KeyCode::Delete | KeyCode::Backspace => return Some(Message::DeleteAnnotation),
+                KeyCode::Enter => return Some(Message::FinishPolygon),
+                _ => {}
             }
         }
         None
@@ -356,6 +377,188 @@ impl HvatApp {
                 log::error!("Failed to load image {:?}: {}", path, e);
             }
         }
+    }
+
+    /// Handle pointer events for annotation drawing.
+    fn handle_pointer_event(&mut self, event: hvat_ui::ImagePointerEvent) {
+        use hvat_ui::PointerEventKind;
+
+        // Update viewer state to persist pointer_state changes
+        self.viewer_state = event.viewer_state.clone();
+
+        let x = event.image_x;
+        let y = event.image_y;
+
+        log::trace!(
+            "ImagePointer: tool={:?}, pos=({:.1}, {:.1}), kind={:?}",
+            self.selected_tool, x, y, event.kind
+        );
+
+        match self.selected_tool {
+            AnnotationTool::Select => {
+                // Selection tool: select/deselect annotations on click
+                if event.kind == PointerEventKind::DragStart {
+                    self.handle_selection_click(x, y);
+                }
+            }
+            AnnotationTool::BoundingBox => {
+                self.handle_bounding_box_draw(x, y, event.kind);
+            }
+            AnnotationTool::Polygon => {
+                self.handle_polygon_draw(x, y, event.kind);
+            }
+            AnnotationTool::Point => {
+                if event.kind == PointerEventKind::DragStart {
+                    self.create_point_annotation(x, y);
+                }
+            }
+        }
+    }
+
+    /// Handle selection tool click - select annotation under cursor.
+    fn handle_selection_click(&mut self, x: f32, y: f32) {
+        // Deselect all first
+        for ann in &mut self.annotations {
+            ann.selected = false;
+        }
+
+        // Find annotation under cursor (reverse order for top-most first)
+        let selected_idx = self
+            .annotations
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, ann)| ann.shape.contains_point(x, y))
+            .map(|(idx, _)| idx);
+
+        if let Some(idx) = selected_idx {
+            let id = self.annotations[idx].id;
+            self.annotations[idx].selected = true;
+            log::info!("Selected annotation {}", id);
+        }
+    }
+
+    /// Handle bounding box drawing.
+    fn handle_bounding_box_draw(&mut self, x: f32, y: f32, kind: hvat_ui::PointerEventKind) {
+        use hvat_ui::PointerEventKind;
+
+        match kind {
+            PointerEventKind::DragStart => {
+                // Start new bounding box
+                self.drawing_state = DrawingState::BoundingBox {
+                    start_x: x,
+                    start_y: y,
+                    current_x: x,
+                    current_y: y,
+                };
+                log::info!("BoundingBox: STARTED at ({:.1}, {:.1})", x, y);
+            }
+            PointerEventKind::DragMove => {
+                // Update current position
+                if let DrawingState::BoundingBox {
+                    current_x,
+                    current_y,
+                    ..
+                } = &mut self.drawing_state
+                {
+                    *current_x = x;
+                    *current_y = y;
+                    log::debug!("BoundingBox: MOVE to ({:.1}, {:.1})", x, y);
+                } else {
+                    log::warn!("BoundingBox: MOVE but drawing_state is {:?}", self.drawing_state);
+                }
+            }
+            PointerEventKind::DragEnd => {
+                log::info!("BoundingBox: END at ({:.1}, {:.1}), state={:?}", x, y, self.drawing_state);
+                // Finish bounding box
+                if let Some(shape) = self.drawing_state.to_shape() {
+                    let annotation = Annotation::new(self.next_annotation_id, shape, self.selected_category);
+                    self.next_annotation_id += 1;
+                    self.annotations.push(annotation);
+                    log::info!("Created bounding box annotation (total: {})", self.annotations.len());
+                } else {
+                    log::warn!("BoundingBox: END but to_shape() returned None");
+                }
+                self.drawing_state = DrawingState::Idle;
+            }
+            PointerEventKind::Click => {
+                // Single click without drag - ignore for bounding box
+            }
+        }
+    }
+
+    /// Handle polygon drawing.
+    fn handle_polygon_draw(&mut self, x: f32, y: f32, kind: hvat_ui::PointerEventKind) {
+        use hvat_ui::PointerEventKind;
+
+        // Polygon only responds to DragStart (click to add vertex)
+        if kind != PointerEventKind::DragStart {
+            return;
+        }
+
+        log::debug!("Polygon: click at ({:.1}, {:.1}), state={:?}", x, y, self.drawing_state);
+
+        // Check if we should close an existing polygon
+        if let DrawingState::Polygon { vertices } = &self.drawing_state {
+            if vertices.len() >= MIN_POLYGON_VERTICES {
+                let (first_x, first_y) = vertices[0];
+                let dist = ((x - first_x).powi(2) + (y - first_y).powi(2)).sqrt();
+                if dist < POLYGON_CLOSE_THRESHOLD {
+                    self.finalize_polygon();
+                    return;
+                }
+            }
+        }
+
+        // Handle adding vertices or starting new polygon
+        match &mut self.drawing_state {
+            DrawingState::Idle => {
+                self.drawing_state = DrawingState::Polygon {
+                    vertices: vec![(x, y)],
+                };
+                log::info!("Polygon: started at ({:.1}, {:.1})", x, y);
+            }
+            DrawingState::Polygon { vertices } => {
+                vertices.push((x, y));
+                log::debug!("Polygon: added vertex {} at ({:.1}, {:.1})", vertices.len(), x, y);
+            }
+            _ => {
+                // Wrong drawing state, reset
+                self.drawing_state = DrawingState::Polygon {
+                    vertices: vec![(x, y)],
+                };
+                log::info!("Polygon: reset and started at ({:.1}, {:.1})", x, y);
+            }
+        }
+    }
+
+    /// Finalize the current polygon drawing and create an annotation.
+    fn finalize_polygon(&mut self) {
+        if let DrawingState::Polygon { vertices } = &self.drawing_state {
+            if vertices.len() >= MIN_POLYGON_VERTICES {
+                let shape = AnnotationShape::Polygon {
+                    vertices: vertices.clone(),
+                };
+                let annotation = Annotation::new(self.next_annotation_id, shape, self.selected_category);
+                self.next_annotation_id += 1;
+                log::info!(
+                    "Polygon created with {} vertices (total: {})",
+                    vertices.len(),
+                    self.annotations.len() + 1
+                );
+                self.annotations.push(annotation);
+            }
+        }
+        self.drawing_state = DrawingState::Idle;
+    }
+
+    /// Create a point annotation.
+    fn create_point_annotation(&mut self, x: f32, y: f32) {
+        let shape = AnnotationShape::Point { x, y };
+        let annotation = Annotation::new(self.next_annotation_id, shape, self.selected_category);
+        self.next_annotation_id += 1;
+        self.annotations.push(annotation);
+        log::info!("Created point annotation at ({:.1}, {:.1})", x, y);
     }
 }
 
@@ -599,6 +802,29 @@ impl Application for HvatApp {
                     self.restore(&next);
                     log::info!("Redo performed");
                 }
+            }
+
+            // Annotation Drawing
+            Message::ImagePointer(event) => {
+                self.handle_pointer_event(event);
+            }
+            Message::CancelAnnotation => {
+                if self.drawing_state.is_drawing() {
+                    self.drawing_state = DrawingState::Idle;
+                    log::info!("Annotation cancelled");
+                }
+            }
+            Message::DeleteAnnotation => {
+                // Remove selected annotations
+                let before_count = self.annotations.len();
+                self.annotations.retain(|a| !a.selected);
+                let deleted = before_count - self.annotations.len();
+                if deleted > 0 {
+                    log::info!("Deleted {} annotation(s)", deleted);
+                }
+            }
+            Message::FinishPolygon => {
+                self.finalize_polygon();
             }
         }
     }

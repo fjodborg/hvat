@@ -3,6 +3,7 @@
 //! All UI events and actions are represented as messages in the Elm architecture style.
 
 use hvat_ui::prelude::*;
+use hvat_ui::ImagePointerEvent;
 
 use crate::model::AnnotationTool;
 use crate::state::ProjectState;
@@ -85,4 +86,14 @@ pub enum Message {
     // Right Sidebar Scroll
     /// Right sidebar scrolled
     RightScrolled(ScrollState),
+
+    // Image Viewer - Annotations
+    /// Pointer event for annotation drawing
+    ImagePointer(ImagePointerEvent),
+    /// Cancel current annotation drawing (Escape key)
+    CancelAnnotation,
+    /// Delete selected annotation
+    DeleteAnnotation,
+    /// Finish polygon annotation (close the shape)
+    FinishPolygon,
 }

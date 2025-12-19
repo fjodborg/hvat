@@ -196,6 +196,30 @@ impl PanDragExt for PanDragState {
     }
 }
 
+/// Interaction mode for the image viewer.
+///
+/// Determines how left mouse button interactions are interpreted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InteractionMode {
+    /// Normal viewing mode - left click does nothing special, middle mouse pans
+    #[default]
+    View,
+    /// Annotation mode - left click/drag reports pointer events for drawing
+    Annotate,
+}
+
+/// Current pointer interaction state.
+///
+/// Tracks what interaction is currently in progress.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PointerState {
+    /// No active pointer interaction
+    #[default]
+    Idle,
+    /// Left mouse is being dragged for annotation drawing
+    AnnotationDrag,
+}
+
 /// State for the image viewer widget
 ///
 /// ## Zoom semantics
@@ -212,8 +236,10 @@ pub struct ImageViewerState {
     pub zoom: f32,
     /// Current fit mode
     pub fit_mode: FitMode,
-    /// Drag interaction state for panning
+    /// Drag interaction state for panning (middle mouse)
     pub drag: PanDragState,
+    /// Current pointer interaction state (for annotation drawing)
+    pub pointer_state: PointerState,
     /// Cached view bounds from last render (width, height)
     pub cached_view_size: Option<(f32, f32)>,
     /// Cached texture size (width, height)
@@ -227,6 +253,7 @@ impl Default for ImageViewerState {
             zoom: 1.0, // Will be updated by sync_with_bounds on first render
             fit_mode: FitMode::FitToView, // Indicates zoom needs to be calculated
             drag: PanDragState::default(),
+            pointer_state: PointerState::default(),
             cached_view_size: None,
             cached_texture_size: None,
         }

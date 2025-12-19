@@ -3,10 +3,10 @@
 use crate::element::Element;
 use crate::layout::Length;
 use crate::renderer::TextureId;
-use crate::state::{NumberInputState, SliderState, TextInputState};
+use crate::state::{InteractionMode, NumberInputState, SliderState, TextInputState};
 use crate::widgets::{
-    AnnotationOverlay, Button, Column, ImageClick, ImageViewer, NumberInput, Row, Slider, Text,
-    TextInput,
+    AnnotationOverlay, Button, Column, ImagePointerEvent, ImageViewer, NumberInput, Row, Slider,
+    Text, TextInput,
 };
 use hvat_gpu::ImageAdjustments;
 
@@ -215,18 +215,18 @@ impl<'a, M: 'static + Clone> ImageViewerBuilder<'a, M> {
         self
     }
 
-    /// Enable annotation mode (left click for drawing instead of panning)
-    pub fn annotation_mode(mut self, enabled: bool) -> Self {
-        self.viewer = self.viewer.annotation_mode(enabled);
+    /// Set the interaction mode (View or Annotate)
+    pub fn interaction_mode(mut self, mode: InteractionMode) -> Self {
+        self.viewer = self.viewer.interaction_mode(mode);
         self
     }
 
-    /// Set the click handler for annotation tools
-    pub fn on_click<F>(mut self, handler: F) -> Self
+    /// Set the pointer event handler for annotation tools
+    pub fn on_pointer<F>(mut self, handler: F) -> Self
     where
-        F: Fn(ImageClick) -> M + 'static,
+        F: Fn(ImagePointerEvent) -> M + 'static,
     {
-        self.viewer = self.viewer.on_click(handler);
+        self.viewer = self.viewer.on_pointer(handler);
         self
     }
 
