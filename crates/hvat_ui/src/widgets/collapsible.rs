@@ -88,14 +88,13 @@ pub struct Collapsible<M> {
     scrollbar_drag_offset: f32,
 }
 
-impl<M: 'static> Collapsible<M> {
-    /// Create a new collapsible section
-    pub fn new(header: impl Into<String>) -> Self {
+impl<M> Default for Collapsible<M> {
+    fn default() -> Self {
         Self {
             state: CollapsibleState::default(),
-            header_text: header.into(),
+            header_text: "Section".to_string(),
             content: None,
-            scroll_state: ScrollState::new(),
+            scroll_state: ScrollState::default(),
             width: Length::Fill(1.0),
             config: CollapsibleConfig::default(),
             on_toggle: Callback::none(),
@@ -105,6 +104,16 @@ impl<M: 'static> Collapsible<M> {
             hover_header: false,
             scrollbar_dragging: false,
             scrollbar_drag_offset: 0.0,
+        }
+    }
+}
+
+impl<M: 'static> Collapsible<M> {
+    /// Create a new collapsible section
+    pub fn new(header: impl Into<String>) -> Self {
+        Self {
+            header_text: header.into(),
+            ..Default::default()
         }
     }
 
@@ -259,11 +268,6 @@ impl<M: 'static> Collapsible<M> {
     }
 }
 
-impl<M: 'static> Default for Collapsible<M> {
-    fn default() -> Self {
-        Self::new("Section")
-    }
-}
 
 impl<M: 'static> Widget<M> for Collapsible<M> {
     fn has_active_overlay(&self) -> bool {

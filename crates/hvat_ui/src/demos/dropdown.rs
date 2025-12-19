@@ -25,8 +25,8 @@ pub enum DropdownMessage {
 impl Default for DropdownDemo {
     fn default() -> Self {
         Self {
-            simple_dropdown: DropdownState::new(),
-            searchable_dropdown: DropdownState::new(),
+            simple_dropdown: DropdownState::default(),
+            searchable_dropdown: DropdownState::default(),
             selected_simple: None,
             selected_search: None,
         }
@@ -172,8 +172,8 @@ impl DropdownDemo {
             DropdownMessage::Reset => {
                 self.selected_simple = None;
                 self.selected_search = None;
-                self.simple_dropdown = DropdownState::new();
-                self.searchable_dropdown = DropdownState::new();
+                self.simple_dropdown = DropdownState::default();
+                self.searchable_dropdown = DropdownState::default();
             }
         }
     }

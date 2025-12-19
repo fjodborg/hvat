@@ -47,7 +47,7 @@ impl InputWidgetsDemo {
             slider_value: SliderState::new(50.0),
             slider_input_value: SliderState::new(25.0),
             stepped_slider_value: SliderState::new(5.0),
-            text_input_state: TextInputState::new(),
+            text_input_state: TextInputState::default(),
             text_value: String::new(),
             number_input_state: NumberInputState::new(42.0),
             number_input_state2: NumberInputState::new(3.14),

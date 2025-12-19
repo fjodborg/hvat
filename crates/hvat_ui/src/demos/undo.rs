@@ -57,7 +57,7 @@ impl UndoDemo {
             counter: 0,
             slider_state: SliderState::new(50.0),
             text_value: String::new(),
-            text_input_state: TextInputState::new(),
+            text_input_state: TextInputState::default(),
             global_undo: Rc::new(RefCell::new(UndoStack::new(50))),
         }
     }

@@ -150,11 +150,11 @@ impl HvatApp {
             tools_collapsed: CollapsibleState::expanded(),
             categories_collapsed: CollapsibleState::expanded(),
             tags_collapsed: CollapsibleState::collapsed(),
-            left_scroll_state: ScrollState::new(),
+            left_scroll_state: ScrollState::default(),
 
             band_selection_collapsed: CollapsibleState::expanded(),
             adjustments_collapsed: CollapsibleState::expanded(),
-            right_scroll_state: ScrollState::new(),
+            right_scroll_state: ScrollState::default(),
 
             selected_tool: AnnotationTool::default(),
 
@@ -171,7 +171,7 @@ impl HvatApp {
 
             image_tags: vec!["needs-review".to_string()],
             tag_input_text: String::new(),
-            tag_input_state: TextInputState::new(),
+            tag_input_state: TextInputState::default(),
 
             red_band_slider: SliderState::new(0.0),
             green_band_slider: SliderState::new(1.0),

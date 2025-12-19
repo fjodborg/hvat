@@ -76,9 +76,8 @@ pub struct NumberInput<M> {
     on_undo_point: SideEffect,
 }
 
-impl<M> NumberInput<M> {
-    /// Create a new number input
-    pub fn new() -> Self {
+impl<M> Default for NumberInput<M> {
+    fn default() -> Self {
         Self {
             min: None,
             max: None,
@@ -94,6 +93,13 @@ impl<M> NumberInput<M> {
             on_change: Callback::none(),
             on_undo_point: SideEffect::none(),
         }
+    }
+}
+
+impl<M> NumberInput<M> {
+    /// Create a new number input
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Set the minimum value
@@ -351,11 +357,6 @@ impl<M> NumberInput<M> {
     }
 }
 
-impl<M> Default for NumberInput<M> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
     fn layout(&mut self, available: Size) -> Size {

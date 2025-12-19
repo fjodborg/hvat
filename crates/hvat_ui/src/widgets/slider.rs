@@ -82,12 +82,11 @@ pub struct Slider<M> {
     on_undo_point: SideEffect,
 }
 
-impl<M> Slider<M> {
-    /// Create a new slider with min and max values
-    pub fn new(min: f32, max: f32) -> Self {
+impl<M> Default for Slider<M> {
+    fn default() -> Self {
         Self {
-            min,
-            max,
+            min: 0.0,
+            max: 1.0,
             step: None,
             state: SliderState::default(),
             width: Length::Fill(1.0),
@@ -99,6 +98,17 @@ impl<M> Slider<M> {
             config: SliderConfig::default(),
             on_change: Callback::none(),
             on_undo_point: SideEffect::none(),
+        }
+    }
+}
+
+impl<M> Slider<M> {
+    /// Create a new slider with min and max values
+    pub fn new(min: f32, max: f32) -> Self {
+        Self {
+            min,
+            max,
+            ..Default::default()
         }
     }
 

@@ -95,11 +95,10 @@ pub struct Dropdown<M> {
     viewport_height: f32,
 }
 
-impl<M: 'static> Dropdown<M> {
-    /// Create a new dropdown
-    pub fn new() -> Self {
+impl<M> Default for Dropdown<M> {
+    fn default() -> Self {
         Self {
-            state: DropdownState::new(),
+            state: DropdownState::default(),
             options: Vec::new(),
             selected: None,
             width: Length::Fixed(DEFAULT_INPUT_WIDTH),
@@ -114,6 +113,13 @@ impl<M: 'static> Dropdown<M> {
             filtered_cache: None,
             viewport_height: 0.0,
         }
+    }
+}
+
+impl<M: 'static> Dropdown<M> {
+    /// Create a new dropdown
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Set the dropdown state (clones from external state)
@@ -371,11 +377,6 @@ impl<M: 'static> Dropdown<M> {
     }
 }
 
-impl<M: 'static> Default for Dropdown<M> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<M: 'static> Widget<M> for Dropdown<M> {
     fn layout(&mut self, available: Size) -> Size {

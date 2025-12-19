@@ -1,5 +1,11 @@
 //! Renderer for drawing UI elements using hvat_gpu
 
+use crate::constants::{
+    RENDERER_CLIP_STACK_CAPACITY, RENDERER_COLOR_INDEX_CAPACITY, RENDERER_COLOR_VERTEX_CAPACITY,
+    RENDERER_OVERLAY_INDEX_CAPACITY, RENDERER_OVERLAY_TEXT_REQUEST_CAPACITY,
+    RENDERER_OVERLAY_VERTEX_CAPACITY, RENDERER_TEXT_CACHE_CAPACITY, RENDERER_TEXT_REQUEST_CAPACITY,
+    RENDERER_TEXTURE_REQUEST_CAPACITY,
+};
 use crate::layout::Bounds;
 use crate::overlay::OverlayRegistry;
 use glyphon::{
@@ -223,10 +229,10 @@ impl Renderer {
             color_pipeline,
             texture_pipeline,
             window_size: (gpu_ctx.width(), gpu_ctx.height()),
-            color_vertices: Vec::with_capacity(1024),
-            color_indices: Vec::with_capacity(2048),
-            overlay_vertices: Vec::with_capacity(256),
-            overlay_indices: Vec::with_capacity(512),
+            color_vertices: Vec::with_capacity(RENDERER_COLOR_VERTEX_CAPACITY),
+            color_indices: Vec::with_capacity(RENDERER_COLOR_INDEX_CAPACITY),
+            overlay_vertices: Vec::with_capacity(RENDERER_OVERLAY_VERTEX_CAPACITY),
+            overlay_indices: Vec::with_capacity(RENDERER_OVERLAY_INDEX_CAPACITY),
             drawing_overlay: false,
             font_system,
             swash_cache,
@@ -236,14 +242,14 @@ impl Renderer {
             overlay_text_atlas,
             overlay_text_renderer,
             viewport,
-            text_requests: Vec::with_capacity(64),
-            overlay_text_requests: Vec::with_capacity(16),
-            texture_requests: Vec::with_capacity(8),
+            text_requests: Vec::with_capacity(RENDERER_TEXT_REQUEST_CAPACITY),
+            overlay_text_requests: Vec::with_capacity(RENDERER_OVERLAY_TEXT_REQUEST_CAPACITY),
+            texture_requests: Vec::with_capacity(RENDERER_TEXTURE_REQUEST_CAPACITY),
             texture_bind_groups: HashMap::new(),
             next_texture_id: 0,
-            clip_stack: Vec::with_capacity(8),
-            text_buffer_cache: HashMap::with_capacity(128),
-            text_cache_used_keys: Vec::with_capacity(128),
+            clip_stack: Vec::with_capacity(RENDERER_CLIP_STACK_CAPACITY),
+            text_buffer_cache: HashMap::with_capacity(RENDERER_TEXT_CACHE_CAPACITY),
+            text_cache_used_keys: Vec::with_capacity(RENDERER_TEXT_CACHE_CAPACITY),
             color_vertex_buffer: None,
             color_index_buffer: None,
             vertex_buffer_capacity: 0,

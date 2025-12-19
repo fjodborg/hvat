@@ -184,25 +184,25 @@ impl ComprehensiveDemo {
             tools_collapsed: CollapsibleState::expanded(),
             info_collapsed: CollapsibleState::collapsed(),
             widgets_collapsed: CollapsibleState::expanded(),
-            left_scroll_state: ScrollState::new(),
+            left_scroll_state: ScrollState::default(),
 
             brightness_slider: SliderState::new(0.0),
             contrast_slider: SliderState::new(1.0),
             gamma_slider: SliderState::new(1.0),
             saturation_slider: SliderState::new(1.0),
             zoom_slider: SliderState::new(100.0),
-            right_scroll_state: ScrollState::new(),
+            right_scroll_state: ScrollState::default(),
 
             selected_tool: Tool::default(),
 
             x_offset_input: NumberInputState::new(0.0),
             y_offset_input: NumberInputState::new(0.0),
 
-            blend_mode_dropdown: DropdownState::new(),
+            blend_mode_dropdown: DropdownState::default(),
             selected_blend_mode: Some(0), // Normal
 
             notes_input_text: String::new(),
-            notes_input_state: TextInputState::new(),
+            notes_input_state: TextInputState::default(),
 
             undo_stack: Rc::new(RefCell::new(UndoStack::new(50))),
 

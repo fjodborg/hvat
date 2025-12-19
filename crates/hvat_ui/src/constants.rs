@@ -205,6 +205,40 @@ pub const FILL_DETECTION_TOLERANCE: f32 = 1.0;
 pub const DEFAULT_INPUT_WIDTH: f32 = 200.0;
 
 // =============================================================================
+// Renderer Buffer Capacities
+// =============================================================================
+
+/// Initial capacity for color vertex buffer
+/// Sized for ~256 quads (each quad = 4 vertices)
+pub const RENDERER_COLOR_VERTEX_CAPACITY: usize = 1024;
+
+/// Initial capacity for color index buffer
+/// Sized for ~256 quads (each quad = 6 indices: 2 triangles)
+pub const RENDERER_COLOR_INDEX_CAPACITY: usize = 2048;
+
+/// Initial capacity for overlay vertex buffer
+/// Overlays typically have fewer primitives than main content
+pub const RENDERER_OVERLAY_VERTEX_CAPACITY: usize = 256;
+
+/// Initial capacity for overlay index buffer
+pub const RENDERER_OVERLAY_INDEX_CAPACITY: usize = 512;
+
+/// Initial capacity for text render requests per frame
+pub const RENDERER_TEXT_REQUEST_CAPACITY: usize = 64;
+
+/// Initial capacity for overlay text requests per frame
+pub const RENDERER_OVERLAY_TEXT_REQUEST_CAPACITY: usize = 16;
+
+/// Initial capacity for texture render requests per frame
+pub const RENDERER_TEXTURE_REQUEST_CAPACITY: usize = 8;
+
+/// Initial capacity for clip stack depth
+pub const RENDERER_CLIP_STACK_CAPACITY: usize = 8;
+
+/// Initial capacity for text buffer cache entries
+pub const RENDERER_TEXT_CACHE_CAPACITY: usize = 128;
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 

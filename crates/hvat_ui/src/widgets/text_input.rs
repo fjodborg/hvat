@@ -55,9 +55,8 @@ pub struct TextInput<M> {
     on_undo_point: SideEffect,
 }
 
-impl<M> TextInput<M> {
-    /// Create a new text input
-    pub fn new() -> Self {
+impl<M> Default for TextInput<M> {
+    fn default() -> Self {
         Self {
             value: String::new(),
             placeholder: String::new(),
@@ -71,6 +70,13 @@ impl<M> TextInput<M> {
             on_submit: Callback::none(),
             on_undo_point: SideEffect::none(),
         }
+    }
+}
+
+impl<M> TextInput<M> {
+    /// Create a new text input
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Set the current value
@@ -201,11 +207,6 @@ impl<M> TextInput<M> {
     }
 }
 
-impl<M> Default for TextInput<M> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<M: Clone + 'static> Widget<M> for TextInput<M> {
     fn layout(&mut self, available: Size) -> Size {

@@ -102,7 +102,7 @@ impl<M: 'static> Scrollable<M> {
     pub fn new(content: Element<M>) -> Self {
         Self {
             content,
-            state: ScrollState::new(),
+            state: ScrollState::default(),
             direction: ScrollDirection::default(),
             scrollbar_visibility: ScrollbarVisibility::default(),
             scrollbar_config: ScrollbarConfig::default(),

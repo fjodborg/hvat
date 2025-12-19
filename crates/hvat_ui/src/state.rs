@@ -457,10 +457,6 @@ pub struct ScrollState {
 }
 
 impl ScrollState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Scroll to a specific offset
     pub fn scroll_to(&mut self, x: f32, y: f32) {
         self.offset = (x, y);
@@ -489,10 +485,6 @@ pub struct DropdownState {
 }
 
 impl DropdownState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn open(&mut self) {
         self.is_open = true;
         self.highlighted = Some(0);
@@ -587,10 +579,6 @@ pub struct TextInputState {
 }
 
 impl TextInputState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn focus(&mut self) {
         self.is_focused = true;
     }
@@ -1410,7 +1398,7 @@ mod tests {
 
     #[test]
     fn dropdown_state_open_close() {
-        let mut state = DropdownState::new();
+        let mut state = DropdownState::default();
         assert!(!state.is_open);
 
         state.open();
@@ -1424,7 +1412,7 @@ mod tests {
 
     #[test]
     fn dropdown_state_toggle() {
-        let mut state = DropdownState::new();
+        let mut state = DropdownState::default();
 
         state.toggle();
         assert!(state.is_open);
@@ -1435,7 +1423,7 @@ mod tests {
 
     #[test]
     fn dropdown_state_scroll_by() {
-        let mut state = DropdownState::new();
+        let mut state = DropdownState::default();
 
         // 20 items, 10 visible -> max scroll = 10
         state.scroll_by(5, 20, 10);
@@ -1453,7 +1441,7 @@ mod tests {
 
     #[test]
     fn dropdown_state_ensure_highlighted_visible() {
-        let mut state = DropdownState::new();
+        let mut state = DropdownState::default();
         state.scroll_offset = 5;
         state.highlighted = Some(2); // Above visible area
 

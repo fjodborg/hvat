@@ -22,7 +22,7 @@ pub enum ScrollableMessage {
 impl Default for ScrollableDemo {
     fn default() -> Self {
         Self {
-            scroll_state: ScrollState::new(),
+            scroll_state: ScrollState::default(),
             item_count: 30,
         }
     }

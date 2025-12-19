@@ -115,30 +115,8 @@ pub struct ImageViewer<M> {
     _phantom: PhantomData<M>,
 }
 
-impl<M> ImageViewer<M> {
-    /// Create a new image viewer with the given texture ID and dimensions
-    pub fn new(texture_id: TextureId, width: u32, height: u32) -> Self {
-        Self {
-            texture_id: Some(texture_id),
-            texture_width: width,
-            texture_height: height,
-            state: ImageViewerState::default(),
-            adjustments: ImageAdjustments::default(),
-            on_change: Callback::none(),
-            on_pointer: Callback::none(),
-            pannable: true,
-            zoomable: true,
-            show_controls: true,
-            width: Length::fill(),
-            height: Length::fill(),
-            overlays: Vec::new(),
-            interaction_mode: InteractionMode::default(),
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Create an empty image viewer (no texture)
-    pub fn empty() -> Self {
+impl<M> Default for ImageViewer<M> {
+    fn default() -> Self {
         Self {
             texture_id: None,
             texture_width: 0,
@@ -156,6 +134,23 @@ impl<M> ImageViewer<M> {
             interaction_mode: InteractionMode::default(),
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<M> ImageViewer<M> {
+    /// Create a new image viewer with the given texture ID and dimensions
+    pub fn new(texture_id: TextureId, width: u32, height: u32) -> Self {
+        Self {
+            texture_id: Some(texture_id),
+            texture_width: width,
+            texture_height: height,
+            ..Default::default()
+        }
+    }
+
+    /// Create an empty image viewer (no texture)
+    pub fn empty() -> Self {
+        Self::default()
     }
 
     /// Set the texture
