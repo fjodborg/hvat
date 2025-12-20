@@ -840,10 +840,11 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     })
                 }
                 Event::MouseMove { position, modifiers, overlay_hint } => {
-                    // Allow if within viewport OR if event is for an overlay
+                    // Allow if within viewport, if event is for an overlay, or if content has active drag
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
+                    let content_has_drag = self.content.has_active_drag();
 
-                    if in_viewport || *overlay_hint {
+                    if in_viewport || *overlay_hint || content_has_drag {
                         Some(Event::MouseMove {
                             position: (
                                 position.0 + self.state.offset.0,

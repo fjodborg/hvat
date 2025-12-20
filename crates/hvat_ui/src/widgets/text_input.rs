@@ -388,9 +388,12 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     }
                     // Note: Ctrl+Z/Y (undo/redo) is handled at application level via UndoStack<T>
                     KeyCode::Enter => {
+                        log::debug!("TextInput: Enter pressed, value='{}', is_focused={}", self.value, self.state.is_focused);
                         if let Some(msg) = self.on_submit.call(self.value.clone()) {
-                            log::debug!("TextInput: submit '{}'", self.value);
+                            log::debug!("TextInput: submit callback returned message");
                             return Some(msg);
+                        } else {
+                            log::debug!("TextInput: submit callback returned None (no handler?)");
                         }
                     }
                     KeyCode::Escape => {

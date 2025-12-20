@@ -36,9 +36,9 @@ pub use widget::Widget;
 pub use widgets::{
     button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
     slider, text, text_input, AnnotationOverlay, BaseInputConfig, Collapsible, CollapsibleConfig,
-    Column, Dropdown, DropdownConfig, ImagePointerEvent, NumberInput, NumberInputConfig,
-    OverlayShape, PointerEventKind, Row, Scrollable, ScrollDirection, ScrollbarConfig,
-    ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
+    ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig, ImagePointerEvent, NumberInput,
+    NumberInputConfig, OverlayShape, PointerEventKind, Row, Scrollable, ScrollDirection,
+    ScrollbarConfig, ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
 };
 
 // Re-export hvat_gpu types that users need

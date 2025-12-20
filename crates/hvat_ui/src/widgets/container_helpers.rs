@@ -119,7 +119,24 @@ pub fn dispatch_event_to_children<M: 'static>(
         }
     }
 
-    // Phase 1: Dispatch to children with active overlays first
+    // Phase 1: Dispatch MouseMove/MouseRelease to children with active drags first
+    // This ensures drag operations continue even when mouse moves outside widget bounds
+    if matches!(event, Event::MouseMove { .. } | Event::MouseRelease { .. }) {
+        for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
+            if child.has_active_drag() {
+                let absolute_bounds = translate_bounds(*bounds, container_bounds);
+                if let Some(msg) = child.on_event(event, absolute_bounds) {
+                    return Some(msg);
+                }
+                // Even if no message, consume MouseMove during drag to prevent other handlers
+                if matches!(event, Event::MouseMove { .. }) {
+                    return None;
+                }
+            }
+        }
+    }
+
+    // Phase 2: Dispatch to children with active overlays
     // This ensures popup clicks are handled before underlying elements
     // For overlays, we check if the event is within the capture bounds (which includes popup area)
     for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
@@ -156,7 +173,7 @@ pub fn dispatch_event_to_children<M: 'static>(
         }
     }
 
-    // Phase 2: Dispatch to remaining children normally
+    // Phase 3: Dispatch to remaining children normally
     for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
         if child.has_active_overlay() {
             continue; // Already handled above

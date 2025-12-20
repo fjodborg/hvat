@@ -127,6 +127,9 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             } => {
                 if bounds.contains(position.0, position.1) {
                     self.state = ButtonState::Pressed;
+                    // Fire click immediately on press to avoid timing issues with view rebuilds
+                    // that can occur between press and release (e.g., when a sibling text input blurs)
+                    return self.on_click.clone();
                 }
                 None
             }
@@ -136,20 +139,13 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                 position,
                 ..
             } => {
-                let was_pressed = self.state == ButtonState::Pressed;
                 let inside = bounds.contains(position.0, position.1);
-
                 self.state = if inside {
                     ButtonState::Hovered
                 } else {
                     ButtonState::Normal
                 };
-
-                if was_pressed && inside {
-                    self.on_click.clone()
-                } else {
-                    None
-                }
+                None
             }
 
             _ => None,

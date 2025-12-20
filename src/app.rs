@@ -23,10 +23,10 @@ use crate::constants::{DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WID
 use crate::data::HyperspectralData;
 use crate::message::Message;
 use crate::model::{
-    Annotation, AnnotationId, AnnotationShape, AnnotationTool, Category, DrawingState,
+    Annotation, AnnotationShape, AnnotationTool, Category, DrawingState,
     MIN_POLYGON_VERTICES, POLYGON_CLOSE_THRESHOLD,
 };
-use crate::state::{AppSnapshot, GpuRenderState, LoadedImage, ProjectState};
+use crate::state::{AppSnapshot, GpuRenderState, ImageDataStore, LoadedImage, ProjectState};
 use crate::test_image::generate_test_hyperspectral;
 
 // ============================================================================
@@ -87,17 +87,29 @@ pub struct HvatApp {
     // Tool selection
     pub(crate) selected_tool: AnnotationTool,
 
-    // Annotations
-    pub(crate) annotations: Vec<Annotation>,
-    pub(crate) drawing_state: DrawingState,
-    pub(crate) next_annotation_id: AnnotationId,
+    // Note: Annotations are now stored per-image in ImageDataStore
 
     // Categories
     pub(crate) categories: Vec<Category>,
     pub(crate) selected_category: u32,
+    /// Category currently being edited (for renaming)
+    pub(crate) editing_category: Option<u32>,
+    /// Text input for category name editing
+    pub(crate) category_name_input: String,
+    /// State for category name text input
+    pub(crate) category_name_input_state: TextInputState,
+    /// Category ID with open color picker
+    pub(crate) color_picker_category: Option<u32>,
+    /// Color picker state (drag tracking)
+    pub(crate) color_picker_state: ColorPickerState,
+    /// Tracks which category's picker was just closed to prevent immediate reopen
+    pub(crate) color_picker_just_closed: Option<u32>,
 
-    // Image tags (per-image)
-    pub(crate) image_tags: Vec<String>,
+    // Per-image data (tags selection, annotations, etc.)
+    pub(crate) image_data_store: ImageDataStore,
+    // Global tag registry (tags exist across all images)
+    pub(crate) global_tags: Vec<String>,
+    // Tag input UI state (not per-image)
     pub(crate) tag_input_text: String,
     pub(crate) tag_input_state: TextInputState,
 
@@ -158,9 +170,7 @@ impl HvatApp {
 
             selected_tool: AnnotationTool::default(),
 
-            annotations: Vec::new(),
-            drawing_state: DrawingState::default(),
-            next_annotation_id: 1,
+            // Annotations are stored per-image in image_data_store
 
             categories: vec![
                 Category::new(1, "Background", [100, 100, 100]),
@@ -168,8 +178,15 @@ impl HvatApp {
                 Category::new(3, "Region", [100, 255, 100]),
             ],
             selected_category: 1,
+            editing_category: None,
+            category_name_input: String::new(),
+            category_name_input_state: TextInputState::default(),
+            color_picker_category: None,
+            color_picker_state: ColorPickerState::default(),
+            color_picker_just_closed: None,
 
-            image_tags: vec!["needs-review".to_string()],
+            image_data_store: ImageDataStore::new(),
+            global_tags: Vec::new(),
             tag_input_text: String::new(),
             tag_input_state: TextInputState::default(),
 
@@ -214,6 +231,15 @@ impl HvatApp {
         self.gamma_slider.set_value(snapshot.gamma);
         self.hue_slider.set_value(snapshot.hue);
         self.needs_gpu_render = true;
+    }
+
+    /// Get the current image path (for per-image data storage).
+    /// Returns a test image path if no project is loaded.
+    pub(crate) fn current_image_path(&self) -> PathBuf {
+        self.project
+            .as_ref()
+            .and_then(|p| p.current_image().cloned())
+            .unwrap_or_else(|| PathBuf::from("__test_image__"))
     }
 
     /// Handle keyboard events for undo/redo and annotation shortcuts.
@@ -417,13 +443,16 @@ impl HvatApp {
 
     /// Handle selection tool click - select annotation under cursor.
     fn handle_selection_click(&mut self, x: f32, y: f32) {
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get_or_create(&path);
+
         // Deselect all first
-        for ann in &mut self.annotations {
+        for ann in &mut image_data.annotations {
             ann.selected = false;
         }
 
         // Find annotation under cursor (reverse order for top-most first)
-        let selected_idx = self
+        let selected_idx = image_data
             .annotations
             .iter()
             .enumerate()
@@ -432,8 +461,8 @@ impl HvatApp {
             .map(|(idx, _)| idx);
 
         if let Some(idx) = selected_idx {
-            let id = self.annotations[idx].id;
-            self.annotations[idx].selected = true;
+            let id = image_data.annotations[idx].id;
+            image_data.annotations[idx].selected = true;
             log::info!("Selected annotation {}", id);
         }
     }
@@ -442,10 +471,13 @@ impl HvatApp {
     fn handle_bounding_box_draw(&mut self, x: f32, y: f32, kind: hvat_ui::PointerEventKind) {
         use hvat_ui::PointerEventKind;
 
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get_or_create(&path);
+
         match kind {
             PointerEventKind::DragStart => {
                 // Start new bounding box
-                self.drawing_state = DrawingState::BoundingBox {
+                image_data.drawing_state = DrawingState::BoundingBox {
                     start_x: x,
                     start_y: y,
                     current_x: x,
@@ -459,27 +491,27 @@ impl HvatApp {
                     current_x,
                     current_y,
                     ..
-                } = &mut self.drawing_state
+                } = &mut image_data.drawing_state
                 {
                     *current_x = x;
                     *current_y = y;
                     log::debug!("BoundingBox: MOVE to ({:.1}, {:.1})", x, y);
                 } else {
-                    log::warn!("BoundingBox: MOVE but drawing_state is {:?}", self.drawing_state);
+                    log::warn!("BoundingBox: MOVE but drawing_state is {:?}", image_data.drawing_state);
                 }
             }
             PointerEventKind::DragEnd => {
-                log::info!("BoundingBox: END at ({:.1}, {:.1}), state={:?}", x, y, self.drawing_state);
+                log::info!("BoundingBox: END at ({:.1}, {:.1}), state={:?}", x, y, image_data.drawing_state);
                 // Finish bounding box
-                if let Some(shape) = self.drawing_state.to_shape() {
-                    let annotation = Annotation::new(self.next_annotation_id, shape, self.selected_category);
-                    self.next_annotation_id += 1;
-                    self.annotations.push(annotation);
-                    log::info!("Created bounding box annotation (total: {})", self.annotations.len());
+                if let Some(shape) = image_data.drawing_state.to_shape() {
+                    let annotation = Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
+                    image_data.next_annotation_id += 1;
+                    image_data.annotations.push(annotation);
+                    log::info!("Created bounding box annotation (total: {})", image_data.annotations.len());
                 } else {
                     log::warn!("BoundingBox: END but to_shape() returned None");
                 }
-                self.drawing_state = DrawingState::Idle;
+                image_data.drawing_state = DrawingState::Idle;
             }
             PointerEventKind::Click => {
                 // Single click without drag - ignore for bounding box
@@ -496,10 +528,13 @@ impl HvatApp {
             return;
         }
 
-        log::debug!("Polygon: click at ({:.1}, {:.1}), state={:?}", x, y, self.drawing_state);
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get_or_create(&path);
+
+        log::debug!("Polygon: click at ({:.1}, {:.1}), state={:?}", x, y, image_data.drawing_state);
 
         // Check if we should close an existing polygon
-        if let DrawingState::Polygon { vertices } = &self.drawing_state {
+        if let DrawingState::Polygon { vertices } = &image_data.drawing_state {
             if vertices.len() >= MIN_POLYGON_VERTICES {
                 let (first_x, first_y) = vertices[0];
                 let dist = ((x - first_x).powi(2) + (y - first_y).powi(2)).sqrt();
@@ -511,9 +546,13 @@ impl HvatApp {
         }
 
         // Handle adding vertices or starting new polygon
-        match &mut self.drawing_state {
+        // Need to re-borrow after potential finalize_polygon call
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get_or_create(&path);
+
+        match &mut image_data.drawing_state {
             DrawingState::Idle => {
-                self.drawing_state = DrawingState::Polygon {
+                image_data.drawing_state = DrawingState::Polygon {
                     vertices: vec![(x, y)],
                 };
                 log::info!("Polygon: started at ({:.1}, {:.1})", x, y);
@@ -524,7 +563,7 @@ impl HvatApp {
             }
             _ => {
                 // Wrong drawing state, reset
-                self.drawing_state = DrawingState::Polygon {
+                image_data.drawing_state = DrawingState::Polygon {
                     vertices: vec![(x, y)],
                 };
                 log::info!("Polygon: reset and started at ({:.1}, {:.1})", x, y);
@@ -534,30 +573,36 @@ impl HvatApp {
 
     /// Finalize the current polygon drawing and create an annotation.
     fn finalize_polygon(&mut self) {
-        if let DrawingState::Polygon { vertices } = &self.drawing_state {
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get_or_create(&path);
+
+        if let DrawingState::Polygon { vertices } = &image_data.drawing_state.clone() {
             if vertices.len() >= MIN_POLYGON_VERTICES {
                 let shape = AnnotationShape::Polygon {
                     vertices: vertices.clone(),
                 };
-                let annotation = Annotation::new(self.next_annotation_id, shape, self.selected_category);
-                self.next_annotation_id += 1;
+                let annotation = Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
+                image_data.next_annotation_id += 1;
                 log::info!(
                     "Polygon created with {} vertices (total: {})",
                     vertices.len(),
-                    self.annotations.len() + 1
+                    image_data.annotations.len() + 1
                 );
-                self.annotations.push(annotation);
+                image_data.annotations.push(annotation);
             }
         }
-        self.drawing_state = DrawingState::Idle;
+        image_data.drawing_state = DrawingState::Idle;
     }
 
     /// Create a point annotation.
     fn create_point_annotation(&mut self, x: f32, y: f32) {
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get_or_create(&path);
+
         let shape = AnnotationShape::Point { x, y };
-        let annotation = Annotation::new(self.next_annotation_id, shape, self.selected_category);
-        self.next_annotation_id += 1;
-        self.annotations.push(annotation);
+        let annotation = Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
+        image_data.next_annotation_id += 1;
+        image_data.annotations.push(annotation);
         log::info!("Created point annotation at ({:.1}, {:.1})", x, y);
     }
 }
@@ -694,13 +739,93 @@ impl Application for HvatApp {
                 log::info!("Category selected: {}", id);
             }
             Message::AddCategory => {
-                let new_id = self.categories.len() as u32 + 1;
+                let new_id = self.categories.iter().map(|c| c.id).max().unwrap_or(0) + 1;
                 self.categories
                     .push(Category::new(new_id, &format!("Category {}", new_id), [200, 200, 100]));
                 log::info!("Added new category: {}", new_id);
             }
+            Message::StartEditingCategory(id) => {
+                if let Some(cat) = self.categories.iter().find(|c| c.id == id) {
+                    self.editing_category = Some(id);
+                    self.category_name_input = cat.name.clone();
+                    self.category_name_input_state = TextInputState::default();
+                    self.category_name_input_state.is_focused = true;
+                    log::info!("Started editing category: {}", id);
+                }
+            }
+            Message::CategoryNameChanged(text, state) => {
+                self.category_name_input = text;
+                self.category_name_input_state = state;
+            }
+            Message::FinishEditingCategory => {
+                if let Some(id) = self.editing_category {
+                    if !self.category_name_input.is_empty() {
+                        if let Some(cat) = self.categories.iter_mut().find(|c| c.id == id) {
+                            cat.name = self.category_name_input.clone();
+                            log::info!("Renamed category {} to '{}'", id, cat.name);
+                        }
+                    }
+                }
+                self.editing_category = None;
+                self.category_name_input.clear();
+            }
+            Message::CancelEditingCategory => {
+                self.editing_category = None;
+                self.category_name_input.clear();
+                log::info!("Cancelled category editing");
+            }
+            Message::ToggleCategoryColorPicker(id) => {
+                // If picker was just closed for this same category, skip reopening
+                // This handles the case where GlobalMousePress closes the picker and then
+                // MouseRelease on the swatch tries to toggle it (which would reopen it)
+                if self.color_picker_just_closed == Some(id) {
+                    log::debug!("Skipping toggle - picker was just closed for category {}", id);
+                    self.color_picker_just_closed = None; // Reset after skipping
+                    return;
+                }
+                // Toggle: if already open for this category, close it; otherwise open for this category
+                if self.color_picker_category == Some(id) {
+                    self.color_picker_category = None;
+                    log::info!("Closed color picker for category: {}", id);
+                } else {
+                    self.color_picker_category = Some(id);
+                    self.color_picker_just_closed = None; // Reset when opening
+                    log::info!("Opened color picker for category: {}", id);
+                }
+            }
+            Message::CloseCategoryColorPicker => {
+                // Track which category's picker was closed to prevent immediate reopen
+                let closed_for = self.color_picker_category;
+                self.color_picker_category = None;
+                self.color_picker_state = ColorPickerState::default();
+                self.color_picker_just_closed = closed_for;
+                log::info!("Closed color picker");
+            }
+            Message::CategoryColorLiveUpdate(color) => {
+                // Update color but don't close picker (live preview while dragging sliders)
+                if let Some(id) = self.color_picker_category {
+                    if let Some(cat) = self.categories.iter_mut().find(|c| c.id == id) {
+                        cat.color = color;
+                    }
+                }
+            }
+            Message::CategoryColorApply(color) => {
+                // Apply color and close picker (from palette selection)
+                if let Some(id) = self.color_picker_category {
+                    if let Some(cat) = self.categories.iter_mut().find(|c| c.id == id) {
+                        cat.color = color;
+                        log::info!("Applied color for category {}: {:?}", id, color);
+                    }
+                }
+                self.color_picker_category = None;
+                self.color_picker_state = ColorPickerState::default();
+            }
+            Message::ColorPickerStateChanged(state) => {
+                log::debug!("Color picker state changed: {:?}", state);
+                self.color_picker_state = state;
+            }
 
-            // Left Sidebar - Tags
+            // Left Sidebar - Tags (global registry with per-image selection)
             Message::TagsToggled(state) => {
                 self.tags_collapsed = state;
             }
@@ -711,17 +836,38 @@ impl Application for HvatApp {
             Message::AddTag => {
                 if !self.tag_input_text.is_empty() {
                     let tag = self.tag_input_text.clone();
-                    if !self.image_tags.contains(&tag) {
-                        self.image_tags.push(tag.clone());
-                        log::info!("Added tag: {}", tag);
+                    // Add to global tag registry if not already present
+                    if !self.global_tags.contains(&tag) {
+                        self.global_tags.push(tag.clone());
+                        log::info!("Added tag '{}' to global registry", tag);
                     }
+                    // Also select it for the current image
+                    let path = self.current_image_path();
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    image_data.selected_tags.insert(tag.clone());
+                    log::info!("Selected tag '{}' for image {:?}", tag, path);
+
                     self.tag_input_text.clear();
                     self.tag_input_state.cursor = 0;
                 }
             }
+            Message::ToggleTag(tag) => {
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                if image_data.selected_tags.contains(&tag) {
+                    image_data.selected_tags.remove(&tag);
+                    log::info!("Deselected tag '{}' on image {:?}", tag, path);
+                } else {
+                    image_data.selected_tags.insert(tag.clone());
+                    log::info!("Selected tag '{}' on image {:?}", tag, path);
+                }
+            }
             Message::RemoveTag(tag) => {
-                self.image_tags.retain(|t| t != &tag);
-                log::info!("Removed tag: {}", tag);
+                // Remove from global registry (affects all images)
+                self.global_tags.retain(|t| t != &tag);
+                // Also remove from all per-image selections
+                self.image_data_store.remove_tag_from_all(&tag);
+                log::info!("Removed tag '{}' from global registry", tag);
             }
 
             // Left Sidebar Scroll
@@ -809,16 +955,20 @@ impl Application for HvatApp {
                 self.handle_pointer_event(event);
             }
             Message::CancelAnnotation => {
-                if self.drawing_state.is_drawing() {
-                    self.drawing_state = DrawingState::Idle;
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                if image_data.drawing_state.is_drawing() {
+                    image_data.drawing_state = DrawingState::Idle;
                     log::info!("Annotation cancelled");
                 }
             }
             Message::DeleteAnnotation => {
                 // Remove selected annotations
-                let before_count = self.annotations.len();
-                self.annotations.retain(|a| !a.selected);
-                let deleted = before_count - self.annotations.len();
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                let before_count = image_data.annotations.len();
+                image_data.annotations.retain(|a| !a.selected);
+                let deleted = before_count - image_data.annotations.len();
                 if deleted > 0 {
                     log::info!("Deleted {} annotation(s)", deleted);
                 }

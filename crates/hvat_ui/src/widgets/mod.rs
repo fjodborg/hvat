@@ -2,6 +2,8 @@
 
 mod button;
 mod collapsible;
+mod color_picker;
+mod color_swatch;
 mod column;
 pub mod config;
 mod container_helpers;
@@ -19,6 +21,8 @@ mod text_input;
 
 pub use button::Button;
 pub use collapsible::{Collapsible, CollapsibleConfig};
+pub use color_picker::ColorPicker;
+pub use color_swatch::ColorSwatch;
 pub use column::Column;
 pub use config::BaseInputConfig;
 pub use dropdown::{Dropdown, DropdownConfig};

@@ -1,7 +1,10 @@
 //! Left sidebar UI component.
 
 use hvat_ui::prelude::*;
-use hvat_ui::{Collapsible, Column, Context, Element, Scrollable, ScrollDirection, ScrollbarVisibility};
+use hvat_ui::{
+    Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, Scrollable, ScrollDirection,
+    ScrollbarVisibility,
+};
 
 use crate::app::HvatApp;
 use crate::constants::SIDEBAR_WIDTH;
@@ -18,7 +21,16 @@ impl HvatApp {
         let selected_tool = self.selected_tool;
         let categories = self.categories.clone();
         let selected_category = self.selected_category;
-        let image_tags = self.image_tags.clone();
+        let editing_category = self.editing_category;
+        let category_name_input = self.category_name_input.clone();
+        let category_name_input_state = self.category_name_input_state;
+        let color_picker_category = self.color_picker_category;
+        let color_picker_state = self.color_picker_state;
+        // Global tags (persist across all images)
+        let global_tags = self.global_tags.clone();
+        // Per-image: which global tags are selected for the current image
+        let current_image_data = self.image_data_store.get(&self.current_image_path());
+        let selected_tags = current_image_data.selected_tags;
         let tag_input_text = self.tag_input_text.clone();
         let tag_input_state = self.tag_input_state.clone();
 
@@ -57,15 +69,62 @@ impl HvatApp {
             .content(|c| {
                 for cat in &categories {
                     let is_selected = cat.id == selected_category;
+                    let is_editing = editing_category == Some(cat.id);
                     let cat_id = cat.id;
-                    let label = if is_selected {
-                        format!("● {}", cat.name)
-                    } else {
-                        format!("○ {}", cat.name)
-                    };
-                    c.button(label)
-                        .width(Length::Fill(1.0))
-                        .on_click(Message::CategorySelected(cat_id));
+                    let cat_color = cat.color;
+                    let cat_name = cat.name.clone();
+
+                    c.row(|r| {
+                        // Color swatch (clickable to toggle color picker)
+                        let swatch = ColorSwatch::new(cat_color)
+                            .width(Length::Fixed(20.0))
+                            .height(Length::Fixed(20.0))
+                            .on_click(Message::ToggleCategoryColorPicker(cat_id));
+                        r.add(Element::new(swatch));
+
+                        if is_editing {
+                            // Show text input for editing
+                            r.text_input()
+                                .value(&category_name_input)
+                                .state(&category_name_input_state)
+                                .placeholder("Category name...")
+                                .width(Length::Fixed(SIDEBAR_WIDTH - 80.0))
+                                .on_change(Message::CategoryNameChanged)
+                                .on_submit(|_| Message::FinishEditingCategory)
+                                .build();
+                            // Show checkmark to confirm (Enter also works)
+                            r.button("✓")
+                                .width(Length::Fixed(25.0))
+                                .on_click(Message::FinishEditingCategory);
+                        } else {
+                            // Show category name as button
+                            let label = if is_selected {
+                                format!("● {}", cat_name)
+                            } else {
+                                format!("○ {}", cat_name)
+                            };
+                            r.button(label)
+                                .width(Length::Fill(1.0))
+                                .on_click(Message::CategorySelected(cat_id));
+                            // Edit button (pen icon)
+                            r.button("✎")
+                                .width(Length::Fixed(25.0))
+                                .on_click(Message::StartEditingCategory(cat_id));
+                        }
+                    });
+
+                    // Show color picker if open for this category
+                    if color_picker_category == Some(cat_id) {
+                        let picker = ColorPicker::new()
+                            .selected(cat_color)
+                            .open(true)
+                            .state(&color_picker_state)
+                            .on_change(Message::CategoryColorLiveUpdate)  // Live updates from sliders
+                            .on_select(Message::CategoryColorApply)       // Palette click applies and closes
+                            .on_close(Message::CloseCategoryColorPicker)
+                            .on_state_change(Message::ColorPickerStateChanged);  // For drag state tracking
+                        c.add(Element::new(picker));
+                    }
                 }
                 c.text("");
                 c.button("+ Add Category")
@@ -81,24 +140,42 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::TagsToggled)
             .content(|c| {
-                for tag in &image_tags {
+                for tag in &global_tags {
                     let tag_clone = tag.clone();
+                    let tag_for_toggle = tag.clone();
+                    let tag_for_remove = tag.clone();
+                    let is_selected = selected_tags.contains(tag);
+
                     c.row(|r| {
-                        r.text_sized(format!("[{}]", tag_clone), 11.0);
+                        // Tag name as selectable button (like categories)
+                        let label = if is_selected {
+                            format!("● {}", tag_clone)
+                        } else {
+                            format!("○ {}", tag_clone)
+                        };
+                        r.button(label)
+                            .width(Length::Fill(1.0))
+                            .on_click(Message::ToggleTag(tag_for_toggle));
+                        // Remove button
                         r.button("×")
                             .width(Length::Fixed(25.0))
-                            .on_click(Message::RemoveTag(tag_clone));
+                            .on_click(Message::RemoveTag(tag_for_remove));
                     });
                 }
                 c.text("");
-                c.text_input()
-                    .value(&tag_input_text)
-                    .state(&tag_input_state)
-                    .placeholder("Add tag...")
-                    .width(Length::Fixed(SIDEBAR_WIDTH - 30.0))
-                    .on_change(Message::TagInputChanged)
-                    .on_submit(|_| Message::AddTag)
-                    .build();
+                c.row(|r| {
+                    r.text_input()
+                        .value(&tag_input_text)
+                        .state(&tag_input_state)
+                        .placeholder("Add tag...")
+                        .width(Length::Fixed(SIDEBAR_WIDTH - 55.0))
+                        .on_change(Message::TagInputChanged)
+                        .on_submit(|_| Message::AddTag)
+                        .build();
+                    r.button("✓")
+                        .width(Length::Fixed(25.0))
+                        .on_click(Message::AddTag);
+                });
                 // Add padding at the bottom so text input isn't cut off when scrolled
                 c.text("");
             });

@@ -274,6 +274,11 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
         self.content.as_ref().map_or(false, |c| c.has_active_overlay())
     }
 
+    fn has_active_drag(&self) -> bool {
+        // Forward to content - needed for widgets like ColorPicker that have internal drag state
+        self.scrollbar_dragging || self.content.as_ref().map_or(false, |c| c.has_active_drag())
+    }
+
     fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
         if !self.state.is_expanded {
             return None;
@@ -520,9 +525,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 if self.state.is_expanded {
                     let content_bounds = self.calc_content_bounds_for_events(bounds);
 
-                    // Forward if within viewport OR if event is for an overlay
+                    // Forward if within viewport, if event is for an overlay, or if content has active drag
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
-                    if in_viewport || *overlay_hint {
+                    let content_has_drag = self.content.as_ref().map_or(false, |c| c.has_active_drag());
+                    if in_viewport || *overlay_hint || content_has_drag {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
                         let scroll_offset = self.scroll_state.offset.1;
@@ -626,7 +632,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                 // Forward to content if expanded
                 let in_viewport = viewport_bounds.contains(position.0, position.1);
-                if self.state.is_expanded && (in_viewport || *overlay_hint) {
+                let content_has_drag = self.content.as_ref().map_or(false, |c| c.has_active_drag());
+                if self.state.is_expanded && (in_viewport || *overlay_hint || content_has_drag) {
                     // Extract values before mutable borrow
                     let needs_scroll = self.needs_scrolling();
                     let scroll_offset = self.scroll_state.offset.1;
@@ -652,22 +659,27 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             }
 
             Event::KeyPress { key, .. } => {
-                // Toggle on Enter/Space when hovering over header
+                log::trace!("Collapsible: KeyPress {:?}, expanded={}", key, self.state.is_expanded);
+                // Forward to content FIRST if expanded (so focused inputs can handle Enter)
+                if self.state.is_expanded {
+                    let content_bounds = self.calc_content_bounds_for_events(bounds);
+                    if let Some(content) = &mut self.content {
+                        if let Some(msg) = content.on_event(event, content_bounds) {
+                            log::trace!("Collapsible: content handled KeyPress");
+                            return Some(msg);
+                        }
+                    }
+                }
+
+                // Toggle on Enter/Space when hovering over header (only if content didn't handle it)
                 if self.hover_header {
                     match key {
                         KeyCode::Enter | KeyCode::Space => {
+                            log::trace!("Collapsible: toggling on Enter/Space (header hover)");
                             self.state.toggle();
                             return self.emit_change();
                         }
                         _ => {}
-                    }
-                }
-
-                // Forward to content if expanded
-                if self.state.is_expanded {
-                    let content_bounds = self.calc_content_bounds_for_events(bounds);
-                    if let Some(content) = &mut self.content {
-                        return content.on_event(event, content_bounds);
                     }
                 }
             }

@@ -62,7 +62,10 @@ impl HvatApp {
 
     /// Build annotation overlays from current annotations and drawing state.
     fn build_overlays(&self) -> Vec<AnnotationOverlay> {
-        let mut overlays: Vec<_> = self
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get(&path);
+
+        let mut overlays: Vec<_> = image_data
             .annotations
             .iter()
             .map(|ann| AnnotationOverlay {
@@ -74,7 +77,7 @@ impl HvatApp {
             .collect();
 
         // Add drawing preview if active
-        if let Some(preview) = self.drawing_preview() {
+        if let Some(preview) = self.drawing_preview(&image_data.drawing_state) {
             let color = self.get_category_color(self.selected_category);
             overlays.push(AnnotationOverlay {
                 shape: preview,
@@ -88,8 +91,8 @@ impl HvatApp {
     }
 
     /// Get preview overlay for current drawing state.
-    fn drawing_preview(&self) -> Option<OverlayShape> {
-        match &self.drawing_state {
+    fn drawing_preview(&self, drawing_state: &DrawingState) -> Option<OverlayShape> {
+        match drawing_state {
             DrawingState::Idle => None,
             DrawingState::BoundingBox { start_x, start_y, current_x, current_y } => {
                 Some(OverlayShape::BoundingBox {

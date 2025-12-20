@@ -44,6 +44,24 @@ pub enum Message {
     CategorySelected(u32),
     /// Add new category
     AddCategory,
+    /// Start editing a category name (by ID)
+    StartEditingCategory(u32),
+    /// Category name input changed
+    CategoryNameChanged(String, TextInputState),
+    /// Finish editing category name (submit)
+    FinishEditingCategory,
+    /// Cancel editing category name
+    CancelEditingCategory,
+    /// Toggle color picker for a category (opens if closed, closes if open)
+    ToggleCategoryColorPicker(u32),
+    /// Close category color picker
+    CloseCategoryColorPicker,
+    /// Live color update from slider (doesn't close picker)
+    CategoryColorLiveUpdate([u8; 3]),
+    /// Apply color from palette selection (closes picker)
+    CategoryColorApply([u8; 3]),
+    /// Color picker state changed (drag state)
+    ColorPickerStateChanged(ColorPickerState),
 
     // Left Sidebar - Image Tags
     /// Tags section toggled
@@ -52,6 +70,8 @@ pub enum Message {
     TagInputChanged(String, TextInputState),
     /// Add tag from input
     AddTag,
+    /// Toggle tag selection (on/off)
+    ToggleTag(String),
     /// Remove tag by value
     RemoveTag(String),
 

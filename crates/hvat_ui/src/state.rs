@@ -562,6 +562,42 @@ impl CollapsibleState {
     }
 }
 
+/// Which RGB slider is being dragged in a color picker
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorPickerDragging {
+    #[default]
+    None,
+    Red,
+    Green,
+    Blue,
+}
+
+/// State for color picker widgets
+///
+/// This type is Copy since it contains only simple types.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ColorPickerState {
+    /// Which slider is currently being dragged
+    pub dragging: ColorPickerDragging,
+}
+
+impl ColorPickerState {
+    /// Check if any slider is being dragged
+    pub fn is_dragging(&self) -> bool {
+        self.dragging != ColorPickerDragging::None
+    }
+
+    /// Start dragging a slider
+    pub fn start_drag(&mut self, slider: ColorPickerDragging) {
+        self.dragging = slider;
+    }
+
+    /// Stop dragging
+    pub fn stop_drag(&mut self) {
+        self.dragging = ColorPickerDragging::None;
+    }
+}
+
 /// State for text input fields
 ///
 /// Note: Undo/redo is handled externally via `UndoStack<T>`. Use the `on_undo_point`

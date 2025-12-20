@@ -647,10 +647,15 @@ fn handle_window_event<A: Application>(
 
             // On press, first send a global event to allow focused widgets to blur
             if btn_state == ElementState::Pressed {
-                state.handle_event(Event::GlobalMousePress {
+                let handled = state.handle_event(Event::GlobalMousePress {
                     button,
                     position: state.cursor_position,
                 });
+                // If GlobalMousePress was handled (e.g., closing an overlay), clear the
+                // overlay registry so subsequent MousePress doesn't get stale overlay_hint
+                if handled {
+                    state.renderer.clear_overlay_registry();
+                }
             }
 
             let event = if btn_state == ElementState::Pressed {
