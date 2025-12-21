@@ -15,6 +15,9 @@ use crate::model::AnnotationTool;
 impl HvatApp {
     /// Build the left sidebar with tools, categories, and tags.
     pub(crate) fn build_left_sidebar(&self) -> Element<Message> {
+        // TODO(perf): These clones happen on every view rebuild. Consider using Rc<RefCell<>>
+        // for widget states and Vec types to avoid cloning cost. The `categories` clone is
+        // particularly expensive as it clones the entire category list.
         let tools_state = self.tools_collapsed.clone();
         let categories_state = self.categories_collapsed.clone();
         let tags_state = self.tags_collapsed.clone();
@@ -44,7 +47,7 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::ToolsToggled)
             .content(|c| {
-                c.text(format!("Current: {}", selected_tool.name())).size(11.0);
+                c.text(format!("Current: {}", selected_tool.name())).size(FONT_SIZE_SECONDARY);
                 c.text("");
                 for tool in AnnotationTool::all() {
                     let is_selected = *tool == selected_tool;

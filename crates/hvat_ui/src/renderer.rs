@@ -1,10 +1,10 @@
 //! Renderer for drawing UI elements using hvat_gpu
 
 use crate::constants::{
-    RENDERER_CLIP_STACK_CAPACITY, RENDERER_COLOR_INDEX_CAPACITY, RENDERER_COLOR_VERTEX_CAPACITY,
-    RENDERER_OVERLAY_INDEX_CAPACITY, RENDERER_OVERLAY_TEXT_REQUEST_CAPACITY,
-    RENDERER_OVERLAY_VERTEX_CAPACITY, RENDERER_TEXT_CACHE_CAPACITY, RENDERER_TEXT_REQUEST_CAPACITY,
-    RENDERER_TEXTURE_REQUEST_CAPACITY,
+    LINE_HEIGHT_FACTOR, RENDERER_CLIP_STACK_CAPACITY, RENDERER_COLOR_INDEX_CAPACITY,
+    RENDERER_COLOR_VERTEX_CAPACITY, RENDERER_OVERLAY_INDEX_CAPACITY,
+    RENDERER_OVERLAY_TEXT_REQUEST_CAPACITY, RENDERER_OVERLAY_VERTEX_CAPACITY,
+    RENDERER_TEXT_CACHE_CAPACITY, RENDERER_TEXT_REQUEST_CAPACITY, RENDERER_TEXTURE_REQUEST_CAPACITY,
 };
 use crate::layout::Bounds;
 use crate::overlay::OverlayRegistry;
@@ -599,7 +599,7 @@ impl Renderer {
         // Create a temporary buffer to measure
         let mut buffer = glyphon::Buffer::new(
             &mut self.font_system,
-            Metrics::new(size, size * 1.2),
+            Metrics::new(size, size * LINE_HEIGHT_FACTOR),
         );
 
         // Set a large width so text doesn't wrap
@@ -638,7 +638,7 @@ impl Renderer {
         // Create a temporary buffer to measure
         let mut buffer = glyphon::Buffer::new(
             &mut self.font_system,
-            Metrics::new(size, size * 1.2),
+            Metrics::new(size, size * LINE_HEIGHT_FACTOR),
         );
 
         // Set the width constraint for wrapping
@@ -666,7 +666,7 @@ impl Renderer {
 
         // If no lines, use single line height
         let line_count = line_count.max(1);
-        let height = line_count as f32 * size * 1.2;
+        let height = line_count as f32 * size * LINE_HEIGHT_FACTOR;
 
         (actual_width, height)
     }
@@ -1067,7 +1067,7 @@ impl Renderer {
             if !self.text_buffer_cache.contains_key(&key) {
                 let mut buffer = Buffer::new(
                     &mut self.font_system,
-                    Metrics::new(request.size, request.size * 1.2),
+                    Metrics::new(request.size, request.size * LINE_HEIGHT_FACTOR),
                 );
 
                 // Set size based on whether wrapping is enabled

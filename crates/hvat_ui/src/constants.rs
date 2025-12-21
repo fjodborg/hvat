@@ -9,11 +9,32 @@ use crate::layout::Padding;
 // Typography
 // =============================================================================
 
-/// Default font size used across most widgets
-pub const DEFAULT_FONT_SIZE: f32 = 14.0;
+/// Title font size (dialog/panel headers)
+pub const FONT_SIZE_TITLE: f32 = 18.0;
+
+/// Section header font size
+pub const FONT_SIZE_SECTION: f32 = 16.0;
+
+/// Subsection/control header font size
+pub const FONT_SIZE_SUBSECTION: f32 = 14.0;
+
+/// Default font size used across most widgets (same as subsection)
+pub const DEFAULT_FONT_SIZE: f32 = FONT_SIZE_SUBSECTION;
+
+/// Body text and label font size
+pub const FONT_SIZE_BODY: f32 = 12.0;
 
 /// Smaller font size for secondary text (e.g., slider input)
-pub const SMALL_FONT_SIZE: f32 = 12.0;
+pub const SMALL_FONT_SIZE: f32 = FONT_SIZE_BODY;
+
+/// Secondary/info text font size
+pub const FONT_SIZE_SECONDARY: f32 = 11.0;
+
+/// Small text font size (shortcuts, hints)
+pub const FONT_SIZE_SMALL: f32 = 10.0;
+
+/// Very small text font size (captions, fine print)
+pub const FONT_SIZE_TINY: f32 = 9.0;
 
 /// Approximate character width as a ratio of font size
 /// Used for text measurement approximation

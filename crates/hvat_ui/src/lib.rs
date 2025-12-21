@@ -49,6 +49,10 @@ pub use hvat_gpu::{ClearColor, GpuContext, ImageAdjustments, Texture, TransformU
 pub mod prelude {
     pub use crate::application::{Application, Resources, Settings};
     pub use crate::callback::{Callback, Callback0, SideEffect};
+    pub use crate::constants::{
+        FONT_SIZE_BODY, FONT_SIZE_SECONDARY, FONT_SIZE_SECTION, FONT_SIZE_SMALL,
+        FONT_SIZE_SUBSECTION, FONT_SIZE_TINY, FONT_SIZE_TITLE,
+    };
     pub use crate::context::Context;
     pub use crate::element::Element;
     pub use crate::event::{Event, KeyCode, KeyModifiers, MouseButton};

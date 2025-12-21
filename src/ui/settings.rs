@@ -53,7 +53,7 @@ impl HvatApp {
             r.button("< Back")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::CloseSettings);
-            r.text("Settings").size(18.0);
+            r.text("Settings").size(FONT_SIZE_TITLE);
         });
 
         ctx.text("");
@@ -76,7 +76,7 @@ impl HvatApp {
                                 .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::ThemeChanged(!dark_theme));
                         });
-                        ac.text("(Theme switching not yet implemented)").size(10.0);
+                        ac.text("(Theme switching not yet implemented)").size(FONT_SIZE_SMALL);
                     });
                 c.add(Element::new(appearance_collapsible));
 
@@ -133,7 +133,7 @@ impl HvatApp {
         // ========================================
         // About Section
         // ========================================
-        ctx.text("About").size(16.0).align(Alignment::Center);
+        ctx.text("About").size(FONT_SIZE_SECTION).align(Alignment::Center);
         ctx.text("");
         ctx.text(APP_NAME).align(Alignment::Center);
         ctx.text(format!("Version: {}", APP_VERSION)).align(Alignment::Center);
@@ -186,7 +186,7 @@ impl HvatApp {
                         for dep in deps {
                             let repo = dep.repository.unwrap_or("crates.io");
                             lc.text(format!("{} v{}", dep.name, dep.version));
-                            lc.text(format!("  {}", repo)).size(10.0);
+                            lc.text(format!("  {}", repo)).size(FONT_SIZE_SMALL);
                         }
                     });
 

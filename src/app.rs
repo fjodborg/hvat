@@ -19,7 +19,10 @@ use hvat_gpu::{BandSelectionUniform, ImageAdjustments};
 use hvat_ui::prelude::*;
 use hvat_ui::{Application, Column, Element, Event, KeyCode, Resources, Row};
 
-use crate::constants::{DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH};
+use crate::constants::{
+    DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_HUE, DEFAULT_RED_BAND,
+    DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH, UNDO_HISTORY_SIZE,
+};
 use crate::data::HyperspectralData;
 use crate::message::Message;
 use crate::model::{
@@ -216,7 +219,7 @@ impl HvatApp {
             gamma_slider: SliderState::new(1.0),
             hue_slider: SliderState::new(0.0),
 
-            undo_stack: Rc::new(RefCell::new(UndoStack::new(50))),
+            undo_stack: Rc::new(RefCell::new(UndoStack::new(UNDO_HISTORY_SIZE))),
 
             window_height: 900.0,
 
@@ -271,6 +274,36 @@ impl HvatApp {
             .as_ref()
             .and_then(|p| p.current_image().cloned())
             .unwrap_or_else(|| PathBuf::from("__test_image__"))
+    }
+
+    /// Reset adjustment sliders to default values.
+    fn reset_adjustment_sliders(&mut self) {
+        self.brightness_slider.set_value(DEFAULT_BRIGHTNESS);
+        self.contrast_slider.set_value(DEFAULT_CONTRAST);
+        self.gamma_slider.set_value(DEFAULT_GAMMA);
+        self.hue_slider.set_value(DEFAULT_HUE);
+    }
+
+    /// Reset band sliders to default values, clamped to available bands.
+    fn reset_band_sliders(&mut self) {
+        let max_band = (self.num_bands - 1) as f32;
+        let green_band = ((DEFAULT_RED_BAND + 1) as f32).min(max_band);
+        let blue_band = ((DEFAULT_RED_BAND + 2) as f32).min(max_band);
+
+        self.red_band_slider.set_value(DEFAULT_RED_BAND as f32);
+        self.green_band_slider.set_value(green_band);
+        self.blue_band_slider.set_value(blue_band);
+
+        self.band_selection = (
+            DEFAULT_RED_BAND,
+            green_band as usize,
+            blue_band as usize,
+        );
+    }
+
+    /// Find a category by ID and return a mutable reference.
+    fn find_category_mut(&mut self, id: u32) -> Option<&mut Category> {
+        self.categories.iter_mut().find(|c| c.id == id)
     }
 
     /// Handle keyboard events for undo/redo and annotation shortcuts.
@@ -405,17 +438,8 @@ impl HvatApp {
         match hyper_result {
             Ok(hyper) => {
                 self.num_bands = hyper.bands.len();
-                self.band_selection = (0, 1.min(self.num_bands - 1), 2.min(self.num_bands - 1));
-
-                let max_band = (self.num_bands - 1) as f32;
-                self.red_band_slider.set_value(0.0);
-                self.green_band_slider.set_value(1.0_f32.min(max_band));
-                self.blue_band_slider.set_value(2.0_f32.min(max_band));
-
-                self.brightness_slider.set_value(0.0);
-                self.contrast_slider.set_value(1.0);
-                self.gamma_slider.set_value(1.0);
-                self.hue_slider.set_value(0.0);
+                self.reset_band_sliders();
+                self.reset_adjustment_sliders();
 
                 self.texture_id = None;
                 self.hyperspectral = Some(hyper);
@@ -979,10 +1003,7 @@ impl Application for HvatApp {
                 self.needs_gpu_render = true;
             }
             Message::ResetAdjustments => {
-                self.brightness_slider.set_value(0.0);
-                self.contrast_slider.set_value(1.0);
-                self.gamma_slider.set_value(1.0);
-                self.hue_slider.set_value(0.0);
+                self.reset_adjustment_sliders();
                 self.needs_gpu_render = true;
                 log::info!("Adjustments reset");
             }

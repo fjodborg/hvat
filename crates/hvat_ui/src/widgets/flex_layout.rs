@@ -136,10 +136,7 @@ impl<M: 'static> Widget<M> for FlexLayout<M> {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        match self.direction {
-            FlexDirection::Horizontal => self.layout_horizontal(available),
-            FlexDirection::Vertical => self.layout_vertical(available),
-        }
+        self.layout_flex(available)
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
@@ -163,233 +160,169 @@ impl<M: 'static> Widget<M> for FlexLayout<M> {
 }
 
 impl<M: 'static> FlexLayout<M> {
-    /// Layout children horizontally (Row behavior)
-    fn layout_horizontal(&mut self, available: Size) -> Size {
-        log::debug!("Row layout: available={:?}", available);
+    /// Unified layout implementation for both horizontal (Row) and vertical (Column) layouts.
+    ///
+    /// This method abstracts the axis-specific logic using closures to extract/set the
+    /// main-axis and cross-axis dimensions, eliminating code duplication between Row and Column.
+    fn layout_flex(&mut self, available: Size) -> Size {
+        let is_horizontal = self.direction == FlexDirection::Horizontal;
+        let direction_name = if is_horizontal { "Row" } else { "Column" };
+
+        log::debug!("{} layout: available={:?}", direction_name, available);
 
         let inner_available = self.inner_available(available);
 
+        // Axis accessor functions - main axis is the layout direction, cross axis is perpendicular
+        let main_axis = |size: Size| -> f32 {
+            if is_horizontal { size.width } else { size.height }
+        };
+        let cross_axis = |size: Size| -> f32 {
+            if is_horizontal { size.height } else { size.width }
+        };
+        let make_size = |main: f32, cross: f32| -> Size {
+            if is_horizontal {
+                Size::new(main, cross)
+            } else {
+                Size::new(cross, main)
+            }
+        };
+
+        let inner_main = main_axis(inner_available);
+        let inner_cross = cross_axis(inner_available);
+
         // First pass: layout children with full available size and detect fill children
-        let mut total_fixed_width = 0.0;
+        let mut total_fixed = 0.0;
         let mut total_fill_weight = 0.0;
-        let mut max_height: f32 = 0.0;
-        let mut child_widths: Vec<f32> = Vec::with_capacity(self.children.len());
-        let mut fill_indices: Vec<usize> = Vec::new();
+        let mut max_cross: f32 = 0.0;
+        let mut child_mains: Vec<f32> = Vec::with_capacity(self.children.len());
+        let mut fill_indices: Vec<usize> = Vec::with_capacity(self.children.len() / 2);
 
         for (i, child) in self.children.iter_mut().enumerate() {
-            let child_size = child.layout(Size::new(inner_available.width, inner_available.height));
+            let child_size = child.layout(inner_available);
+            let child_main = main_axis(child_size);
+            let child_cross = cross_axis(child_size);
 
-            // A child is considered "fill" if it returns the full available width
-            let is_fill = child_size.width >= inner_available.width - FILL_DETECTION_TOLERANCE;
+            // A child is considered "fill" if it returns the full available main-axis size
+            let is_fill = child_main >= inner_main - FILL_DETECTION_TOLERANCE;
 
             if is_fill {
                 fill_indices.push(i);
                 total_fill_weight += 1.0;
-                child_widths.push(0.0);
-                max_height = max_height.max(child_size.height);
-                log::debug!("  Row child {} is FILL: size={:?}", i, child_size);
+                child_mains.push(0.0);
+                max_cross = max_cross.max(child_cross);
+                log::debug!("  {} child {} is FILL: size={:?}", direction_name, i, child_size);
             } else {
-                total_fixed_width += child_size.width;
-                child_widths.push(child_size.width);
-                max_height = max_height.max(child_size.height);
-                log::debug!("  Row child {} is FIXED: width={}", i, child_size.width);
+                total_fixed += child_main;
+                child_mains.push(child_main);
+                max_cross = max_cross.max(child_cross);
+                log::debug!("  {} child {} is FIXED: main={}", direction_name, i, child_main);
             }
         }
 
-        // Add spacing for non-zero width children only
-        let non_zero_count = child_widths.iter().filter(|&&w| w > 0.0).count();
+        // Add spacing for non-zero main-axis children only
+        let non_zero_count = child_mains.iter().filter(|&&m| m > 0.0).count();
         if non_zero_count > 1 {
-            total_fixed_width += self.spacing * (non_zero_count - 1) as f32;
+            total_fixed += self.spacing * (non_zero_count - 1) as f32;
         }
 
         // Calculate fill space and distribute to fill children
-        let remaining_width = (inner_available.width - total_fixed_width).max(0.0);
-        let fill_width_per_unit = if total_fill_weight > 0.0 {
-            remaining_width / total_fill_weight
+        let remaining = (inner_main - total_fixed).max(0.0);
+        let fill_per_unit = if total_fill_weight > 0.0 {
+            remaining / total_fill_weight
         } else {
             0.0
         };
 
-        // Update fill children widths and re-layout all children with final dimensions
-        // We need to re-layout all children because the available height may have changed
-        // (e.g., when a parent Column distributes remaining space to Fill children)
-        for (idx, child) in self.children.iter_mut().enumerate() {
-            let child_width = if fill_indices.contains(&idx) {
-                child_widths[idx] = fill_width_per_unit;
-                fill_width_per_unit
-            } else {
-                child_widths[idx]
-            };
+        // Second pass: re-layout fill children with allocated main-axis size
+        for &idx in &fill_indices {
+            child_mains[idx] = fill_per_unit;
+            let child_size = self.children[idx].layout(make_size(fill_per_unit, inner_cross));
+            max_cross = max_cross.max(cross_axis(child_size));
+            log::debug!(
+                "  {} child {} FILL allocated: main={}, got={:?}",
+                direction_name,
+                idx,
+                fill_per_unit,
+                child_size
+            );
+        }
 
-            let child_size = child.layout(Size::new(child_width, inner_available.height));
-            max_height = max_height.max(child_size.height);
-
-            if fill_indices.contains(&idx) {
-                log::debug!(
-                    "  Row child {} FILL allocated: width={}, got={:?}",
-                    idx,
-                    child_width,
-                    child_size
-                );
+        // For horizontal layout, we may need to re-layout non-fill children too
+        // since the cross-axis (height) may have changed
+        if is_horizontal {
+            for (idx, child) in self.children.iter_mut().enumerate() {
+                if !fill_indices.contains(&idx) {
+                    let child_size = child.layout(make_size(child_mains[idx], inner_cross));
+                    max_cross = max_cross.max(cross_axis(child_size));
+                }
             }
         }
 
         // Third pass: calculate actual positions
         self.child_bounds.clear();
-        let mut x = self.padding.left;
-        let mut had_visible_child = false;
-
-        for (i, child) in self.children.iter().enumerate() {
-            let child_width = child_widths[i];
-            let child_height = child.cached_size().height;
-            // Don't apply cross-alignment offset to zero-sized children (overlays)
-            // They handle their own positioning and should use the row's top edge as reference
-            let y_offset = if child_width > 0.0 || child_height > 0.0 {
-                self.cross_align.align(max_height, child_height)
-            } else {
-                0.0
-            };
-
-            // Add spacing before this child if there was a previous visible child
-            if child_width > 0.0 && had_visible_child {
-                x += self.spacing;
-            }
-
-            let bounds = Bounds::new(x, self.padding.top + y_offset, child_width, child_height);
-            log::debug!("  Row child {} final bounds: {:?}", i, bounds);
-            self.child_bounds.push(bounds);
-
-            // Only advance x for non-zero width children
-            if child_width > 0.0 {
-                x += child_width;
-                had_visible_child = true;
-            }
-        }
-
-        // Calculate content dimensions (without padding - padding added in resolve)
-        // x currently points past the last visible child
-        let children_width = x - self.padding.left;
-
-        // Resolve final size, adding padding to content dimensions
-        Size::new(
-            self.width
-                .resolve(available.width, children_width + self.padding.horizontal()),
-            self.height
-                .resolve(available.height, max_height + self.padding.vertical()),
-        )
-    }
-
-    /// Layout children vertically (Column behavior)
-    fn layout_vertical(&mut self, available: Size) -> Size {
-        log::debug!("Column layout: available={:?}", available);
-
-        let inner_available = self.inner_available(available);
-
-        // First pass: layout children to determine fixed vs fill heights
-        let mut total_fixed_height = 0.0;
-        let mut total_fill_weight = 0.0;
-        let mut max_width: f32 = 0.0;
-        let mut child_heights: Vec<f32> = Vec::with_capacity(self.children.len());
-        let mut fill_indices: Vec<usize> = Vec::new();
-
-        for (i, child) in self.children.iter_mut().enumerate() {
-            let child_size = child.layout(Size::new(inner_available.width, inner_available.height));
-
-            // A child is considered "fill" if it returns the full available height
-            let is_fill = child_size.height >= inner_available.height - FILL_DETECTION_TOLERANCE;
-
-            if is_fill {
-                fill_indices.push(i);
-                total_fill_weight += 1.0;
-                child_heights.push(0.0);
-                max_width = max_width.max(child_size.width);
-                log::debug!("  Column child {} is FILL: size={:?}", i, child_size);
-            } else {
-                total_fixed_height += child_size.height;
-                child_heights.push(child_size.height);
-                max_width = max_width.max(child_size.width);
-                log::debug!("  Column child {} is FIXED: height={}", i, child_size.height);
-            }
-        }
-
-        // Add spacing for non-zero height children only
-        let non_zero_count = child_heights.iter().filter(|&&h| h > 0.0).count();
-        if non_zero_count > 1 {
-            total_fixed_height += self.spacing * (non_zero_count - 1) as f32;
-        }
-
-        // Calculate fill space and distribute to fill children
-        let remaining_height = (inner_available.height - total_fixed_height).max(0.0);
-        let fill_height_per_unit = if total_fill_weight > 0.0 {
-            remaining_height / total_fill_weight
+        let (start_main, start_cross) = if is_horizontal {
+            (self.padding.left, self.padding.top)
         } else {
-            0.0
+            (self.padding.top, self.padding.left)
         };
 
-        // Update fill children heights with their proper allocation
-        for &idx in &fill_indices {
-            let fill_height = fill_height_per_unit;
-            child_heights[idx] = fill_height;
-
-            let child_size =
-                self.children[idx].layout(Size::new(inner_available.width, fill_height));
-            max_width = max_width.max(child_size.width);
-            log::debug!(
-                "  Column child {} FILL allocated: height={}, got={:?}",
-                idx,
-                fill_height,
-                child_size
-            );
-        }
-
-        // Second pass: calculate actual positions
-        self.child_bounds.clear();
-        let mut y = self.padding.top;
+        let mut pos = start_main;
         let mut had_visible_child = false;
 
         for (i, child) in self.children.iter().enumerate() {
-            let child_height = child_heights[i];
-            let child_width = child.cached_size().width;
+            let child_main = child_mains[i];
+            let cached = child.cached_size();
+            let child_cross = cross_axis(cached);
+
             // Don't apply cross-alignment offset to zero-sized children (overlays)
-            // They handle their own positioning and should use the column's left edge as reference
-            let x_offset = if child_width > 0.0 || child_height > 0.0 {
-                self.cross_align.align(max_width, child_width)
+            // They handle their own positioning
+            let is_overlay = child_main == 0.0 && child_cross == 0.0;
+            let cross_offset = if !is_overlay {
+                self.cross_align.align(max_cross, child_cross)
             } else {
                 0.0
             };
 
             // Add spacing before this child if there was a previous visible child
-            if child_height > 0.0 && had_visible_child {
-                y += self.spacing;
+            if child_main > 0.0 && had_visible_child {
+                pos += self.spacing;
             }
 
-            let bounds = Bounds::new(
-                self.padding.left + x_offset,
-                y,
-                child_width,
-                child_height,
-            );
-            log::debug!("  Column child {} bounds: {:?}", i, bounds);
+            let bounds = if is_horizontal {
+                Bounds::new(pos, start_cross + cross_offset, child_main, child_cross)
+            } else {
+                Bounds::new(start_cross + cross_offset, pos, child_cross, child_main)
+            };
+
+            log::debug!("  {} child {} final bounds: {:?}", direction_name, i, bounds);
             self.child_bounds.push(bounds);
 
-            // Only advance y for non-zero height children
-            if child_height > 0.0 {
-                y += child_height;
+            // Only advance position for non-zero main-axis children
+            if child_main > 0.0 {
+                pos += child_main;
                 had_visible_child = true;
             }
-            // Zero-height children don't advance y or add spacing
         }
 
-        // Calculate content dimensions (without padding - padding added in resolve)
-        // y currently points past the last visible child
-        let children_height = y - self.padding.top;
+        // Calculate content dimensions
+        let content_main = pos - start_main;
 
         // Resolve final size, adding padding to content dimensions
+        let (content_width, content_height) = if is_horizontal {
+            (
+                content_main + self.padding.horizontal(),
+                max_cross + self.padding.vertical(),
+            )
+        } else {
+            (
+                max_cross + self.padding.horizontal(),
+                content_main + self.padding.vertical(),
+            )
+        };
+
         Size::new(
-            self.width
-                .resolve(available.width, max_width + self.padding.horizontal()),
-            self.height
-                .resolve(available.height, children_height + self.padding.vertical()),
+            self.width.resolve(available.width, content_width),
+            self.height.resolve(available.height, content_height),
         )
     }
 }

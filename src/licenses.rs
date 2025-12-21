@@ -17,19 +17,19 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
     DependencyInfo {
         name: "hvat",
         version: "0.1.0",
-        license: "GNU Affero General Public License v3.0 or later",
+        license: "GNU Affero General Public License v3.0",
         repository: None,
     },
     DependencyInfo {
         name: "hvat_gpu",
         version: "0.1.0",
-        license: "GNU Affero General Public License v3.0 or later",
+        license: "GNU Affero General Public License v3.0",
         repository: None,
     },
     DependencyInfo {
         name: "hvat_ui",
         version: "0.1.0",
-        license: "GNU Affero General Public License v3.0 or later",
+        license: "GNU Affero General Public License v3.0",
         repository: None,
     },
     DependencyInfo {

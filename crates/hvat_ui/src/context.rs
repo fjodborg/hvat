@@ -138,6 +138,7 @@ impl<M: 'static> Default for Context<M> {
 /// ctx.text("Centered").align(Alignment::Center);  // Fluent API
 /// ctx.text("Custom").size(18.0).align(Alignment::Center);
 /// ```
+// Note: TextDisplayBuilder uses Drop to automatically add text, so #[must_use] is not appropriate
 pub struct TextDisplayBuilder<'a, M: 'static> {
     ctx: &'a mut Context<M>,
     text: Option<Text>,

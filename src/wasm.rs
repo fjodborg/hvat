@@ -2,8 +2,8 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::HvatApp;
-use hvat_ui::{run_with_settings, ClearColor, Settings};
+use crate::{default_settings, HvatApp};
+use hvat_ui::run_with_settings;
 
 #[wasm_bindgen(start)]
 pub fn start() {
@@ -15,15 +15,9 @@ pub fn start() {
 }
 
 async fn run_app() {
-    let settings = Settings::new()
-        .title("HVAT - Hyperspectral Vision Annotation Tool")
-        .size(1400, 900)
-        .background(ClearColor::rgb(0.12, 0.12, 0.15))
-        .target_fps(60);
-
     log::info!("HVAT WASM starting...");
 
-    if let Err(e) = run_with_settings(HvatApp::new(), settings) {
+    if let Err(e) = run_with_settings(HvatApp::new(), default_settings()) {
         log::error!("Application error: {}", e);
     }
 }

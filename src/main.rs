@@ -3,19 +3,13 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    use hvat::HvatApp;
-    use hvat_ui::{run_with_settings, ClearColor, Settings};
+    use hvat::{default_settings, HvatApp};
+    use hvat_ui::run_with_settings;
 
     // Note: env_logger is initialized by hvat_ui internally
     log::info!("HVAT starting...");
 
-    let settings = Settings::new()
-        .title("HVAT - Hyperspectral Vision Annotation Tool")
-        .size(1400, 900)
-        .background(ClearColor::rgb(0.12, 0.12, 0.15))
-        .target_fps(60);
-
-    if let Err(e) = run_with_settings(HvatApp::new(), settings) {
+    if let Err(e) = run_with_settings(HvatApp::new(), default_settings()) {
         log::error!("Application error: {}", e);
     }
 }
