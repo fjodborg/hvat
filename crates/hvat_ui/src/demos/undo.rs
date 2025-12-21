@@ -138,7 +138,7 @@ impl UndoDemo {
 
         col(move |c| {
             c.text("Undo/Redo Demo (Global)");
-            c.text_sized("Demonstrates global undo/redo with keyboard shortcuts", 12.0);
+            c.text("Demonstrates global undo/redo with keyboard shortcuts").size(12.0);
             c.text("");
 
             // Counter section
@@ -214,17 +214,17 @@ impl UndoDemo {
             c.text("");
 
             // Instructions
-            c.text_sized("How it works:", 14.0);
-            c.text_sized("• Global undo tracks entire demo state (counter + slider + text)", 11.0);
-            c.text_sized("• Counter changes are recorded immediately", 11.0);
-            c.text_sized("• Slider snapshots are saved when drag/input starts", 11.0);
-            c.text_sized("• Text snapshots are saved when input gains focus", 11.0);
-            c.text_sized("• Undo/Redo restores the full state snapshot", 11.0);
+            c.text("How it works:").size(14.0);
+            c.text("• Global undo tracks entire demo state (counter + slider + text)").size(11.0);
+            c.text("• Counter changes are recorded immediately").size(11.0);
+            c.text("• Slider snapshots are saved when drag/input starts").size(11.0);
+            c.text("• Text snapshots are saved when input gains focus").size(11.0);
+            c.text("• Undo/Redo restores the full state snapshot").size(11.0);
             c.text("");
-            c.text_sized("Keyboard shortcuts:", 14.0);
-            c.text_sized("• Ctrl+Z = Undo", 11.0);
-            c.text_sized("• Ctrl+Y = Redo (Windows style)", 11.0);
-            c.text_sized("• Ctrl+Shift+Z = Redo (Mac style)", 11.0);
+            c.text("Keyboard shortcuts:").size(14.0);
+            c.text("• Ctrl+Z = Undo").size(11.0);
+            c.text("• Ctrl+Y = Redo (Windows style)").size(11.0);
+            c.text("• Ctrl+Shift+Z = Redo (Mac style)").size(11.0);
         })
     }
 

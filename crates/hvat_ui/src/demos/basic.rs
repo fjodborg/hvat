@@ -24,7 +24,7 @@ impl BasicDemo {
         let click_count = self.click_count;
         col(move |c| {
             c.text("Basic Demo");
-            c.text_sized("A simple button counter example", 12.0);
+            c.text("A simple button counter example").size(12.0);
 
             let msg = wrap(BasicMessage::Clicked);
             c.row(|r| {

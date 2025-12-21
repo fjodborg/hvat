@@ -1,4 +1,4 @@
-//! HVAT - Hyperspectral Annotation Tool
+//! HVAT - Hyperspectral Vision Annotation Tool
 //! Native entry point
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -10,7 +10,7 @@ fn main() {
     log::info!("HVAT starting...");
 
     let settings = Settings::new()
-        .title("HVAT - Hyperspectral Annotation Tool")
+        .title("HVAT - Hyperspectral Vision Annotation Tool")
         .size(1400, 900)
         .background(ClearColor::rgb(0.12, 0.12, 0.15))
         .target_fps(60);

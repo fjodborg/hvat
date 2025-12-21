@@ -24,6 +24,26 @@ pub enum Message {
     Redo,
     /// Toggle settings panel
     ToggleSettings,
+    /// Close settings and return to main view
+    CloseSettings,
+    /// Settings view scrolled
+    SettingsScrolled(ScrollState),
+    /// Dependencies section toggled in settings
+    DependenciesToggled(CollapsibleState),
+    /// Individual license section toggled (license name, new state)
+    LicenseToggled(String, CollapsibleState),
+    /// Settings section toggled (collapsible)
+    SettingsSectionToggled(CollapsibleState),
+    /// Appearance section toggled
+    AppearanceSectionToggled(CollapsibleState),
+    /// Keybindings section toggled
+    KeybindingsSectionToggled(CollapsibleState),
+    /// Theme changed (true = dark, false = light)
+    ThemeChanged(bool),
+    /// Export folder path changed
+    ExportFolderChanged(String, TextInputState),
+    /// Import folder path changed
+    ImportFolderChanged(String, TextInputState),
     /// Folder was selected and images discovered
     FolderLoaded(ProjectState),
 

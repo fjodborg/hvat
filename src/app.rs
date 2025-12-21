@@ -1,4 +1,4 @@
-//! HVAT Application - Hyperspectral Annotation Tool
+//! HVAT Application - Hyperspectral Vision Annotation Tool
 //!
 //! Main application implementing the three-column layout with:
 //! - Left sidebar: Tools, Categories, Image Tags
@@ -130,6 +130,26 @@ pub struct HvatApp {
 
     // Flag to trigger GPU re-render (band/adjustment change)
     needs_gpu_render: bool,
+
+    // Settings view
+    pub(crate) settings_open: bool,
+    pub(crate) settings_scroll_state: ScrollState,
+    pub(crate) settings_section_collapsed: CollapsibleState,
+    pub(crate) appearance_section_collapsed: CollapsibleState,
+    pub(crate) keybindings_section_collapsed: CollapsibleState,
+    pub(crate) dependencies_collapsed: CollapsibleState,
+    /// Collapsed state for each license type in the dependencies view
+    pub(crate) license_collapsed: std::collections::HashMap<String, CollapsibleState>,
+
+    // User preferences
+    /// Dark theme enabled (true = dark, false = light)
+    pub(crate) dark_theme: bool,
+    /// Default export folder path
+    pub(crate) export_folder: String,
+    pub(crate) export_folder_state: TextInputState,
+    /// Default import folder path
+    pub(crate) import_folder: String,
+    pub(crate) import_folder_state: TextInputState,
 }
 
 impl Default for HvatApp {
@@ -201,6 +221,20 @@ impl HvatApp {
             window_height: 900.0,
 
             needs_gpu_render: true,
+
+            settings_open: false,
+            settings_scroll_state: ScrollState::default(),
+            settings_section_collapsed: CollapsibleState::expanded(),
+            appearance_section_collapsed: CollapsibleState::expanded(),
+            keybindings_section_collapsed: CollapsibleState::collapsed(),
+            dependencies_collapsed: CollapsibleState::collapsed(),
+            license_collapsed: std::collections::HashMap::new(),
+
+            dark_theme: true, // Default to dark theme
+            export_folder: String::new(),
+            export_folder_state: TextInputState::default(),
+            import_folder: String::new(),
+            import_folder_state: TextInputState::default(),
         }
     }
 
@@ -625,6 +659,12 @@ impl Application for HvatApp {
     }
 
     fn view(&self) -> Element<Self::Message> {
+        // Show settings view when settings_open is true
+        if self.settings_open {
+            return self.build_settings_view();
+        }
+
+        // Main application view
         let topbar = self.build_topbar();
         let left_sidebar = self.build_left_sidebar();
         let center_viewer = self.build_image_viewer();
@@ -710,7 +750,42 @@ impl Application for HvatApp {
                 }
             }
             Message::ToggleSettings => {
-                log::info!("Settings toggle requested");
+                self.settings_open = !self.settings_open;
+                log::info!("Settings toggled: {}", self.settings_open);
+            }
+            Message::CloseSettings => {
+                self.settings_open = false;
+                log::info!("Settings closed");
+            }
+            Message::SettingsScrolled(state) => {
+                self.settings_scroll_state = state;
+            }
+            Message::DependenciesToggled(state) => {
+                self.dependencies_collapsed = state;
+            }
+            Message::LicenseToggled(license, state) => {
+                self.license_collapsed.insert(license, state);
+            }
+            Message::SettingsSectionToggled(state) => {
+                self.settings_section_collapsed = state;
+            }
+            Message::AppearanceSectionToggled(state) => {
+                self.appearance_section_collapsed = state;
+            }
+            Message::KeybindingsSectionToggled(state) => {
+                self.keybindings_section_collapsed = state;
+            }
+            Message::ThemeChanged(dark) => {
+                self.dark_theme = dark;
+                log::info!("Theme changed to: {}", if dark { "dark" } else { "light" });
+            }
+            Message::ExportFolderChanged(text, state) => {
+                self.export_folder = text;
+                self.export_folder_state = state;
+            }
+            Message::ImportFolderChanged(text, state) => {
+                self.import_folder = text;
+                self.import_folder_state = state;
             }
 
             // Image Viewer

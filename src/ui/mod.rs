@@ -6,6 +6,7 @@
 mod image_viewer;
 mod left_sidebar;
 mod right_sidebar;
+mod settings;
 mod topbar;
 
 // Re-export nothing - the impl blocks extend HvatApp directly

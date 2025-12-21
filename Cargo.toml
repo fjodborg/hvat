@@ -6,6 +6,7 @@ resolver = "2"
 name = "hvat"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0"
 authors = ["fjodborg <github.com/fjodborg>"]
 include = ["LICENSE", "**/*.rs", "Cargo.toml"]
 
@@ -41,6 +42,9 @@ web-sys = { version = "0.3", features = [
     "Url",
     "Event",
     "EventTarget",
+    "Element",
+    "HtmlElement",
+    "ProgressEvent",
 ] }
 winit = "0.29"
 wgpu = "27"
@@ -51,6 +55,9 @@ env_logger = "0.11"
 winit = "0.29"
 wgpu = "27"
 rfd = "0.15"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.rfd]
+version = "0.15"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

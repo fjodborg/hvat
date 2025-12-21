@@ -81,7 +81,7 @@ impl InputWidgetsDemo {
 
         col(move |c| {
             c.text("Input Widgets Demo");
-            c.text_sized("Demonstrates slider, text input, and number input widgets", 12.0);
+            c.text("Demonstrates slider, text input, and number input widgets").size(12.0);
             c.text("");
 
             // Basic Slider
@@ -189,14 +189,14 @@ impl InputWidgetsDemo {
             c.text("");
 
             // Instructions
-            c.text_sized("Controls:", 14.0);
-            c.text_sized("• Slider: Click/drag track or thumb, scroll wheel, arrow keys when hovered", 11.0);
-            c.text_sized("• Input field: Click to focus, type value, Enter/Escape to confirm", 11.0);
-            c.text_sized("• Number input: Click +/- buttons, Up/Down arrows, scroll wheel", 11.0);
+            c.text("Controls:").size(14.0);
+            c.text("• Slider: Click/drag track or thumb, scroll wheel, arrow keys when hovered").size(11.0);
+            c.text("• Input field: Click to focus, type value, Enter/Escape to confirm").size(11.0);
+            c.text("• Number input: Click +/- buttons, Up/Down arrows, scroll wheel").size(11.0);
             c.text("");
-            c.text_sized("Focus behavior:", 14.0);
-            c.text_sized("• Click outside any input to blur (deselect) it", 11.0);
-            c.text_sized("• Clicking +/- buttons blurs the number input field", 11.0);
+            c.text("Focus behavior:").size(14.0);
+            c.text("• Click outside any input to blur (deselect) it").size(11.0);
+            c.text("• Clicking +/- buttons blurs the number input field").size(11.0);
         })
     }
 

@@ -376,9 +376,9 @@ impl ComprehensiveDemo {
 
         // Build topbar content
         let mut ctx = Context::new();
-        ctx.text_sized("HVAT Image Viewer", 18.0);
-        ctx.text_sized("  |  File: example.png  |  ", 12.0);
-        ctx.text_sized(&zoom_text, 12.0);
+        ctx.text("HVAT Image Viewer").size(18.0);
+        ctx.text("  |  File: example.png  |  ").size(12.0);
+        ctx.text(&zoom_text).size(12.0);
 
         // Build topbar as a row with fixed height
         let topbar_row = Row::new(ctx.take())
@@ -430,7 +430,7 @@ impl ComprehensiveDemo {
         // Build sidebar content
         let mut sidebar_ctx = Context::new();
 
-        sidebar_ctx.text_sized("Controls", 16.0);
+        sidebar_ctx.text("Controls").size(16.0);
         sidebar_ctx.text("");
 
         // View Settings Collapsible
@@ -459,10 +459,10 @@ impl ComprehensiveDemo {
                 });
 
                 c.text("");
-                c.text_sized("Pan Offset:", 12.0);
+                c.text("Pan Offset:").size(12.0);
 
                 c.row(|r| {
-                    r.text_sized("X:", 12.0);
+                    r.text("X:").size(12.0);
                     r.number_input()
                         .state(&x_offset_state)
                         .range(-2.0, 2.0)
@@ -473,7 +473,7 @@ impl ComprehensiveDemo {
                 });
 
                 c.row(|r| {
-                    r.text_sized("Y:", 12.0);
+                    r.text("Y:").size(12.0);
                     r.number_input()
                         .state(&y_offset_state)
                         .range(-2.0, 2.0)
@@ -493,7 +493,7 @@ impl ComprehensiveDemo {
             .max_height(250.0)
             .on_toggle(move |s| wrap_tools(ComprehensiveMessage::ToolsToggled(s)))
             .content(|c| {
-                c.text_sized(format!("Current: {}", selected_tool.name()), 11.0);
+                c.text(format!("Current: {}", selected_tool.name())).size(11.0);
                 c.text("");
                 for tool in Tool::all() {
                     let is_selected = *tool == selected_tool;
@@ -519,16 +519,13 @@ impl ComprehensiveDemo {
             .on_toggle(move |s| wrap_widgets(ComprehensiveMessage::WidgetsToggled(s)))
             .content(|c| {
                 // Dropdown demo
-                c.text_sized("Dropdown (searchable):", 12.0);
-                c.text_sized(
-                    format!(
+                c.text("Dropdown (searchable):").size(12.0);
+                c.text(format!(
                         "Selected: {}",
                         selected_blend_mode
                             .map(|i| BLEND_MODES[i])
                             .unwrap_or("None")
-                    ),
-                    10.0,
-                );
+                    )).size(10.0);
                 c.add(
                     Element::new(
                         crate::Dropdown::new()
@@ -551,7 +548,7 @@ impl ComprehensiveDemo {
                 );
 
                 c.text("");
-                c.text_sized("Text Input:", 12.0);
+                c.text("Text Input:").size(12.0);
                 c.text_input()
                     .value(&notes_text)
                     .state(&notes_state)
@@ -565,7 +562,7 @@ impl ComprehensiveDemo {
                     })
                     .on_undo_point(undo_ctx.callback_with_label("notes"))
                     .build();
-                c.text_sized(format!("Text: \"{}\"", notes_text), 9.0);
+                c.text(format!("Text: \"{}\"", notes_text)).size(9.0);
             });
         sidebar_ctx.add(Element::new(collapsible_widgets));
 
@@ -576,18 +573,18 @@ impl ComprehensiveDemo {
             .width(Length::Fill(1.0))
             .on_toggle(move |s| wrap_info(ComprehensiveMessage::InfoToggled(s)))
             .content(|c| {
-                c.text_sized("hvat_ui Framework Demo", 12.0);
-                c.text_sized("", 8.0);
-                c.text_sized("Features demonstrated:", 11.0);
-                c.text_sized("- Image viewer with pan/zoom", 10.0);
-                c.text_sized("- Collapsible sections", 10.0);
-                c.text_sized("- Scrollable containers", 10.0);
-                c.text_sized("- Sliders with inputs", 10.0);
-                c.text_sized("- Number inputs", 10.0);
-                c.text_sized("- Dropdown (searchable)", 10.0);
-                c.text_sized("- Text input", 10.0);
-                c.text_sized("- Buttons", 10.0);
-                c.text_sized("- Row/Column layout", 10.0);
+                c.text("hvat_ui Framework Demo").size(12.0);
+                c.text("").size(8.0);
+                c.text("Features demonstrated:").size(11.0);
+                c.text("- Image viewer with pan/zoom").size(10.0);
+                c.text("- Collapsible sections").size(10.0);
+                c.text("- Scrollable containers").size(10.0);
+                c.text("- Sliders with inputs").size(10.0);
+                c.text("- Number inputs").size(10.0);
+                c.text("- Dropdown (searchable)").size(10.0);
+                c.text("- Text input").size(10.0);
+                c.text("- Buttons").size(10.0);
+                c.text("- Row/Column layout").size(10.0);
             });
         sidebar_ctx.add(Element::new(collapsible_info));
 
@@ -660,11 +657,11 @@ impl ComprehensiveDemo {
 
         let mut sidebar_ctx = Context::new();
 
-        sidebar_ctx.text_sized("View Controls", 16.0);
+        sidebar_ctx.text("View Controls").size(16.0);
         sidebar_ctx.text("");
 
         // Zoom slider (percentage) - this one actually works!
-        sidebar_ctx.text_sized("Zoom % (controls viewer)", 12.0);
+        sidebar_ctx.text("Zoom % (controls viewer)").size(12.0);
         sidebar_ctx.slider(10.0, 500.0)
             .state(&zoom_state)
             .step(1.0)
@@ -676,12 +673,12 @@ impl ComprehensiveDemo {
 
         // Separator
         sidebar_ctx.text("────────────────────");
-        sidebar_ctx.text_sized("Demo Sliders", 14.0);
-        sidebar_ctx.text_sized("(values stored, no image effect)", 10.0);
+        sidebar_ctx.text("Demo Sliders").size(14.0);
+        sidebar_ctx.text("(values stored, no image effect)").size(10.0);
         sidebar_ctx.text("");
 
         // Brightness slider
-        sidebar_ctx.text_sized(format!("Brightness: {:.2}", brightness_state.value), 12.0);
+        sidebar_ctx.text(format!("Brightness: {:.2}", brightness_state.value)).size(12.0);
         sidebar_ctx.slider(-1.0, 1.0)
             .state(&brightness_state)
             .step(0.01)
@@ -693,7 +690,7 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Contrast slider
-        sidebar_ctx.text_sized(format!("Contrast: {:.2}", contrast_state.value), 12.0);
+        sidebar_ctx.text(format!("Contrast: {:.2}", contrast_state.value)).size(12.0);
         sidebar_ctx.slider(0.0, 3.0)
             .state(&contrast_state)
             .step(0.01)
@@ -705,7 +702,7 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Gamma slider
-        sidebar_ctx.text_sized(format!("Gamma: {:.2}", gamma_state.value), 12.0);
+        sidebar_ctx.text(format!("Gamma: {:.2}", gamma_state.value)).size(12.0);
         sidebar_ctx.slider(0.1, 3.0)
             .state(&gamma_state)
             .step(0.01)
@@ -717,7 +714,7 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Saturation slider
-        sidebar_ctx.text_sized(format!("Saturation: {:.2}", saturation_state.value), 12.0);
+        sidebar_ctx.text(format!("Saturation: {:.2}", saturation_state.value)).size(12.0);
         sidebar_ctx.slider(0.0, 2.0)
             .state(&saturation_state)
             .step(0.01)
@@ -735,12 +732,12 @@ impl ComprehensiveDemo {
 
         sidebar_ctx.text("");
         sidebar_ctx.text("────────────────────");
-        sidebar_ctx.text_sized("Keyboard shortcuts:", 11.0);
-        sidebar_ctx.text_sized("0 - Zoom to 100%", 10.0);
-        sidebar_ctx.text_sized("F - Fit to window", 10.0);
-        sidebar_ctx.text_sized("+/- - Zoom in/out", 10.0);
-        sidebar_ctx.text_sized("Drag - Pan image", 10.0);
-        sidebar_ctx.text_sized("Scroll - Zoom", 10.0);
+        sidebar_ctx.text("Keyboard shortcuts:").size(11.0);
+        sidebar_ctx.text("0 - Zoom to 100%").size(10.0);
+        sidebar_ctx.text("F - Fit to window").size(10.0);
+        sidebar_ctx.text("+/- - Zoom in/out").size(10.0);
+        sidebar_ctx.text("Drag - Pan image").size(10.0);
+        sidebar_ctx.text("Scroll - Zoom").size(10.0);
 
         // Wrap in scrollable
         let content = Element::new(Column::new(sidebar_ctx.take()));

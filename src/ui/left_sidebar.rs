@@ -44,7 +44,7 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::ToolsToggled)
             .content(|c| {
-                c.text_sized(format!("Current: {}", selected_tool.name()), 11.0);
+                c.text(format!("Current: {}", selected_tool.name())).size(11.0);
                 c.text("");
                 for tool in AnnotationTool::all() {
                     let is_selected = *tool == selected_tool;

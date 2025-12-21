@@ -16,7 +16,7 @@ pub fn start() {
 
 async fn run_app() {
     let settings = Settings::new()
-        .title("HVAT - Hyperspectral Annotation Tool")
+        .title("HVAT - Hyperspectral Vision Annotation Tool")
         .size(1400, 900)
         .background(ClearColor::rgb(0.12, 0.12, 0.15))
         .target_fps(60);

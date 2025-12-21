@@ -1,7 +1,7 @@
 //! Builder context for constructing widget trees
 
 use crate::element::Element;
-use crate::layout::{Length, Padding};
+use crate::layout::{Alignment, Length, Padding};
 use crate::renderer::TextureId;
 use crate::state::{InteractionMode, NumberInputState, SliderState, TextInputState};
 use crate::widgets::{
@@ -25,16 +25,19 @@ impl<M: 'static> Context<M> {
         }
     }
 
-    /// Add a text widget
-    pub fn text(&mut self, content: impl Into<String>) -> &mut Self {
-        self.children.push(Element::new(Text::new(content)));
-        self
-    }
-
-    /// Add a text widget with custom size
-    pub fn text_sized(&mut self, content: impl Into<String>, size: f32) -> &mut Self {
-        self.children.push(Element::new(Text::new(content).size(size)));
-        self
+    /// Add a text widget with builder pattern
+    ///
+    /// # Examples
+    /// ```ignore
+    /// ctx.text("Simple text");
+    /// ctx.text("Centered").align(Alignment::Center);
+    /// ctx.text("Large centered").size(18.0).align(Alignment::Center);
+    /// ```
+    pub fn text(&mut self, content: impl Into<String>) -> TextDisplayBuilder<'_, M> {
+        TextDisplayBuilder {
+            ctx: self,
+            text: Some(Text::new(content)),
+        }
     }
 
     /// Add a button widget
@@ -121,6 +124,80 @@ impl<M: 'static> Context<M> {
 impl<M: 'static> Default for Context<M> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Builder for text display widgets
+///
+/// Text is automatically added to the context when this builder is dropped,
+/// so you don't need to call `.build()` explicitly (though you can).
+///
+/// # Examples
+/// ```ignore
+/// ctx.text("Simple text");  // Added on drop
+/// ctx.text("Centered").align(Alignment::Center);  // Fluent API
+/// ctx.text("Custom").size(18.0).align(Alignment::Center);
+/// ```
+pub struct TextDisplayBuilder<'a, M: 'static> {
+    ctx: &'a mut Context<M>,
+    text: Option<Text>,
+}
+
+impl<'a, M: 'static> TextDisplayBuilder<'a, M> {
+    /// Set the font size
+    pub fn size(mut self, size: f32) -> Self {
+        if let Some(text) = self.text.take() {
+            self.text = Some(text.size(size));
+        }
+        self
+    }
+
+    /// Set the text alignment
+    ///
+    /// Note: For `Alignment::Center` to work visibly, the text widget needs
+    /// width to center within. This method automatically sets `Fill` width
+    /// when centering.
+    pub fn align(mut self, alignment: Alignment) -> Self {
+        if let Some(mut text) = self.text.take() {
+            text = text.text_align(alignment);
+            // For centering to work, we need the text to fill available width
+            if alignment == Alignment::Center {
+                text = text.width(Length::Fill(1.0));
+            }
+            self.text = Some(text);
+        }
+        self
+    }
+
+    /// Set the width explicitly
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        if let Some(text) = self.text.take() {
+            self.text = Some(text.width(width));
+        }
+        self
+    }
+
+    /// Enable word wrapping
+    ///
+    /// When enabled, text will wrap to the next line if any word would be clipped.
+    /// For proper wrapping, also set a width constraint (e.g., `Length::Fill`).
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        if let Some(text) = self.text.take() {
+            self.text = Some(text.wrap(wrap));
+        }
+        self
+    }
+
+    // No explicit build() needed - Drop handles adding to context
+    // The builder is consumed when it goes out of scope
+}
+
+impl<'a, M: 'static> Drop for TextDisplayBuilder<'a, M> {
+    fn drop(&mut self) {
+        // Take the text out and add it to the context
+        if let Some(text) = self.text.take() {
+            self.ctx.children.push(Element::new(text));
+        }
     }
 }
 

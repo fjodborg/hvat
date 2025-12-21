@@ -10,7 +10,7 @@ use crate::layout::Bounds;
 use crate::overlay::OverlayRegistry;
 use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, Family, FontSystem, Metrics, Resolution, Shaping,
-    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
+    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Wrap,
 };
 use hvat_gpu::{ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, Pipeline, Texture, TexturePipeline, TransformUniform};
 use std::collections::HashMap;
@@ -76,6 +76,15 @@ impl Default for Color {
     }
 }
 
+/// Text alignment for rendering
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
 /// Text draw request stored for batch rendering
 struct TextRequest {
     text: String,
@@ -85,21 +94,37 @@ struct TextRequest {
     color: Color,
     clip: Option<Bounds>,
     is_overlay: bool,
+    /// Optional width constraint for word wrapping
+    wrap_width: Option<f32>,
+    /// Text alignment within the wrap width
+    align: TextAlign,
 }
 
-/// Key for text buffer cache (text content + font size)
+/// Key for text buffer cache (text content + font size + wrap width + alignment)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TextCacheKey {
     text: String,
     /// Font size in tenths of a point (to avoid float hashing issues)
     size_tenths: u32,
+    /// Wrap width in pixels (None = no wrapping)
+    wrap_width: Option<u32>,
+    /// Text alignment
+    align: TextAlign,
+}
+
+impl std::hash::Hash for TextAlign {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (*self as u8).hash(state);
+    }
 }
 
 impl TextCacheKey {
-    fn new(text: &str, size: f32) -> Self {
+    fn new(text: &str, size: f32, wrap_width: Option<f32>, align: TextAlign) -> Self {
         Self {
             text: text.to_string(),
             size_tenths: (size * 10.0) as u32,
+            wrap_width: wrap_width.map(|w| w as u32),
+            align,
         }
     }
 }
@@ -564,8 +589,100 @@ impl Renderer {
         );
     }
 
+    /// Measure text width using the actual font system
+    ///
+    /// Returns the actual rendered width of the text string at the given font size.
+    /// This is more accurate than approximate char_width calculations.
+    pub fn measure_text_width(&mut self, text: &str, size: f32) -> f32 {
+        use glyphon::{Attrs, Family, Metrics, Shaping};
+
+        // Create a temporary buffer to measure
+        let mut buffer = glyphon::Buffer::new(
+            &mut self.font_system,
+            Metrics::new(size, size * 1.2),
+        );
+
+        // Set a large width so text doesn't wrap
+        buffer.set_size(&mut self.font_system, Some(10000.0), Some(size * 2.0));
+
+        buffer.set_text(
+            &mut self.font_system,
+            text,
+            &Attrs::new().family(Family::SansSerif),
+            Shaping::Advanced,
+        );
+
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        // Get the actual width from the layout
+        let mut max_width: f32 = 0.0;
+        for run in buffer.layout_runs() {
+            let line_width = run.glyphs.iter().map(|g| g.w).sum::<f32>();
+            // Also account for the starting x offset of the last glyph
+            if let Some(last_glyph) = run.glyphs.last() {
+                max_width = max_width.max(last_glyph.x + last_glyph.w);
+            } else {
+                max_width = max_width.max(line_width);
+            }
+        }
+
+        max_width
+    }
+
+    /// Measure text dimensions with word wrapping at a given width
+    ///
+    /// Returns (width, height) where height accounts for multiple lines when wrapping.
+    pub fn measure_text_wrapped(&mut self, text: &str, size: f32, max_width: f32) -> (f32, f32) {
+        use glyphon::{Attrs, Family, Metrics, Shaping, Wrap};
+
+        // Create a temporary buffer to measure
+        let mut buffer = glyphon::Buffer::new(
+            &mut self.font_system,
+            Metrics::new(size, size * 1.2),
+        );
+
+        // Set the width constraint for wrapping
+        buffer.set_size(&mut self.font_system, Some(max_width), None);
+        buffer.set_wrap(&mut self.font_system, Wrap::Word);
+
+        buffer.set_text(
+            &mut self.font_system,
+            text,
+            &Attrs::new().family(Family::SansSerif),
+            Shaping::Advanced,
+        );
+
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        // Get the dimensions from the layout
+        let mut actual_width: f32 = 0.0;
+        let mut line_count: usize = 0;
+        for run in buffer.layout_runs() {
+            line_count += 1;
+            if let Some(last_glyph) = run.glyphs.last() {
+                actual_width = actual_width.max(last_glyph.x + last_glyph.w);
+            }
+        }
+
+        // If no lines, use single line height
+        let line_count = line_count.max(1);
+        let height = line_count as f32 * size * 1.2;
+
+        (actual_width, height)
+    }
+
     /// Queue text for rendering
     pub fn text(&mut self, text: &str, x: f32, y: f32, size: f32, color: Color) {
+        self.text_impl(text, x, y, size, color, None, TextAlign::Left);
+    }
+
+    /// Queue text for rendering with word wrapping at a specified width
+    pub fn text_wrapped(&mut self, text: &str, x: f32, y: f32, size: f32, color: Color, wrap_width: f32, align: TextAlign) {
+        self.text_impl(text, x, y, size, color, Some(wrap_width), align);
+    }
+
+    /// Internal implementation for queuing text
+    fn text_impl(&mut self, text: &str, x: f32, y: f32, size: f32, color: Color, wrap_width: Option<f32>, align: TextAlign) {
         // Skip clipping when drawing overlays
         let clip = if self.drawing_overlay {
             None
@@ -580,6 +697,8 @@ impl Renderer {
             color,
             clip,
             is_overlay: self.drawing_overlay,
+            wrap_width,
+            align,
         };
         // Add to appropriate list based on overlay state
         if self.drawing_overlay {
@@ -937,7 +1056,7 @@ impl Renderer {
 
         // Ensure all text buffers are in cache (or create new ones)
         for request in requests {
-            let key = TextCacheKey::new(&request.text, request.size);
+            let key = TextCacheKey::new(&request.text, request.size, request.wrap_width, request.align);
 
             // Track that this key is used this frame
             if !self.text_cache_used_keys.contains(&key) {
@@ -951,7 +1070,14 @@ impl Renderer {
                     Metrics::new(request.size, request.size * 1.2),
                 );
 
-                buffer.set_size(&mut self.font_system, Some(width as f32), Some(height as f32));
+                // Set size based on whether wrapping is enabled
+                let buffer_width = request.wrap_width.unwrap_or(width as f32);
+                buffer.set_size(&mut self.font_system, Some(buffer_width), Some(height as f32));
+
+                // Enable word wrapping if wrap_width is specified
+                if request.wrap_width.is_some() {
+                    buffer.set_wrap(&mut self.font_system, Wrap::Word);
+                }
 
                 buffer.set_text(
                     &mut self.font_system,
@@ -959,6 +1085,16 @@ impl Renderer {
                     &Attrs::new().family(Family::SansSerif),
                     Shaping::Advanced,
                 );
+
+                // Set text alignment for each line
+                let align = match request.align {
+                    TextAlign::Left => glyphon::cosmic_text::Align::Left,
+                    TextAlign::Center => glyphon::cosmic_text::Align::Center,
+                    TextAlign::Right => glyphon::cosmic_text::Align::Right,
+                };
+                for line in buffer.lines.iter_mut() {
+                    line.set_align(Some(align));
+                }
 
                 buffer.shape_until_scroll(&mut self.font_system, false);
 
@@ -970,7 +1106,7 @@ impl Renderer {
         let text_areas: Vec<TextArea> = requests
             .iter()
             .filter_map(|request| {
-                let key = TextCacheKey::new(&request.text, request.size);
+                let key = TextCacheKey::new(&request.text, request.size, request.wrap_width, request.align);
                 let buffer = self.text_buffer_cache.get(&key)?;
 
                 let bounds = if let Some(clip) = &request.clip {

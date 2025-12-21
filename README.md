@@ -93,3 +93,8 @@ trunk serve --release  # Open the app under localhost:8080
 - 3D Annotation
 
 </details>
+
+<details>
+<summary>Known Bugs (Yes, bugs are a subset of features)</summary>
+
+</details>

@@ -39,13 +39,19 @@ pub struct FlexLayout<M> {
 impl<M> FlexLayout<M> {
     /// Create a new flex layout with the given direction and children
     pub fn new(direction: FlexDirection, children: Vec<Element<M>>) -> Self {
+        // Row: Fill width by default, Center vertical alignment
+        // Column: Shrink width, Center horizontal alignment
+        let width = match direction {
+            FlexDirection::Horizontal => Length::Fill(1.0),
+            FlexDirection::Vertical => Length::Shrink,
+        };
+
         Self {
             children,
             spacing: DEFAULT_SPACING,
             padding: Padding::ZERO,
-            width: Length::Shrink,
+            width,
             height: Length::Shrink,
-            // Default to Center alignment for better vertical centering in rows
             cross_align: Alignment::Center,
             direction,
             child_bounds: Vec::new(),

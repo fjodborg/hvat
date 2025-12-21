@@ -36,7 +36,7 @@ impl HvatApp {
 
         let mut sidebar_ctx = Context::new();
 
-        sidebar_ctx.text_sized("Image Controls", 14.0);
+        sidebar_ctx.text("Image Controls").size(14.0);
 
         // Band Selection Collapsible
         let band_s = band_state.clone();
@@ -45,7 +45,7 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::BandSelectionToggled)
             .content(|c| {
-                c.text_sized("Red Channel", 12.0);
+                c.text("Red Channel").size(12.0);
                 c.slider(0.0, max_band)
                     .state(&red_slider)
                     .step(1.0)
@@ -55,7 +55,7 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("red_band"))
                     .build();
 
-                c.text_sized("Green Channel", 12.0);
+                c.text("Green Channel").size(12.0);
                 c.slider(0.0, max_band)
                     .state(&green_slider)
                     .step(1.0)
@@ -65,7 +65,7 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("green_band"))
                     .build();
 
-                c.text_sized("Blue Channel", 12.0);
+                c.text("Blue Channel").size(12.0);
                 c.slider(0.0, max_band)
                     .state(&blue_slider)
                     .step(1.0)
@@ -84,7 +84,7 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::AdjustmentsToggled)
             .content(|c| {
-                c.text_sized(format!("Brightness: {:.2}", brightness_slider.value), 12.0);
+                c.text(format!("Brightness: {:.2}", brightness_slider.value)).size(12.0);
                 c.slider(-1.0, 1.0)
                     .state(&brightness_slider)
                     .step(0.01)
@@ -94,7 +94,7 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("brightness"))
                     .build();
 
-                c.text_sized(format!("Contrast: {:.2}", contrast_slider.value), 12.0);
+                c.text(format!("Contrast: {:.2}", contrast_slider.value)).size(12.0);
                 c.slider(0.1, 3.0)
                     .state(&contrast_slider)
                     .step(0.01)
@@ -104,7 +104,7 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("contrast"))
                     .build();
 
-                c.text_sized(format!("Gamma: {:.2}", gamma_slider.value), 12.0);
+                c.text(format!("Gamma: {:.2}", gamma_slider.value)).size(12.0);
                 c.slider(0.1, 3.0)
                     .state(&gamma_slider)
                     .step(0.01)
@@ -114,7 +114,7 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("gamma"))
                     .build();
 
-                c.text_sized(format!("Hue: {:.0}°", hue_slider.value), 12.0);
+                c.text(format!("Hue: {:.0}°", hue_slider.value)).size(12.0);
                 c.slider(0.0, 360.0)
                     .state(&hue_slider)
                     .step(1.0)
@@ -133,12 +133,12 @@ impl HvatApp {
         // Keyboard shortcuts info
         sidebar_ctx.text("");
         sidebar_ctx.text("────────────────────");
-        sidebar_ctx.text_sized("Keyboard shortcuts:", 11.0);
-        sidebar_ctx.text_sized("Ctrl+Z - Undo", 10.0);
-        sidebar_ctx.text_sized("Ctrl+Y - Redo", 10.0);
-        sidebar_ctx.text_sized("0 - Zoom to 100%", 10.0);
-        sidebar_ctx.text_sized("F - Fit to window", 10.0);
-        sidebar_ctx.text_sized("+/- - Zoom in/out", 10.0);
+        sidebar_ctx.text("Keyboard shortcuts:").size(11.0);
+        sidebar_ctx.text("Ctrl+Z - Undo").size(10.0);
+        sidebar_ctx.text("Ctrl+Y - Redo").size(10.0);
+        sidebar_ctx.text("0 - Zoom to 100%").size(10.0);
+        sidebar_ctx.text("F - Fit to window").size(10.0);
+        sidebar_ctx.text("+/- - Zoom in/out").size(10.0);
 
         // Wrap in scrollable
         let content = Element::new(Column::new(sidebar_ctx.take()));

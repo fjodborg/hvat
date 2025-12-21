@@ -1,0 +1,119 @@
+//! Build script for HVAT
+//!
+//! Automatically generates src/licenses.rs with dependency license information
+//! using cargo-about.
+
+use std::env;
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+fn main() {
+    // Tell Cargo to rerun this if Cargo.lock changes (new dependencies)
+    println!("cargo:rerun-if-changed=Cargo.lock");
+    println!("cargo:rerun-if-changed=about.toml");
+    println!("cargo:rerun-if-changed=about.hbs");
+
+    // Only regenerate if we have cargo-about available
+    let cargo_about = find_cargo_about();
+
+    if let Some(cargo_about_path) = cargo_about {
+        generate_licenses(&cargo_about_path);
+    } else {
+        // cargo-about not found, check if licenses.rs exists
+        if !Path::new("src/licenses.rs").exists() {
+            // Create a stub file so compilation doesn't fail
+            eprintln!("cargo:warning=cargo-about not found, creating stub licenses.rs");
+            create_stub_licenses();
+        }
+    }
+}
+
+/// Find cargo-about binary
+fn find_cargo_about() -> Option<String> {
+    // Try common locations
+    let home = env::var("HOME").unwrap_or_default();
+    let candidates = [
+        format!("{}/.cargo/bin/cargo-about", home),
+        "cargo-about".to_string(),
+    ];
+
+    for candidate in candidates {
+        if Command::new(&candidate)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Generate licenses.rs using cargo-about
+fn generate_licenses(cargo_about: &str) {
+    let output = Command::new(cargo_about)
+        .args(["generate", "about.hbs"])
+        .output();
+
+    match output {
+        Ok(result) => {
+            if result.status.success() {
+                let content = String::from_utf8_lossy(&result.stdout);
+
+                // Only write if content is valid Rust code (starts with expected header)
+                if content.starts_with("//! Auto-generated") {
+                    if let Err(e) = fs::write("src/licenses.rs", content.as_bytes()) {
+                        eprintln!("cargo:warning=Failed to write licenses.rs: {}", e);
+                    }
+                } else {
+                    eprintln!("cargo:warning=cargo-about output doesn't look like valid Rust code");
+                }
+            } else {
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                eprintln!("cargo:warning=cargo-about failed: {}", stderr);
+            }
+        }
+        Err(e) => {
+            eprintln!("cargo:warning=Failed to run cargo-about: {}", e);
+        }
+    }
+}
+
+/// Create a stub licenses.rs file when cargo-about is not available
+fn create_stub_licenses() {
+    let stub = r#"//! Auto-generated license information for third-party dependencies.
+//!
+//! This is a stub file. Install cargo-about and rebuild to generate full license info:
+//! cargo install cargo-about
+
+/// Information about a third-party dependency
+#[derive(Debug, Clone)]
+pub struct DependencyInfo {
+    pub name: &'static str,
+    pub version: &'static str,
+    pub license: &'static str,
+    pub repository: Option<&'static str>,
+}
+
+/// All third-party dependencies used by this project
+pub const DEPENDENCIES: &[DependencyInfo] = &[
+    DependencyInfo {
+        name: "hvat",
+        version: env!("CARGO_PKG_VERSION"),
+        license: "AGPL-3.0-or-later",
+        repository: None,
+    },
+];
+
+/// Get a summary of license usage
+pub fn license_summary() -> Vec<(&'static str, usize)> {
+    vec![("AGPL-3.0-or-later", 1)]
+}
+"#;
+
+    if let Err(e) = fs::write("src/licenses.rs", stub) {
+        eprintln!("cargo:warning=Failed to write stub licenses.rs: {}", e);
+    }
+}
