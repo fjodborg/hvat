@@ -37,6 +37,7 @@ impl HvatApp {
 
         let max_band = (self.num_bands - 1) as f32;
 
+        // Create UndoContext for slider undo points
         let slider_undo_snapshot = self.snapshot();
         let undo_stack = Rc::clone(&self.undo_stack);
         let undo_ctx = UndoContext::new(undo_stack, slider_undo_snapshot);

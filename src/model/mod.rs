@@ -4,7 +4,8 @@ mod annotation;
 mod category;
 
 pub use annotation::{
-    Annotation, AnnotationId, AnnotationShape, AnnotationTool, DrawingState, MIN_POLYGON_VERTICES,
-    POLYGON_CLOSE_THRESHOLD,
+    Annotation, AnnotationHandle, AnnotationId, AnnotationShape, AnnotationTool, BBoxHandle,
+    DrawingState, EditState, HANDLE_HIT_RADIUS, MIN_DRAG_DISTANCE, MIN_POLYGON_VERTICES,
+    POLYGON_CLOSE_THRESHOLD, PolygonHandle,
 };
 pub use category::Category;

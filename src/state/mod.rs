@@ -12,4 +12,4 @@ pub use gpu_cache::{CachedGpuTexture, GpuTextureCache};
 pub use image_data::ImageData;
 pub use image_data::ImageDataStore;
 pub use project::{IMAGE_EXTENSIONS, LoadedImage, ProjectState, is_image_filename};
-pub use snapshot::AppSnapshot;
+pub use snapshot::{AnnotationState, AppSnapshot};

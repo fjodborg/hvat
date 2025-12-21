@@ -28,8 +28,8 @@ use crate::data::HyperspectralData;
 use crate::format::{AutoSaveManager, ExportOptions, FormatRegistry, ProjectData};
 use crate::message::Message;
 use crate::model::{
-    Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, MIN_POLYGON_VERTICES,
-    POLYGON_CLOSE_THRESHOLD,
+    Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, EditState,
+    HANDLE_HIT_RADIUS, MIN_DRAG_DISTANCE, MIN_POLYGON_VERTICES, POLYGON_CLOSE_THRESHOLD,
 };
 use crate::state::{
     AppSnapshot, GpuRenderState, GpuTextureCache, ImageDataStore, LoadedImage, ProjectState,
@@ -467,7 +467,7 @@ impl HvatApp {
         }
     }
 
-    /// Create a snapshot of current state for undo.
+    /// Create a snapshot of current state for undo (sliders only, no annotations).
     pub(crate) fn snapshot(&self) -> AppSnapshot {
         AppSnapshot {
             red_band: self.band_selection.0,
@@ -477,11 +477,34 @@ impl HvatApp {
             contrast: self.contrast_slider.value,
             gamma: self.gamma_slider.value,
             hue: self.hue_slider.value,
+            annotations: None,
+        }
+    }
+
+    /// Create a snapshot with annotation state included.
+    pub(crate) fn snapshot_with_annotations(&self) -> AppSnapshot {
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get(&path);
+
+        AppSnapshot {
+            red_band: self.band_selection.0,
+            green_band: self.band_selection.1,
+            blue_band: self.band_selection.2,
+            brightness: self.brightness_slider.value,
+            contrast: self.contrast_slider.value,
+            gamma: self.gamma_slider.value,
+            hue: self.hue_slider.value,
+            annotations: Some(crate::state::AnnotationState {
+                image_path: path,
+                annotations: image_data.annotations.clone(),
+                next_annotation_id: image_data.next_annotation_id,
+            }),
         }
     }
 
     /// Restore state from a snapshot.
     fn restore(&mut self, snapshot: &AppSnapshot) {
+        // Restore slider state
         self.band_selection = (snapshot.red_band, snapshot.green_band, snapshot.blue_band);
         self.red_band_slider.set_value(snapshot.red_band as f32);
         self.green_band_slider.set_value(snapshot.green_band as f32);
@@ -491,6 +514,19 @@ impl HvatApp {
         self.gamma_slider.set_value(snapshot.gamma);
         self.hue_slider.set_value(snapshot.hue);
         self.needs_gpu_render = true;
+
+        // Restore annotation state if present
+        if let Some(ref ann_state) = snapshot.annotations {
+            let image_data = self.image_data_store.get_or_create(&ann_state.image_path);
+            image_data.annotations = ann_state.annotations.clone();
+            image_data.next_annotation_id = ann_state.next_annotation_id;
+            self.auto_save.mark_dirty();
+            log::info!(
+                "Restored {} annotations for {:?}",
+                ann_state.annotations.len(),
+                ann_state.image_path
+            );
+        }
     }
 
     /// Get the current image path (for per-image data storage).
@@ -500,6 +536,14 @@ impl HvatApp {
             .as_ref()
             .and_then(|p| p.current_image().cloned())
             .unwrap_or_else(|| PathBuf::from("__test_image__"))
+    }
+
+    /// Push an undo point with annotation state to the unified undo stack.
+    /// Call this before any annotation modification.
+    fn push_annotation_undo_point(&self) {
+        let snapshot = self.snapshot_with_annotations();
+        self.undo_stack.borrow_mut().push(snapshot);
+        log::debug!("Pushed annotation undo point");
     }
 
     /// Reset adjustment sliders to default values.
@@ -901,10 +945,7 @@ impl HvatApp {
 
         match self.selected_tool {
             AnnotationTool::Select => {
-                // Selection tool: select/deselect annotations on click
-                if event.kind == PointerEventKind::DragStart {
-                    self.handle_selection_click(x, y);
-                }
+                self.handle_select_tool(x, y, event.kind);
             }
             AnnotationTool::BoundingBox => {
                 self.handle_bounding_box_draw(x, y, event.kind);
@@ -920,29 +961,230 @@ impl HvatApp {
         }
     }
 
-    /// Handle selection tool click - select annotation under cursor.
-    fn handle_selection_click(&mut self, x: f32, y: f32) {
+    /// Get the hit radius scaled for current zoom level.
+    fn scaled_hit_radius(&self) -> f32 {
+        // Scale the hit radius inversely with zoom so handles are easier to grab at any zoom
+        let zoom = self.viewer_state.effective_zoom();
+        HANDLE_HIT_RADIUS / zoom.max(0.1)
+    }
+
+    /// Handle Select tool - selection, modification, and cycling.
+    fn handle_select_tool(&mut self, x: f32, y: f32, kind: hvat_ui::PointerEventKind) {
+        use hvat_ui::PointerEventKind;
+
+        match kind {
+            PointerEventKind::DragStart => {
+                self.handle_selection_drag_start(x, y);
+            }
+            PointerEventKind::DragMove => {
+                self.handle_selection_drag_move(x, y);
+            }
+            PointerEventKind::DragEnd => {
+                self.handle_selection_drag_end(x, y);
+            }
+            PointerEventKind::Click => {
+                // Click is handled via DragStart/DragEnd
+            }
+        }
+    }
+
+    /// Handle drag start in select mode - check for handle hit or start selection.
+    fn handle_selection_drag_start(&mut self, x: f32, y: f32) {
+        let path = self.current_image_path();
+        let hit_radius = self.scaled_hit_radius();
+
+        // First, check if we're clicking on a handle of the currently selected annotation
+        let selected_handle = {
+            let image_data = self.image_data_store.get(&path);
+            image_data
+                .annotations
+                .iter()
+                .find(|ann| ann.selected)
+                .and_then(|ann| {
+                    ann.shape
+                        .hit_test_handle(x, y, hit_radius)
+                        .map(|handle| (ann.id, ann.shape.clone(), handle))
+                })
+        };
+
+        if let Some((annotation_id, original_shape, handle)) = selected_handle {
+            // Record potential drag - we don't start editing until there's actual movement
+            log::debug!(
+                "Potential drag on annotation {}, handle={:?}",
+                annotation_id,
+                handle
+            );
+
+            let image_data = self.image_data_store.get_or_create(&path);
+            image_data.edit_state = EditState::PotentialDrag {
+                annotation_id,
+                handle,
+                start_x: x,
+                start_y: y,
+                original_shape,
+            };
+            return;
+        }
+
+        // Not clicking on a selected annotation's handle - do selection/cycling
+        self.handle_selection_click_with_cycling(x, y);
+    }
+
+    /// Handle selection click with cycling through overlapping annotations.
+    fn handle_selection_click_with_cycling(&mut self, x: f32, y: f32) {
         let path = self.current_image_path();
         let image_data = self.image_data_store.get_or_create(&path);
 
-        // Deselect all first
-        for ann in &mut image_data.annotations {
-            ann.selected = false;
-        }
-
-        // Find annotation under cursor (reverse order for top-most first)
-        let selected_idx = image_data
+        // Find all annotations under cursor
+        let hit_indices: Vec<usize> = image_data
             .annotations
             .iter()
             .enumerate()
-            .rev()
-            .find(|(_, ann)| ann.shape.contains_point(x, y))
-            .map(|(idx, _)| idx);
+            .filter(|(_, ann)| ann.shape.contains_point(x, y))
+            .map(|(idx, _)| idx)
+            .collect();
 
-        if let Some(idx) = selected_idx {
-            let id = image_data.annotations[idx].id;
-            image_data.annotations[idx].selected = true;
-            log::info!("Selected annotation {}", id);
+        if hit_indices.is_empty() {
+            // Clicked on empty space - deselect all
+            for ann in &mut image_data.annotations {
+                ann.selected = false;
+            }
+            image_data.last_clicked_index = None;
+            log::debug!("No annotation at click position, deselected all");
+            return;
+        }
+
+        // Find which one to select (cycle through overlapping annotations)
+        let next_idx = if let Some(last_idx) = image_data.last_clicked_index {
+            // If we previously clicked here and there are multiple overlapping,
+            // cycle to the next one
+            if hit_indices.contains(&last_idx) {
+                // Find position of last_idx in hit_indices and get next
+                let pos = hit_indices.iter().position(|&i| i == last_idx).unwrap_or(0);
+                let next_pos = (pos + 1) % hit_indices.len();
+                hit_indices[next_pos]
+            } else {
+                // Last click was elsewhere, start fresh with top-most (last in render order)
+                *hit_indices.last().unwrap()
+            }
+        } else {
+            // No previous click, select top-most
+            *hit_indices.last().unwrap()
+        };
+
+        // Deselect all and select the chosen one
+        for ann in &mut image_data.annotations {
+            ann.selected = false;
+        }
+        image_data.annotations[next_idx].selected = true;
+        image_data.last_clicked_index = Some(next_idx);
+
+        let id = image_data.annotations[next_idx].id;
+        log::info!(
+            "Selected annotation {} (cycling: {} overlapping)",
+            id,
+            hit_indices.len()
+        );
+    }
+
+    /// Handle drag move in select mode - update annotation if editing.
+    fn handle_selection_drag_move(&mut self, x: f32, y: f32) {
+        let path = self.current_image_path();
+
+        // Check if we need to transition from PotentialDrag to DraggingHandle
+        let should_start_editing = {
+            let image_data = self.image_data_store.get(&path);
+            if let EditState::PotentialDrag {
+                start_x, start_y, ..
+            } = &image_data.edit_state
+            {
+                let dx = x - start_x;
+                let dy = y - start_y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                distance >= MIN_DRAG_DISTANCE
+            } else {
+                false
+            }
+        };
+
+        if should_start_editing {
+            // Transition to DraggingHandle and push undo point
+            self.push_annotation_undo_point();
+
+            let image_data = self.image_data_store.get_or_create(&path);
+            if let EditState::PotentialDrag {
+                annotation_id,
+                handle,
+                start_x,
+                start_y,
+                original_shape,
+            } = image_data.edit_state.clone()
+            {
+                log::info!(
+                    "Starting handle drag on annotation {}, handle={:?}",
+                    annotation_id,
+                    handle
+                );
+                image_data.edit_state = EditState::DraggingHandle {
+                    annotation_id,
+                    handle,
+                    start_x,
+                    start_y,
+                    original_shape,
+                };
+            }
+        }
+
+        // Now handle the actual drag if we're in DraggingHandle state
+        let image_data = self.image_data_store.get_or_create(&path);
+        if let EditState::DraggingHandle {
+            annotation_id,
+            handle,
+            start_x,
+            start_y,
+            ref original_shape,
+        } = image_data.edit_state.clone()
+        {
+            // Apply the handle drag to get new shape
+            if let Some(new_shape) =
+                AnnotationShape::apply_handle_drag(&original_shape, &handle, start_x, start_y, x, y)
+            {
+                // Find and update the annotation
+                if let Some(ann) = image_data
+                    .annotations
+                    .iter_mut()
+                    .find(|a| a.id == annotation_id)
+                {
+                    ann.shape = new_shape;
+                    self.auto_save.mark_dirty();
+                }
+            }
+        }
+    }
+
+    /// Handle drag end in select mode - finalize editing or trigger cycling.
+    fn handle_selection_drag_end(&mut self, x: f32, y: f32) {
+        let path = self.current_image_path();
+
+        // Check what state we're in
+        let was_potential_drag = {
+            let image_data = self.image_data_store.get(&path);
+            image_data.edit_state.is_potential_drag()
+        };
+
+        if was_potential_drag {
+            // Mouse was released without enough movement - treat as a click for cycling
+            let image_data = self.image_data_store.get_or_create(&path);
+            image_data.edit_state = EditState::Idle;
+
+            // Now do cycling
+            self.handle_selection_click_with_cycling(x, y);
+        } else {
+            let image_data = self.image_data_store.get_or_create(&path);
+            if image_data.edit_state.is_editing() {
+                log::info!("Finished editing annotation");
+                image_data.edit_state = EditState::Idle;
+            }
         }
     }
 
@@ -951,6 +1193,16 @@ impl HvatApp {
         use hvat_ui::PointerEventKind;
 
         let path = self.current_image_path();
+
+        // For DragEnd, check if we'll create an annotation and push undo point first
+        if kind == PointerEventKind::DragEnd {
+            let image_data = self.image_data_store.get(&path);
+            if image_data.drawing_state.to_shape().is_some() {
+                // Push undo point before creating annotation
+                self.push_annotation_undo_point();
+            }
+        }
+
         let image_data = self.image_data_store.get_or_create(&path);
 
         match kind {
@@ -989,7 +1241,7 @@ impl HvatApp {
                     y,
                     image_data.drawing_state
                 );
-                // Finish bounding box
+                // Finish bounding box (undo point already pushed above)
                 if let Some(shape) = image_data.drawing_state.to_shape() {
                     let annotation = Annotation::new(
                         image_data.next_annotation_id,
@@ -1079,6 +1331,22 @@ impl HvatApp {
     /// Finalize the current polygon drawing and create an annotation.
     fn finalize_polygon(&mut self) {
         let path = self.current_image_path();
+
+        // Check if we can create a polygon and push undo point first
+        let should_create = {
+            let image_data = self.image_data_store.get(&path);
+            if let DrawingState::Polygon { vertices } = &image_data.drawing_state {
+                vertices.len() >= MIN_POLYGON_VERTICES
+            } else {
+                false
+            }
+        };
+
+        if should_create {
+            // Push undo point before creating annotation
+            self.push_annotation_undo_point();
+        }
+
         let image_data = self.image_data_store.get_or_create(&path);
 
         if let DrawingState::Polygon { vertices } = &image_data.drawing_state.clone() {
@@ -1103,6 +1371,9 @@ impl HvatApp {
 
     /// Create a point annotation.
     fn create_point_annotation(&mut self, x: f32, y: f32) {
+        // Push undo point before creating annotation
+        self.push_annotation_undo_point();
+
         let path = self.current_image_path();
         let image_data = self.image_data_store.get_or_create(&path);
 
@@ -1618,8 +1889,10 @@ impl Application for HvatApp {
             }
 
             // Global Undo/Redo
+            // Priority: annotation undo first, then slider/adjustment undo
             Message::Undo => {
-                let current = self.snapshot();
+                // Unified undo - snapshots may contain slider state, annotation state, or both
+                let current = self.snapshot_with_annotations();
                 let prev = self.undo_stack.borrow_mut().undo(current);
                 if let Some(prev) = prev {
                     self.restore(&prev);
@@ -1627,7 +1900,8 @@ impl Application for HvatApp {
                 }
             }
             Message::Redo => {
-                let current = self.snapshot();
+                // Unified redo - snapshots may contain slider state, annotation state, or both
+                let current = self.snapshot_with_annotations();
                 let next = self.undo_stack.borrow_mut().redo(current);
                 if let Some(next) = next {
                     self.restore(&next);
@@ -1651,10 +1925,15 @@ impl Application for HvatApp {
                 // Remove selected annotations
                 let path = self.current_image_path();
                 let image_data = self.image_data_store.get_or_create(&path);
-                let before_count = image_data.annotations.len();
-                image_data.annotations.retain(|a| !a.selected);
-                let deleted = before_count - image_data.annotations.len();
-                if deleted > 0 {
+                // Check if there are any selected annotations to delete
+                let has_selected = image_data.annotations.iter().any(|a| a.selected);
+                if has_selected {
+                    // Push undo point before deleting
+                    self.push_annotation_undo_point();
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    let before_count = image_data.annotations.len();
+                    image_data.annotations.retain(|a| !a.selected);
+                    let deleted = before_count - image_data.annotations.len();
                     self.auto_save.mark_dirty();
                     log::info!("Deleted {} annotation(s)", deleted);
                 }

@@ -523,9 +523,13 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     };
                     renderer.stroke_rect(box_bounds, border_color, overlay.line_width);
 
-                    // Draw corner handles if selected
+                    // Draw handles if selected
                     if overlay.selected {
                         let handle_size = 6.0;
+                        let mid_x = (screen_x1 + screen_x2) / 2.0;
+                        let mid_y = (screen_y1 + screen_y2) / 2.0;
+
+                        // Corner handles (for resize in both directions)
                         let corners = [
                             (screen_x1, screen_y1),
                             (screen_x2, screen_y1),
@@ -542,6 +546,37 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             renderer.fill_rect(handle_bounds, Color::WHITE);
                             renderer.stroke_rect(handle_bounds, selected_color, 1.0);
                         }
+
+                        // Edge midpoint handles (for resize in one direction)
+                        let edges = [
+                            (mid_x, screen_y1), // Top edge
+                            (mid_x, screen_y2), // Bottom edge
+                            (screen_x1, mid_y), // Left edge
+                            (screen_x2, mid_y), // Right edge
+                        ];
+                        for (ex, ey) in edges {
+                            let handle_bounds = Bounds::new(
+                                ex - handle_size / 2.0,
+                                ey - handle_size / 2.0,
+                                handle_size,
+                                handle_size,
+                            );
+                            // Edge handles slightly different color to distinguish
+                            renderer.fill_rect(handle_bounds, Color::rgba(0.9, 0.9, 0.9, 1.0));
+                            renderer.stroke_rect(handle_bounds, selected_color, 1.0);
+                        }
+
+                        // Center handle (for move) - draw a small crosshair or distinct marker
+                        let center_size = 8.0;
+                        let center_bounds = Bounds::new(
+                            mid_x - center_size / 2.0,
+                            mid_y - center_size / 2.0,
+                            center_size,
+                            center_size,
+                        );
+                        // Draw center as a circle-like marker (filled with semi-transparent)
+                        renderer.fill_rect(center_bounds, Color::rgba(1.0, 1.0, 0.5, 0.6));
+                        renderer.stroke_rect(center_bounds, selected_color, 1.0);
                     }
                 }
                 OverlayShape::Point { x, y } => {
@@ -609,6 +644,25 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             };
                             renderer.fill_rect(handle_bounds, handle_fill);
                             renderer.stroke_rect(handle_bounds, line_color, 1.0);
+                        }
+
+                        // Draw center handle for selected closed polygons (for move)
+                        if overlay.selected && *closed && screen_verts.len() >= 3 {
+                            let sum_x: f32 = screen_verts.iter().map(|(x, _)| x).sum();
+                            let sum_y: f32 = screen_verts.iter().map(|(_, y)| y).sum();
+                            let n = screen_verts.len() as f32;
+                            let center_x = sum_x / n;
+                            let center_y = sum_y / n;
+
+                            let center_size = 8.0;
+                            let center_bounds = Bounds::new(
+                                center_x - center_size / 2.0,
+                                center_y - center_size / 2.0,
+                                center_size,
+                                center_size,
+                            );
+                            renderer.fill_rect(center_bounds, Color::rgba(1.0, 1.0, 0.5, 0.6));
+                            renderer.stroke_rect(center_bounds, selected_color, 1.0);
                         }
                     }
                 }

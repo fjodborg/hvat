@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Annotation, AnnotationId, DrawingState};
+use crate::model::{Annotation, AnnotationId, DrawingState, EditState};
 
 /// Data associated with a specific image (tags, annotations, etc.)
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -17,8 +17,14 @@ pub struct ImageData {
     /// Current drawing state for this image (transient, not serialized)
     #[serde(skip)]
     pub drawing_state: DrawingState,
+    /// Current edit state for modifying existing annotations (transient)
+    #[serde(skip)]
+    pub edit_state: EditState,
     /// Next annotation ID for this image
     pub next_annotation_id: AnnotationId,
+    /// Last clicked annotation index (for cycling through overlapping annotations)
+    #[serde(skip)]
+    pub last_clicked_index: Option<usize>,
 }
 
 /// Storage for per-image data, keyed by image path
