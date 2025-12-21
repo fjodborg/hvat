@@ -435,7 +435,8 @@ mod tests {
         let viewport_size = 200.0;
 
         // At top
-        let scroll = thumb_y_to_scroll_offset(0.0, track, thumb_height, content_size, viewport_size);
+        let scroll =
+            thumb_y_to_scroll_offset(0.0, track, thumb_height, content_size, viewport_size);
         assert!((scroll - 0.0).abs() < 0.001);
 
         // At bottom (thumb_y = track_height - thumb_height = 150)

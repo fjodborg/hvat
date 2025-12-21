@@ -89,8 +89,11 @@ impl GpuRenderState {
                 label: Some("Hyperspectral Render Encoder"),
             });
 
-        self.pipeline
-            .render(&mut encoder, &self.render_target.view, &self.band_data.bind_group);
+        self.pipeline.render(
+            &mut encoder,
+            &self.render_target.view,
+            &self.band_data.bind_group,
+        );
 
         gpu_ctx.queue.submit(std::iter::once(encoder.finish()));
     }

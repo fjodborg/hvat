@@ -160,13 +160,33 @@ pub struct ClearColor {
 
 impl ClearColor {
     /// Dark gray (default for image viewers).
-    pub const DARK_GRAY: ClearColor = ClearColor { r: 0.1, g: 0.1, b: 0.1, a: 1.0 };
+    pub const DARK_GRAY: ClearColor = ClearColor {
+        r: 0.1,
+        g: 0.1,
+        b: 0.1,
+        a: 1.0,
+    };
     /// Black.
-    pub const BLACK: ClearColor = ClearColor { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+    pub const BLACK: ClearColor = ClearColor {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    };
     /// White.
-    pub const WHITE: ClearColor = ClearColor { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+    pub const WHITE: ClearColor = ClearColor {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
     /// Transparent.
-    pub const TRANSPARENT: ClearColor = ClearColor { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+    pub const TRANSPARENT: ClearColor = ClearColor {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 0.0,
+    };
 
     /// Create a custom clear color.
     pub fn new(r: f64, g: f64, b: f64, a: f64) -> Self {

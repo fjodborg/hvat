@@ -33,13 +33,7 @@ impl Default for DropdownDemo {
     }
 }
 
-pub const SIMPLE_OPTIONS: &[&str] = &[
-    "Option 1",
-    "Option 2",
-    "Option 3",
-    "Option 4",
-    "Option 5",
-];
+pub const SIMPLE_OPTIONS: &[&str] = &["Option 1", "Option 2", "Option 3", "Option 4", "Option 5"];
 
 pub const COUNTRY_OPTIONS: &[&str] = &[
     "Argentina",
@@ -64,7 +58,10 @@ impl DropdownDemo {
         Self::default()
     }
 
-    pub fn view<M: Clone + 'static>(&self, wrap: impl Fn(DropdownMessage) -> M + Clone + 'static) -> Element<M> {
+    pub fn view<M: Clone + 'static>(
+        &self,
+        wrap: impl Fn(DropdownMessage) -> M + Clone + 'static,
+    ) -> Element<M> {
         let wrap_reset = wrap.clone();
         let wrap_simple_state = wrap.clone();
         let wrap_simple_select = wrap.clone();
@@ -159,7 +156,10 @@ impl DropdownDemo {
             DropdownMessage::SimpleSelected(index) => {
                 self.selected_simple = Some(index);
                 self.simple_dropdown.close();
-                log::info!("Simple dropdown selected: {}", SIMPLE_OPTIONS.get(index).unwrap_or(&"?"));
+                log::info!(
+                    "Simple dropdown selected: {}",
+                    SIMPLE_OPTIONS.get(index).unwrap_or(&"?")
+                );
             }
             DropdownMessage::SearchStateChanged(state) => {
                 self.searchable_dropdown = state;
@@ -167,7 +167,10 @@ impl DropdownDemo {
             DropdownMessage::SearchSelected(index) => {
                 self.selected_search = Some(index);
                 self.searchable_dropdown.close();
-                log::info!("Search dropdown selected: {}", COUNTRY_OPTIONS.get(index).unwrap_or(&"?"));
+                log::info!(
+                    "Search dropdown selected: {}",
+                    COUNTRY_OPTIONS.get(index).unwrap_or(&"?")
+                );
             }
             DropdownMessage::Reset => {
                 self.selected_simple = None;

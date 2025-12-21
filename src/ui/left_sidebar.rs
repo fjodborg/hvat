@@ -3,8 +3,8 @@
 use hvat_ui::constants::{BUTTON_PADDING_COMPACT, COLOR_PICKER_SWATCH_OFFSET, ROW_ITEM_HEIGHT};
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, Panel, Scrollable,
-    ScrollDirection, ScrollbarVisibility,
+    BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, Panel,
+    ScrollDirection, Scrollable, ScrollbarVisibility,
 };
 
 use crate::app::HvatApp;
@@ -47,7 +47,8 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::ToolsToggled)
             .content(|c| {
-                c.text(format!("Current: {}", selected_tool.name())).size(FONT_SIZE_SECONDARY);
+                c.text(format!("Current: {}", selected_tool.name()))
+                    .size(FONT_SIZE_SECONDARY);
                 c.text("");
                 for tool in AnnotationTool::all() {
                     let is_selected = *tool == selected_tool;
@@ -127,10 +128,10 @@ impl HvatApp {
                             .open(true)
                             .x_offset(COLOR_PICKER_SWATCH_OFFSET)
                             .state(&color_picker_state)
-                            .on_change(Message::CategoryColorLiveUpdate)  // Live updates from sliders
-                            .on_select(Message::CategoryColorApply)       // Palette click applies and closes
+                            .on_change(Message::CategoryColorLiveUpdate) // Live updates from sliders
+                            .on_select(Message::CategoryColorApply) // Palette click applies and closes
                             .on_close(Message::CloseCategoryColorPicker)
-                            .on_state_change(Message::ColorPickerStateChanged);  // For drag state tracking
+                            .on_state_change(Message::ColorPickerStateChanged); // For drag state tracking
                         c.add(Element::new(picker));
                     }
                 }

@@ -38,7 +38,7 @@ pub use widgets::{
     slider, text, text_input, AnnotationOverlay, BaseInputConfig, BorderSides, Collapsible,
     CollapsibleConfig, ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig,
     ImagePointerEvent, NumberInput, NumberInputConfig, OverlayShape, Panel, PickerAlignment,
-    PointerEventKind, Row, Scrollable, ScrollDirection, ScrollbarConfig, ScrollbarVisibility,
+    PointerEventKind, Row, ScrollDirection, Scrollable, ScrollbarConfig, ScrollbarVisibility,
     Slider, SliderConfig, Text, TextInput, TextInputConfig,
 };
 

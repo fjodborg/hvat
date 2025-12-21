@@ -26,8 +26,8 @@ use crate::constants::{
 use crate::data::HyperspectralData;
 use crate::message::Message;
 use crate::model::{
-    Annotation, AnnotationShape, AnnotationTool, Category, DrawingState,
-    MIN_POLYGON_VERTICES, POLYGON_CLOSE_THRESHOLD,
+    Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, MIN_POLYGON_VERTICES,
+    POLYGON_CLOSE_THRESHOLD,
 };
 use crate::state::{AppSnapshot, GpuRenderState, ImageDataStore, LoadedImage, ProjectState};
 use crate::test_image::generate_test_hyperspectral;
@@ -45,7 +45,8 @@ pub enum AsyncPickerResult {
 }
 
 // Global shared state for receiving async picker results
-static PENDING_PICKER_RESULT: OnceLock<std::sync::Mutex<Option<AsyncPickerResult>>> = OnceLock::new();
+static PENDING_PICKER_RESULT: OnceLock<std::sync::Mutex<Option<AsyncPickerResult>>> =
+    OnceLock::new();
 
 fn pending_picker_state() -> &'static std::sync::Mutex<Option<AsyncPickerResult>> {
     PENDING_PICKER_RESULT.get_or_init(|| std::sync::Mutex::new(None))
@@ -192,7 +193,6 @@ impl HvatApp {
             selected_tool: AnnotationTool::default(),
 
             // Annotations are stored per-image in image_data_store
-
             categories: vec![
                 Category::new(1, "Background", [100, 100, 100]),
                 Category::new(2, "Object", [255, 100, 100]),
@@ -294,11 +294,7 @@ impl HvatApp {
         self.green_band_slider.set_value(green_band);
         self.blue_band_slider.set_value(blue_band);
 
-        self.band_selection = (
-            DEFAULT_RED_BAND,
-            green_band as usize,
-            blue_band as usize,
-        );
+        self.band_selection = (DEFAULT_RED_BAND, green_band as usize, blue_band as usize);
     }
 
     /// Find a category by ID and return a mutable reference.
@@ -472,7 +468,10 @@ impl HvatApp {
 
         log::trace!(
             "ImagePointer: tool={:?}, pos=({:.1}, {:.1}), kind={:?}",
-            self.selected_tool, x, y, event.kind
+            self.selected_tool,
+            x,
+            y,
+            event.kind
         );
 
         match self.selected_tool {
@@ -552,17 +551,32 @@ impl HvatApp {
                     *current_y = y;
                     log::debug!("BoundingBox: MOVE to ({:.1}, {:.1})", x, y);
                 } else {
-                    log::warn!("BoundingBox: MOVE but drawing_state is {:?}", image_data.drawing_state);
+                    log::warn!(
+                        "BoundingBox: MOVE but drawing_state is {:?}",
+                        image_data.drawing_state
+                    );
                 }
             }
             PointerEventKind::DragEnd => {
-                log::info!("BoundingBox: END at ({:.1}, {:.1}), state={:?}", x, y, image_data.drawing_state);
+                log::info!(
+                    "BoundingBox: END at ({:.1}, {:.1}), state={:?}",
+                    x,
+                    y,
+                    image_data.drawing_state
+                );
                 // Finish bounding box
                 if let Some(shape) = image_data.drawing_state.to_shape() {
-                    let annotation = Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
+                    let annotation = Annotation::new(
+                        image_data.next_annotation_id,
+                        shape,
+                        self.selected_category,
+                    );
                     image_data.next_annotation_id += 1;
                     image_data.annotations.push(annotation);
-                    log::info!("Created bounding box annotation (total: {})", image_data.annotations.len());
+                    log::info!(
+                        "Created bounding box annotation (total: {})",
+                        image_data.annotations.len()
+                    );
                 } else {
                     log::warn!("BoundingBox: END but to_shape() returned None");
                 }
@@ -586,7 +600,12 @@ impl HvatApp {
         let path = self.current_image_path();
         let image_data = self.image_data_store.get_or_create(&path);
 
-        log::debug!("Polygon: click at ({:.1}, {:.1}), state={:?}", x, y, image_data.drawing_state);
+        log::debug!(
+            "Polygon: click at ({:.1}, {:.1}), state={:?}",
+            x,
+            y,
+            image_data.drawing_state
+        );
 
         // Check if we should close an existing polygon
         if let DrawingState::Polygon { vertices } = &image_data.drawing_state {
@@ -614,7 +633,12 @@ impl HvatApp {
             }
             DrawingState::Polygon { vertices } => {
                 vertices.push((x, y));
-                log::debug!("Polygon: added vertex {} at ({:.1}, {:.1})", vertices.len(), x, y);
+                log::debug!(
+                    "Polygon: added vertex {} at ({:.1}, {:.1})",
+                    vertices.len(),
+                    x,
+                    y
+                );
             }
             _ => {
                 // Wrong drawing state, reset
@@ -636,7 +660,8 @@ impl HvatApp {
                 let shape = AnnotationShape::Polygon {
                     vertices: vertices.clone(),
                 };
-                let annotation = Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
+                let annotation =
+                    Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
                 image_data.next_annotation_id += 1;
                 log::info!(
                     "Polygon created with {} vertices (total: {})",
@@ -655,7 +680,8 @@ impl HvatApp {
         let image_data = self.image_data_store.get_or_create(&path);
 
         let shape = AnnotationShape::Point { x, y };
-        let annotation = Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
+        let annotation =
+            Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
         image_data.next_annotation_id += 1;
         image_data.annotations.push(annotation);
         log::info!("Created point annotation at ({:.1}, {:.1})", x, y);
@@ -672,7 +698,11 @@ impl Application for HvatApp {
     fn setup(&mut self, resources: &mut Resources<'_>) {
         log::info!("HVAT setup: generating hyperspectral test image...");
 
-        let hyper = generate_test_hyperspectral(DEFAULT_TEST_WIDTH, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_BANDS);
+        let hyper = generate_test_hyperspectral(
+            DEFAULT_TEST_WIDTH,
+            DEFAULT_TEST_HEIGHT,
+            DEFAULT_TEST_BANDS,
+        );
         self.hyperspectral = Some(hyper);
         self.num_bands = DEFAULT_TEST_BANDS;
 
@@ -733,7 +763,10 @@ impl Application for HvatApp {
                 {
                     wasm_bindgen_futures::spawn_local(async {
                         let files = rfd::AsyncFileDialog::new()
-                            .add_filter("images", &["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"])
+                            .add_filter(
+                                "images",
+                                &["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"],
+                            )
                             .pick_files()
                             .await;
 
@@ -836,8 +869,11 @@ impl Application for HvatApp {
             }
             Message::AddCategory => {
                 let new_id = self.categories.iter().map(|c| c.id).max().unwrap_or(0) + 1;
-                self.categories
-                    .push(Category::new(new_id, &format!("Category {}", new_id), [200, 200, 100]));
+                self.categories.push(Category::new(
+                    new_id,
+                    &format!("Category {}", new_id),
+                    [200, 200, 100],
+                ));
                 log::info!("Added new category: {}", new_id);
             }
             Message::StartEditingCategory(id) => {

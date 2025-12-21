@@ -174,10 +174,18 @@ impl<M: 'static> FlexLayout<M> {
 
         // Axis accessor functions - main axis is the layout direction, cross axis is perpendicular
         let main_axis = |size: Size| -> f32 {
-            if is_horizontal { size.width } else { size.height }
+            if is_horizontal {
+                size.width
+            } else {
+                size.height
+            }
         };
         let cross_axis = |size: Size| -> f32 {
-            if is_horizontal { size.height } else { size.width }
+            if is_horizontal {
+                size.height
+            } else {
+                size.width
+            }
         };
         let make_size = |main: f32, cross: f32| -> Size {
             if is_horizontal {
@@ -210,12 +218,22 @@ impl<M: 'static> FlexLayout<M> {
                 total_fill_weight += 1.0;
                 child_mains.push(0.0);
                 max_cross = max_cross.max(child_cross);
-                log::debug!("  {} child {} is FILL: size={:?}", direction_name, i, child_size);
+                log::debug!(
+                    "  {} child {} is FILL: size={:?}",
+                    direction_name,
+                    i,
+                    child_size
+                );
             } else {
                 total_fixed += child_main;
                 child_mains.push(child_main);
                 max_cross = max_cross.max(child_cross);
-                log::debug!("  {} child {} is FIXED: main={}", direction_name, i, child_main);
+                log::debug!(
+                    "  {} child {} is FIXED: main={}",
+                    direction_name,
+                    i,
+                    child_main
+                );
             }
         }
 
@@ -294,7 +312,12 @@ impl<M: 'static> FlexLayout<M> {
                 Bounds::new(start_cross + cross_offset, pos, child_cross, child_main)
             };
 
-            log::debug!("  {} child {} final bounds: {:?}", direction_name, i, bounds);
+            log::debug!(
+                "  {} child {} final bounds: {:?}",
+                direction_name,
+                i,
+                bounds
+            );
             self.child_bounds.push(bounds);
 
             // Only advance position for non-zero main-axis children

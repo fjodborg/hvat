@@ -3,7 +3,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    use hvat::{default_settings, HvatApp};
+    use hvat::{HvatApp, default_settings};
     use hvat_ui::run_with_settings;
 
     // Note: env_logger is initialized by hvat_ui internally

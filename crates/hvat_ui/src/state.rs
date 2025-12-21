@@ -284,7 +284,13 @@ impl ImageViewerState {
     /// ensuring that `zoom` always reflects the actual displayed value.
     /// This fixes the issue where `FitToView` mode leaves `zoom` at a stale value
     /// until user interaction.
-    pub fn sync_with_bounds(&mut self, view_width: f32, view_height: f32, tex_width: u32, tex_height: u32) {
+    pub fn sync_with_bounds(
+        &mut self,
+        view_width: f32,
+        view_height: f32,
+        tex_width: u32,
+        tex_height: u32,
+    ) {
         self.cached_view_size = Some((view_width, view_height));
         self.cached_texture_size = Some((tex_width, tex_height));
 
@@ -514,7 +520,8 @@ impl DropdownState {
         }
 
         let max_scroll = max_items.saturating_sub(visible_items);
-        let new_offset = (self.scroll_offset as isize + delta).clamp(0, max_scroll as isize) as usize;
+        let new_offset =
+            (self.scroll_offset as isize + delta).clamp(0, max_scroll as isize) as usize;
         self.scroll_offset = new_offset;
     }
 

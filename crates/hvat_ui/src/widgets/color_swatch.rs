@@ -1,6 +1,6 @@
 //! Color swatch widget for displaying and selecting colors
 
-use crate::constants::{DEFAULT_FONT_SIZE, line_height};
+use crate::constants::{line_height, DEFAULT_FONT_SIZE};
 use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};

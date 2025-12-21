@@ -137,9 +137,20 @@ impl<M> Widget<M> for Text {
             if let Some(wrap_width) = self.layout_width {
                 log::trace!(
                     "Text draw wrapped: '{}' at {:?}, wrap_width={}, align={:?}",
-                    self.content, bounds, wrap_width, text_align
+                    self.content,
+                    bounds,
+                    wrap_width,
+                    text_align
                 );
-                renderer.text_wrapped(&self.content, bounds.x, bounds.y, self.size, self.color, wrap_width, text_align);
+                renderer.text_wrapped(
+                    &self.content,
+                    bounds.x,
+                    bounds.y,
+                    self.size,
+                    self.color,
+                    wrap_width,
+                    text_align,
+                );
                 return;
             }
         }
@@ -157,7 +168,9 @@ impl<M> Widget<M> for Text {
 
         log::trace!(
             "Text draw: '{}' at {:?}, text_x={}",
-            self.content, bounds, text_x
+            self.content,
+            bounds,
+            text_x
         );
 
         // Draw text using glyphon

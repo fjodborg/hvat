@@ -2,8 +2,8 @@
 //!
 //! All UI events and actions are represented as messages in the Elm architecture style.
 
-use hvat_ui::prelude::*;
 use hvat_ui::ImagePointerEvent;
+use hvat_ui::prelude::*;
 
 use crate::model::AnnotationTool;
 use crate::state::ProjectState;

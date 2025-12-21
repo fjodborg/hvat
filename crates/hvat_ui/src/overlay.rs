@@ -62,7 +62,9 @@ impl OverlayRegistry {
 
     /// Check if position hits any registered overlay
     pub fn has_overlay_at(&self, x: f32, y: f32) -> bool {
-        self.overlays.iter().any(|entry| entry.bounds.contains(x, y))
+        self.overlays
+            .iter()
+            .any(|entry| entry.bounds.contains(x, y))
     }
 
     /// Get the topmost overlay at a position (highest z-order)

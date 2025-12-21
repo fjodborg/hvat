@@ -1,6 +1,7 @@
 //! Bitmap font rendering for test hyperspectral images.
 
 /// 5x7 bitmap font for text rendering.
+#[rustfmt::skip]
 fn get_char_bitmap(c: char) -> Option<[u8; 7]> {
     match c {
         'A' => Some([0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001]),

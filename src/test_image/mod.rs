@@ -75,9 +75,9 @@ fn generate_band_pixel(band_idx: usize, x: u32, y: u32, width: u32, height: u32)
                 fx * 0.3
             }
         }
-        1 => fy,                                                        // Vertical gradient
-        2 => (fx + fy) / 2.0,                                            // Diagonal
-        3 => 1.0 - fx,                                                   // Inverse horizontal
+        1 => fy,              // Vertical gradient
+        2 => (fx + fy) / 2.0, // Diagonal
+        3 => 1.0 - fx,        // Inverse horizontal
         4 => {
             // Checkerboard
             let checker = ((x / 32) + (y / 32)) % 2 == 0;
@@ -99,11 +99,10 @@ fn generate_band_pixel(band_idx: usize, x: u32, y: u32, width: u32, height: u32)
         }
         7 => {
             // Noise-like pattern
-            let noise =
-                ((x as f32 * 12.9898 + y as f32 * 78.233).sin() * 43758.5453).fract();
+            let noise = ((x as f32 * 12.9898 + y as f32 * 78.233).sin() * 43758.5453).fract();
             noise * 0.5 + fy * 0.5
         }
-        8 => render_ascii_art(x, y, width, height),                      // ASCII art
+        8 => render_ascii_art(x, y, width, height), // ASCII art
         _ => {
             let offset = (band_idx as f32 * 0.1) % 1.0;
             ((fx + offset) % 1.0 + fy) / 2.0

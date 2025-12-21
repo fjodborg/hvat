@@ -2,7 +2,7 @@
 
 use crate::element::Element;
 use crate::prelude::*;
-use crate::widgets::{Column, Scrollable, ScrollDirection, ScrollbarVisibility};
+use crate::widgets::{Column, ScrollDirection, Scrollable, ScrollbarVisibility};
 use crate::Context;
 
 /// Scrollable demo state
@@ -33,7 +33,10 @@ impl ScrollableDemo {
         Self::default()
     }
 
-    pub fn view<M: Clone + 'static>(&self, wrap: impl Fn(ScrollableMessage) -> M + Clone + 'static) -> Element<M> {
+    pub fn view<M: Clone + 'static>(
+        &self,
+        wrap: impl Fn(ScrollableMessage) -> M + Clone + 'static,
+    ) -> Element<M> {
         let wrap_add = wrap.clone();
         let wrap_remove = wrap.clone();
         let wrap_scroll = wrap.clone();
@@ -51,7 +54,10 @@ impl ScrollableDemo {
             c.row(|r| {
                 r.button("Add Items").on_click(add_msg);
                 r.button("Remove Items").on_click(remove_msg);
-                r.text(format!("Items: {} | Offset: {:.0}", item_count, scroll_offset));
+                r.text(format!(
+                    "Items: {} | Offset: {:.0}",
+                    item_count, scroll_offset
+                ));
             });
 
             // Build content for scrollable

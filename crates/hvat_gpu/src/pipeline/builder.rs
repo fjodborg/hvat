@@ -100,51 +100,56 @@ impl<'a> PipelineBuilder<'a> {
     /// # Panics
     /// Panics if no shader module was provided.
     pub fn build(self) -> wgpu::RenderPipeline {
-        let shader = self.shader.expect("PipelineBuilder requires a shader module");
+        let shader = self
+            .shader
+            .expect("PipelineBuilder requires a shader module");
 
-        let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: self.label.map(|l| format!("{} Layout", l)).as_deref(),
-            bind_group_layouts: &self.bind_group_layouts,
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: self.label.map(|l| format!("{} Layout", l)).as_deref(),
+                bind_group_layouts: &self.bind_group_layouts,
+                push_constant_ranges: &[],
+            });
 
-        self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: self.label,
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: Some(self.vs_entry),
-                buffers: &self.vertex_buffers,
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: Some(self.fs_entry),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.format,
-                    blend: self.blend_state,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: self.topology,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: self.cull_mode,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        })
+        self.device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: self.label,
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some(self.vs_entry),
+                    buffers: &self.vertex_buffers,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some(self.fs_entry),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.format,
+                        blend: self.blend_state,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: self.topology,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: self.cull_mode,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            })
     }
 }
 
@@ -229,9 +234,10 @@ impl<'a> BindGroupLayoutBuilder<'a> {
 
     /// Build the bind group layout.
     pub fn build(self) -> wgpu::BindGroupLayout {
-        self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: self.label,
-            entries: &self.entries,
-        })
+        self.device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: self.label,
+                entries: &self.entries,
+            })
     }
 }

@@ -2,13 +2,13 @@
 
 use crate::callback::Callback;
 use crate::constants::{SCROLLBAR_MIN_THUMB, SCROLLBAR_WIDTH, SCROLL_SPEED};
-use crate::widgets::scrollbar::{self, ScrollbarParams};
 use crate::element::Element;
 use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{ScrollDragExt, ScrollState};
 use crate::widget::Widget;
+use crate::widgets::scrollbar::{self, ScrollbarParams};
 
 /// Scroll direction for scrollable containers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -170,21 +170,28 @@ impl<M: 'static> Scrollable<M> {
 
     /// Check if vertical scrolling is needed
     fn needs_vertical_scroll(&self) -> bool {
-        matches!(self.direction, ScrollDirection::Vertical | ScrollDirection::Both)
-            && self.content_size.height > self.viewport_size.height
+        matches!(
+            self.direction,
+            ScrollDirection::Vertical | ScrollDirection::Both
+        ) && self.content_size.height > self.viewport_size.height
     }
 
     /// Check if horizontal scrolling is needed
     fn needs_horizontal_scroll(&self) -> bool {
-        matches!(self.direction, ScrollDirection::Horizontal | ScrollDirection::Both)
-            && self.content_size.width > self.viewport_size.width
+        matches!(
+            self.direction,
+            ScrollDirection::Horizontal | ScrollDirection::Both
+        ) && self.content_size.width > self.viewport_size.width
     }
 
     /// Check if vertical scrollbar should be shown
     fn show_vertical_scrollbar(&self) -> bool {
         match self.scrollbar_visibility {
             ScrollbarVisibility::Always => {
-                matches!(self.direction, ScrollDirection::Vertical | ScrollDirection::Both)
+                matches!(
+                    self.direction,
+                    ScrollDirection::Vertical | ScrollDirection::Both
+                )
             }
             ScrollbarVisibility::Auto => self.needs_vertical_scroll(),
             ScrollbarVisibility::Never => false,
@@ -195,7 +202,10 @@ impl<M: 'static> Scrollable<M> {
     fn show_horizontal_scrollbar(&self) -> bool {
         match self.scrollbar_visibility {
             ScrollbarVisibility::Always => {
-                matches!(self.direction, ScrollDirection::Horizontal | ScrollDirection::Both)
+                matches!(
+                    self.direction,
+                    ScrollDirection::Horizontal | ScrollDirection::Both
+                )
             }
             ScrollbarVisibility::Auto => self.needs_horizontal_scroll(),
             ScrollbarVisibility::Never => false,
@@ -249,7 +259,11 @@ impl<M: 'static> Scrollable<M> {
         );
 
         if (new_offset.1 - self.state.offset.1).abs() > 0.1 {
-            log::debug!("  -> Clamped offset from {:.1} to {:.1}", self.state.offset.1, new_offset.1);
+            log::debug!(
+                "  -> Clamped offset from {:.1} to {:.1}",
+                self.state.offset.1,
+                new_offset.1
+            );
         }
 
         self.state.offset = new_offset;
@@ -434,10 +448,14 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
 
         // Adjust viewport for scrollbars if needed
         if self.scrollbar_visibility != ScrollbarVisibility::Never {
-            let needs_v = matches!(self.direction, ScrollDirection::Vertical | ScrollDirection::Both)
-                && self.content_size.height > viewport_height;
-            let needs_h = matches!(self.direction, ScrollDirection::Horizontal | ScrollDirection::Both)
-                && self.content_size.width > viewport_width;
+            let needs_v = matches!(
+                self.direction,
+                ScrollDirection::Vertical | ScrollDirection::Both
+            ) && self.content_size.height > viewport_height;
+            let needs_h = matches!(
+                self.direction,
+                ScrollDirection::Horizontal | ScrollDirection::Both
+            ) && self.content_size.width > viewport_width;
 
             if needs_v {
                 viewport_width -= scrollbar_width;
@@ -479,14 +497,16 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
 
         let should_clamp = prev_viewport_height > 0.0  // Not the very first layout
             && viewport_height <= prev_viewport_height  // Viewport same or smaller
-            && !is_flexlayout_first_pass;  // Not in FlexLayout probe pass
+            && !is_flexlayout_first_pass; // Not in FlexLayout probe pass
 
         if should_clamp {
             self.clamp_scroll();
         } else {
             log::debug!(
                 "Scrollable: skipping clamp (viewport changed {:.1} -> {:.1}, is_first_pass={})",
-                prev_viewport_height, viewport_height, is_flexlayout_first_pass
+                prev_viewport_height,
+                viewport_height,
+                is_flexlayout_first_pass
             );
         }
 
@@ -596,9 +616,11 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 // Check vertical scrollbar
                 if let Some(thumb) = self.v_scrollbar_thumb(bounds) {
                     if thumb.contains(position.0, position.1) {
-                        self.state.drag.start_drag_with(crate::state::ScrollDragData {
-                            thumb_offset: position.1 - thumb.y,
-                        });
+                        self.state
+                            .drag
+                            .start_drag_with(crate::state::ScrollDragData {
+                                thumb_offset: position.1 - thumb.y,
+                            });
                         return self.emit_change();
                     }
 
@@ -622,9 +644,11 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 // Check horizontal scrollbar
                 if let Some(thumb) = self.h_scrollbar_thumb(bounds) {
                     if thumb.contains(position.0, position.1) {
-                        self.state.drag.start_drag_with(crate::state::ScrollDragData {
-                            thumb_offset: position.0 - thumb.x,
-                        });
+                        self.state
+                            .drag
+                            .start_drag_with(crate::state::ScrollDragData {
+                                thumb_offset: position.0 - thumb.x,
+                            });
                         return self.emit_change();
                     }
 
@@ -718,7 +742,12 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 }
             }
 
-            Event::MouseScroll { delta, position, modifiers, overlay_hint } => {
+            Event::MouseScroll {
+                delta,
+                position,
+                modifiers,
+                overlay_hint,
+            } => {
                 let content_bounds = self.calc_content_bounds_for_events(viewport_bounds);
 
                 // If event is for an overlay, forward to children so they can handle it
@@ -839,7 +868,11 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                         overlay_hint: *overlay_hint,
                     })
                 }
-                Event::MouseMove { position, modifiers, overlay_hint } => {
+                Event::MouseMove {
+                    position,
+                    modifiers,
+                    overlay_hint,
+                } => {
                     // Allow if within viewport, if event is for an overlay, or if content has active drag
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
                     let content_has_drag = self.content.has_active_drag();

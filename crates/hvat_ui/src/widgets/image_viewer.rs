@@ -4,7 +4,9 @@ use crate::callback::Callback;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer, TextureId};
-use crate::state::{FitMode, ImageViewerState, InteractionMode, PanDragData, PanDragExt, PointerState};
+use crate::state::{
+    FitMode, ImageViewerState, InteractionMode, PanDragData, PanDragExt, PointerState,
+};
 use crate::widget::Widget;
 use hvat_gpu::{ImageAdjustments, TransformUniform};
 use std::marker::PhantomData;
@@ -74,11 +76,19 @@ pub struct AnnotationOverlay {
 #[derive(Debug, Clone)]
 pub enum OverlayShape {
     /// Bounding box (x, y, width, height) in image coordinates
-    BoundingBox { x: f32, y: f32, width: f32, height: f32 },
+    BoundingBox {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    },
     /// Point marker (x, y) in image coordinates
     Point { x: f32, y: f32 },
     /// Polygon (vertices) in image coordinates
-    Polygon { vertices: Vec<(f32, f32)>, closed: bool },
+    Polygon {
+        vertices: Vec<(f32, f32)>,
+        closed: bool,
+    },
 }
 
 /// An image viewer widget with pan and zoom capabilities
@@ -320,7 +330,12 @@ impl<M> ImageViewer<M> {
         let base_scale_x = (self.texture_width as f32 / bounds.width) * zoom;
         let base_scale_y = (self.texture_height as f32 / bounds.height) * zoom;
 
-        TransformUniform::from_transform_xy(self.state.pan.0, self.state.pan.1, base_scale_x, base_scale_y)
+        TransformUniform::from_transform_xy(
+            self.state.pan.0,
+            self.state.pan.1,
+            base_scale_x,
+            base_scale_y,
+        )
     }
 
     /// Convert screen position to clip space relative to widget bounds
@@ -422,7 +437,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
 
         // Sync state with layout bounds - this resolves any pending FitToView mode
         // and ensures the zoom value is correct before draw() and before any events.
-        self.state.sync_with_bounds(size.width, size.height, self.texture_width, self.texture_height);
+        self.state.sync_with_bounds(
+            size.width,
+            size.height,
+            self.texture_width,
+            self.texture_height,
+        );
 
         size
     }
@@ -464,14 +484,25 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
 
         // Draw annotation overlays
         for overlay in &self.overlays {
-            let color = Color::rgba(overlay.color[0], overlay.color[1], overlay.color[2], overlay.color[3]);
+            let color = Color::rgba(
+                overlay.color[0],
+                overlay.color[1],
+                overlay.color[2],
+                overlay.color[3],
+            );
             let selected_color = Color::rgba(1.0, 1.0, 0.0, 1.0); // Yellow for selected
 
             match &overlay.shape {
-                OverlayShape::BoundingBox { x, y, width, height } => {
+                OverlayShape::BoundingBox {
+                    x,
+                    y,
+                    width,
+                    height,
+                } => {
                     // Convert image coordinates to screen coordinates
                     let (screen_x1, screen_y1) = self.image_to_screen(*x, *y, &bounds);
-                    let (screen_x2, screen_y2) = self.image_to_screen(*x + *width, *y + *height, &bounds);
+                    let (screen_x2, screen_y2) =
+                        self.image_to_screen(*x + *width, *y + *height, &bounds);
 
                     let box_bounds = Bounds::new(
                         screen_x1.min(screen_x2),
@@ -485,7 +516,11 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     renderer.fill_rect(box_bounds, fill_color);
 
                     // Draw border
-                    let border_color = if overlay.selected { selected_color } else { color };
+                    let border_color = if overlay.selected {
+                        selected_color
+                    } else {
+                        color
+                    };
                     renderer.stroke_rect(box_bounds, border_color, overlay.line_width);
 
                     // Draw corner handles if selected
@@ -514,7 +549,11 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     let radius = 6.0;
 
                     // Draw a circle approximation (diamond shape)
-                    let point_color = if overlay.selected { selected_color } else { color };
+                    let point_color = if overlay.selected {
+                        selected_color
+                    } else {
+                        color
+                    };
                     let point_bounds = Bounds::new(
                         screen_x - radius,
                         screen_y - radius,
@@ -529,7 +568,11 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         continue;
                     }
 
-                    let line_color = if overlay.selected { selected_color } else { color };
+                    let line_color = if overlay.selected {
+                        selected_color
+                    } else {
+                        color
+                    };
                     let screen_verts: Vec<(f32, f32)> = vertices
                         .iter()
                         .map(|(x, y)| self.image_to_screen(*x, *y, &bounds))
@@ -621,7 +664,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
         // Sync state with current bounds - this resolves any pending FitToView mode
         // and ensures zoom operations use the correct base value.
-        self.state.sync_with_bounds(bounds.width, bounds.height, self.texture_width, self.texture_height);
+        self.state.sync_with_bounds(
+            bounds.width,
+            bounds.height,
+            self.texture_width,
+            self.texture_height,
+        );
 
         match event {
             // Handle control button clicks (left mouse)
@@ -659,7 +707,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 // In annotation mode, emit pointer events for drawing
                 if self.interaction_mode == InteractionMode::Annotate {
                     self.state.pointer_state = PointerState::AnnotationDrag;
-                    self.state.sync_with_bounds(bounds.width, bounds.height, self.texture_width, self.texture_height);
+                    self.state.sync_with_bounds(
+                        bounds.width,
+                        bounds.height,
+                        self.texture_width,
+                        self.texture_height,
+                    );
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
                     return self.on_pointer.call(ImagePointerEvent {
                         image_x,
@@ -681,7 +734,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
             } => {
                 if self.state.pointer_state == PointerState::AnnotationDrag {
                     self.state.pointer_state = PointerState::Idle;
-                    self.state.sync_with_bounds(bounds.width, bounds.height, self.texture_width, self.texture_height);
+                    self.state.sync_with_bounds(
+                        bounds.width,
+                        bounds.height,
+                        self.texture_width,
+                        self.texture_height,
+                    );
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
                     return self.on_pointer.call(ImagePointerEvent {
                         image_x,
@@ -760,13 +818,18 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 None
             }
 
-            Event::MouseScroll { delta, position, .. } => {
+            Event::MouseScroll {
+                delta, position, ..
+            } => {
                 if !bounds.contains(position.0, position.1) || !self.zoomable {
                     return None;
                 }
 
                 // Skip if on control buttons
-                if self.control_button_at(position.0, position.1, &bounds).is_some() {
+                if self
+                    .control_button_at(position.0, position.1, &bounds)
+                    .is_some()
+                {
                     return None;
                 }
 

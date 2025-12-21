@@ -88,7 +88,10 @@ impl ImageViewerDemo {
         }
     }
 
-    pub fn view<M: Clone + 'static>(&self, wrap: impl Fn(ImageViewerMessage) -> M + Clone + 'static) -> Element<M> {
+    pub fn view<M: Clone + 'static>(
+        &self,
+        wrap: impl Fn(ImageViewerMessage) -> M + Clone + 'static,
+    ) -> Element<M> {
         let viewer_state = self.viewer_state.clone();
         let show_controls = self.show_controls;
         let texture_id = self.texture_id;
@@ -121,8 +124,12 @@ impl ImageViewerDemo {
                 r.button("Reset View").on_click(reset_msg);
                 r.button("Zoom In").on_click(zoom_in_msg);
                 r.button("Zoom Out").on_click(zoom_out_msg);
-                r.button(if show_controls { "Hide Controls" } else { "Show Controls" })
-                    .on_click(toggle_msg);
+                r.button(if show_controls {
+                    "Hide Controls"
+                } else {
+                    "Show Controls"
+                })
+                .on_click(toggle_msg);
             });
 
             // Image viewer

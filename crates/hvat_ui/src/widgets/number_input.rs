@@ -294,8 +294,8 @@ impl<M> NumberInput<M> {
     /// Handle delete (with undo support)
     fn handle_delete(&mut self) -> bool {
         // Check if delete would do anything
-        let would_modify =
-            self.state.selection.is_some() || self.state.cursor < text_core::char_count(&self.state.text);
+        let would_modify = self.state.selection.is_some()
+            || self.state.cursor < text_core::char_count(&self.state.text);
 
         if would_modify {
             // Push undo BEFORE making changes
@@ -351,12 +351,11 @@ impl<M> NumberInput<M> {
 
     /// Emit a state change if handler is set and value is valid
     fn emit_change(&self) -> Option<M> {
-        self.state.value().and_then(|value| {
-            self.on_change.call((value, self.state.clone()))
-        })
+        self.state
+            .value()
+            .and_then(|value| self.on_change.call((value, self.state.clone())))
     }
 }
-
 
 impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
     fn layout(&mut self, available: Size) -> Size {
@@ -374,7 +373,12 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
         let content = self.content_bounds(bounds);
 
         // Draw background and border
-        text_core::draw_input_background(renderer, bounds, self.state.is_focused, &self.config.base);
+        text_core::draw_input_background(
+            renderer,
+            bounds,
+            self.state.is_focused,
+            &self.config.base,
+        );
 
         // Draw selection if present and focused
         if self.state.is_focused {
@@ -530,12 +534,8 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     let was_focused = self.state.is_focused;
                     self.state.is_focused = true;
                     let text_chars = text_core::char_count(&self.state.text);
-                    let new_cursor = text_core::x_to_char_index(
-                        x,
-                        content.x,
-                        self.font_size,
-                        text_chars,
-                    );
+                    let new_cursor =
+                        text_core::x_to_char_index(x, content.x, self.font_size, text_chars);
 
                     if modifiers.shift && was_focused {
                         // Extend selection
@@ -610,7 +610,10 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     }
                     KeyCode::Z if modifiers.ctrl && modifiers.shift => {
                         if self.state.redo() {
-                            log::debug!("NumberInput: redo (Ctrl+Shift+Z), value = '{}'", self.state.text);
+                            log::debug!(
+                                "NumberInput: redo (Ctrl+Shift+Z), value = '{}'",
+                                self.state.text
+                            );
                             return self.emit_change();
                         }
                     }
@@ -667,19 +670,26 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = result.selection;
                     }
                     KeyCode::A if modifiers.ctrl => {
-                        let result = text_core::handle_select_all(text_core::char_count(&self.state.text));
+                        let result =
+                            text_core::handle_select_all(text_core::char_count(&self.state.text));
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }
                     KeyCode::Up => {
                         if self.increment() {
-                            log::debug!("NumberInput: up arrow increment, value = {}", self.state.text);
+                            log::debug!(
+                                "NumberInput: up arrow increment, value = {}",
+                                self.state.text
+                            );
                             return self.emit_change();
                         }
                     }
                     KeyCode::Down => {
                         if self.decrement() {
-                            log::debug!("NumberInput: down arrow decrement, value = {}", self.state.text);
+                            log::debug!(
+                                "NumberInput: down arrow decrement, value = {}",
+                                self.state.text
+                            );
                             return self.emit_change();
                         }
                     }
@@ -703,9 +713,13 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 if bounds.contains(position.0, position.1) {
                     let steps = delta.1.signum() as i32;
                     if steps > 0 {
-                        (0..steps.abs()).for_each(|_| { self.increment(); });
+                        (0..steps.abs()).for_each(|_| {
+                            self.increment();
+                        });
                     } else {
-                        (0..steps.abs()).for_each(|_| { self.decrement(); });
+                        (0..steps.abs()).for_each(|_| {
+                            self.decrement();
+                        });
                     }
                     return self.emit_change();
                 }
@@ -729,7 +743,10 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
 
             Event::FocusLost => {
                 // Blur when window loses focus
-                if text_core::handle_focus_lost(&mut self.state.is_focused, &mut self.state.selection) {
+                if text_core::handle_focus_lost(
+                    &mut self.state.is_focused,
+                    &mut self.state.selection,
+                ) {
                     log::debug!("NumberInput: FocusLost, blurred");
                     self.validate_value();
                     return self.emit_change();

@@ -4,10 +4,12 @@
 
 use hvat_ui::constants::BUTTON_PADDING_COMPACT;
 use hvat_ui::prelude::*;
-use hvat_ui::{Collapsible, Column, Context, Element, Scrollable, ScrollDirection, ScrollbarVisibility, Text};
+use hvat_ui::{
+    Collapsible, Column, Context, Element, ScrollDirection, Scrollable, ScrollbarVisibility, Text,
+};
 
 use crate::app::HvatApp;
-use crate::licenses::{DependencyInfo, DEPENDENCIES};
+use crate::licenses::{DEPENDENCIES, DependencyInfo};
 use crate::message::Message;
 
 /// Application version
@@ -76,7 +78,8 @@ impl HvatApp {
                                 .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::ThemeChanged(!dark_theme));
                         });
-                        ac.text("(Theme switching not yet implemented)").size(FONT_SIZE_SMALL);
+                        ac.text("(Theme switching not yet implemented)")
+                            .size(FONT_SIZE_SMALL);
                     });
                 c.add(Element::new(appearance_collapsible));
 
@@ -133,17 +136,25 @@ impl HvatApp {
         // ========================================
         // About Section
         // ========================================
-        ctx.text("About").size(FONT_SIZE_SECTION).align(Alignment::Center);
+        ctx.text("About")
+            .size(FONT_SIZE_SECTION)
+            .align(Alignment::Center);
         ctx.text("");
         ctx.text(APP_NAME).align(Alignment::Center);
-        ctx.text(format!("Version: {}", APP_VERSION)).align(Alignment::Center);
+        ctx.text(format!("Version: {}", APP_VERSION))
+            .align(Alignment::Center);
         ctx.text("");
-        ctx.text("A GPU-accelerated desktop and web application").align(Alignment::Center);
-        ctx.text("for hyperspectral image annotation.").align(Alignment::Center);
+        ctx.text("A GPU-accelerated desktop and web application")
+            .align(Alignment::Center);
+        ctx.text("for hyperspectral image annotation.")
+            .align(Alignment::Center);
         ctx.text("");
         ctx.text("License: AGPL-3.0").align(Alignment::Center);
-        ctx.text("Source: https://github.com/fjodborg/hvat").align(Alignment::Center);
-        ctx.text("My intention is to make it so you own the data and the output of the program, but in this stage i'm keeping it AGPL-3.0, but i might change it to MIT in the future").align(Alignment::Center).wrap(true);
+        ctx.text("Source: https://github.com/fjodborg/hvat")
+            .align(Alignment::Center);
+        ctx.text("My intention is to make it so you own the data and the output of the program, but in this stage i'm keeping it AGPL-3.0, but i might change it to MIT in the future")
+            .align(Alignment::Center)
+            .wrap(true);
 
         ctx.text("");
         ctx.text("");
@@ -160,39 +171,40 @@ impl HvatApp {
         licenses.sort();
 
         // Dependencies Section (collapsible) with nested license collapsibles
-        let collapsible = Collapsible::new(format!(
-            "Third-Party Dependencies ({})",
-            DEPENDENCIES.len()
-        ))
-        .state(&dependencies_collapsed)
-        .on_toggle(Message::DependenciesToggled)
-        .content(|c| {
-            // Create a nested collapsible for each license type
-            for license in &licenses {
-                let deps = by_license.get(*license).unwrap();
-                let license_string = license.to_string();
-                let license_state = license_collapsed
-                    .get(&license_string)
-                    .copied()
-                    .unwrap_or_else(CollapsibleState::collapsed);
+        let collapsible =
+            Collapsible::new(format!("Third-Party Dependencies ({})", DEPENDENCIES.len()))
+                .state(&dependencies_collapsed)
+                .on_toggle(Message::DependenciesToggled)
+                .content(|c| {
+                    // Create a nested collapsible for each license type
+                    for license in &licenses {
+                        let deps = by_license.get(*license).unwrap();
+                        let license_string = license.to_string();
+                        let license_state = license_collapsed
+                            .get(&license_string)
+                            .copied()
+                            .unwrap_or_else(CollapsibleState::collapsed);
 
-                // Clone for the closure
-                let license_for_closure = license_string.clone();
+                        // Clone for the closure
+                        let license_for_closure = license_string.clone();
 
-                let license_collapsible = Collapsible::new(format!("{} ({})", license, deps.len()))
-                    .state(&license_state)
-                    .on_toggle(move |state| Message::LicenseToggled(license_for_closure.clone(), state))
-                    .content(|lc| {
-                        for dep in deps {
-                            let repo = dep.repository.unwrap_or("crates.io");
-                            lc.text(format!("{} v{}", dep.name, dep.version));
-                            lc.text(format!("  {}", repo)).size(FONT_SIZE_SMALL);
-                        }
-                    });
+                        let license_collapsible =
+                            Collapsible::new(format!("{} ({})", license, deps.len()))
+                                .state(&license_state)
+                                .on_toggle(move |state| {
+                                    Message::LicenseToggled(license_for_closure.clone(), state)
+                                })
+                                .content(|lc| {
+                                    for dep in deps {
+                                        let repo = dep.repository.unwrap_or("crates.io");
+                                        lc.text(format!("{} v{}", dep.name, dep.version));
+                                        lc.text(format!("  {}", repo)).size(FONT_SIZE_SMALL);
+                                    }
+                                });
 
-                c.add(Element::new(license_collapsible));
-            }
-        });
+                        c.add(Element::new(license_collapsible));
+                    }
+                });
 
         ctx.add(Element::new(collapsible));
 
@@ -202,7 +214,11 @@ impl HvatApp {
 
         // Wrap in scrollable
         // Column must fill width so centered text can center properly
-        let content = Element::new(Column::new(ctx.take()).padding(16.0).width(Length::Fill(1.0)));
+        let content = Element::new(
+            Column::new(ctx.take())
+                .padding(16.0)
+                .width(Length::Fill(1.0)),
+        );
         let scrollable = Scrollable::new(content)
             .state(&scroll_state)
             .direction(ScrollDirection::Vertical)

@@ -2,7 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::{default_settings, HvatApp};
+use crate::{HvatApp, default_settings};
 use hvat_ui::run_with_settings;
 
 #[wasm_bindgen(start)]

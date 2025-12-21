@@ -19,7 +19,11 @@ impl Bounds {
 
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         debug_assert!(width >= 0.0, "Bounds width cannot be negative: {}", width);
-        debug_assert!(height >= 0.0, "Bounds height cannot be negative: {}", height);
+        debug_assert!(
+            height >= 0.0,
+            "Bounds height cannot be negative: {}",
+            height
+        );
         Self {
             x,
             y,

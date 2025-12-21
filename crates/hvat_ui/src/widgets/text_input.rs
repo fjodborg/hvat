@@ -168,18 +168,20 @@ impl<M> TextInput<M> {
 
     /// Handle text insertion
     fn insert_text(&mut self, text: &str) {
-        self.state.cursor =
-            text_core::insert_text(&mut self.value, self.state.cursor, self.state.selection, text);
+        self.state.cursor = text_core::insert_text(
+            &mut self.value,
+            self.state.cursor,
+            self.state.selection,
+            text,
+        );
         self.state.selection = None;
     }
 
     /// Handle backspace
     fn handle_backspace(&mut self) -> bool {
-        if let Some(new_cursor) = text_core::handle_backspace(
-            &mut self.value,
-            self.state.cursor,
-            self.state.selection,
-        ) {
+        if let Some(new_cursor) =
+            text_core::handle_backspace(&mut self.value, self.state.cursor, self.state.selection)
+        {
             self.state.cursor = new_cursor;
             self.state.selection = None;
             true
@@ -207,7 +209,6 @@ impl<M> TextInput<M> {
     }
 }
 
-
 impl<M: Clone + 'static> Widget<M> for TextInput<M> {
     fn layout(&mut self, available: Size) -> Size {
         let content_height = line_height(self.font_size);
@@ -224,7 +225,12 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
         let content = self.content_bounds(bounds);
 
         // Draw background and border
-        text_core::draw_input_background(renderer, bounds, self.state.is_focused, &self.config.base);
+        text_core::draw_input_background(
+            renderer,
+            bounds,
+            self.state.is_focused,
+            &self.config.base,
+        );
 
         // Draw selection if present and focused
         if self.state.is_focused {
@@ -289,8 +295,12 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     // Focus and position cursor
                     let was_focused = self.state.is_focused;
                     self.state.is_focused = true;
-                    let new_cursor =
-                        text_core::x_to_char_index(x, content.x, self.font_size, text_core::char_count(&self.value));
+                    let new_cursor = text_core::x_to_char_index(
+                        x,
+                        content.x,
+                        self.font_size,
+                        text_core::char_count(&self.value),
+                    );
 
                     if modifiers.shift && was_focused {
                         // Extend selection
@@ -382,13 +392,18 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         self.state.selection = result.selection;
                     }
                     KeyCode::A if modifiers.ctrl => {
-                        let result = text_core::handle_select_all(text_core::char_count(&self.value));
+                        let result =
+                            text_core::handle_select_all(text_core::char_count(&self.value));
                         self.state.cursor = result.cursor;
                         self.state.selection = result.selection;
                     }
                     // Note: Ctrl+Z/Y (undo/redo) is handled at application level via UndoStack<T>
                     KeyCode::Enter => {
-                        log::debug!("TextInput: Enter pressed, value='{}', is_focused={}", self.value, self.state.is_focused);
+                        log::debug!(
+                            "TextInput: Enter pressed, value='{}', is_focused={}",
+                            self.value,
+                            self.state.is_focused
+                        );
                         if let Some(msg) = self.on_submit.call(self.value.clone()) {
                             log::debug!("TextInput: submit callback returned message");
                             return Some(msg);
@@ -424,7 +439,10 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
 
             Event::FocusLost => {
                 // Blur when window loses focus
-                if text_core::handle_focus_lost(&mut self.state.is_focused, &mut self.state.selection) {
+                if text_core::handle_focus_lost(
+                    &mut self.state.is_focused,
+                    &mut self.state.selection,
+                ) {
                     log::debug!("TextInput: FocusLost, blurred");
                     return self.emit_change();
                 }

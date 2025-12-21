@@ -57,10 +57,10 @@ impl HyperspectralGpuData {
     ) -> Self {
         let num_bands = bands.len();
         let num_layers = ((num_bands + 3) / 4) as u32; // ceil(num_bands / 4)
-        // IMPORTANT: Use at least 2 layers to work around wgpu WebGL2 bug where
-        // single-layer texture arrays are incorrectly translated to non-array textures.
-        // See: https://github.com/gfx-rs/wgpu/issues/2161
-        // TODO: Fix this in the future.
+                                                       // IMPORTANT: Use at least 2 layers to work around wgpu WebGL2 bug where
+                                                       // single-layer texture arrays are incorrectly translated to non-array textures.
+                                                       // See: https://github.com/gfx-rs/wgpu/issues/2161
+                                                       // TODO: Fix this in the future.
         let num_layers = num_layers.max(2);
 
         let pixel_count = (width * height) as usize;
@@ -200,38 +200,50 @@ pub struct HyperspectralPipeline {
 
 impl HyperspectralPipeline {
     pub fn new(ctx: &GpuContext) -> Self {
-        let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Hyperspectral Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/hyperspectral.wgsl").into()),
-        });
+        let shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Hyperspectral Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("../shaders/hyperspectral.wgsl").into(),
+                ),
+            });
 
         // Create uniform buffers
         let transform_uniform = TransformUniform::new();
-        let uniform_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Hyperspectral Transform Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[transform_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Hyperspectral Transform Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[transform_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         let adjustments = ImageAdjustments::new();
-        let adjustments_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Hyperspectral Adjustments Buffer"),
-            contents: bytemuck::cast_slice(&[adjustments]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let adjustments_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Hyperspectral Adjustments Buffer"),
+                contents: bytemuck::cast_slice(&[adjustments]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         let band_selection = BandSelectionUniform::default();
         let band_selection_buffer =
-            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Band Selection Buffer"),
-                contents: bytemuck::cast_slice(&[band_selection]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            ctx.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Band Selection Buffer"),
+                    contents: bytemuck::cast_slice(&[band_selection]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
 
         // Create bind group layouts
         let uniform_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
             .with_label("Hyperspectral Uniform Bind Group Layout")
-            .add_uniform_buffer(bindings::UNIFORM_TRANSFORM_BINDING, wgpu::ShaderStages::VERTEX)
+            .add_uniform_buffer(
+                bindings::UNIFORM_TRANSFORM_BINDING,
+                wgpu::ShaderStages::VERTEX,
+            )
             .add_uniform_buffer(
                 bindings::UNIFORM_ADJUSTMENTS_BINDING,
                 wgpu::ShaderStages::FRAGMENT,
@@ -245,7 +257,10 @@ impl HyperspectralPipeline {
         // Use texture 2D array for band data
         let band_texture_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
             .with_label("Band Texture Bind Group Layout")
-            .add_texture_2d_array(bindings::BAND_TEXTURE_ARRAY_BINDING, wgpu::ShaderStages::FRAGMENT)
+            .add_texture_2d_array(
+                bindings::BAND_TEXTURE_ARRAY_BINDING,
+                wgpu::ShaderStages::FRAGMENT,
+            )
             .add_sampler(bindings::BAND_SAMPLER_BINDING, wgpu::ShaderStages::FRAGMENT)
             .build();
 
@@ -301,17 +316,21 @@ impl HyperspectralPipeline {
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
-        let vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Hyperspectral Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Hyperspectral Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
-        let index_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Hyperspectral Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let index_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Hyperspectral Index Buffer"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         Self {
             render_pipeline,
@@ -357,12 +376,17 @@ impl HyperspectralPipeline {
         view: &wgpu::TextureView,
         band_bind_group: &wgpu::BindGroup,
     ) {
-        self.render_with_clear(encoder, view, band_bind_group, Some(wgpu::Color {
-            r: 0.1,
-            g: 0.1,
-            b: 0.1,
-            a: 1.0,
-        }));
+        self.render_with_clear(
+            encoder,
+            view,
+            band_bind_group,
+            Some(wgpu::Color {
+                r: 0.1,
+                g: 0.1,
+                b: 0.1,
+                a: 1.0,
+            }),
+        );
     }
 
     /// Render hyperspectral image to a render target with optional clear.

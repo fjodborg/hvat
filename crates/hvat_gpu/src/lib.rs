@@ -11,8 +11,8 @@ pub use config::{ClearColor, GpuConfig, RenderConfig, TextureConfig};
 pub use context::GpuContext;
 pub use error::{GpuError, Result};
 pub use pipeline::{
-    BindGroupLayoutBuilder, ColorPipeline, HyperspectralGpuData,
-    HyperspectralPipeline, Pipeline, PipelineBuilder, TexturePipeline,
+    BindGroupLayoutBuilder, ColorPipeline, HyperspectralGpuData, HyperspectralPipeline, Pipeline,
+    PipelineBuilder, TexturePipeline,
 };
 pub use texture::Texture;
 pub use uniform::{BandSelectionUniform, ImageAdjustments, TransformUniform};

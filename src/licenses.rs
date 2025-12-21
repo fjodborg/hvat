@@ -1284,7 +1284,9 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
         name: "wasm-bindgen-macro-support",
         version: "0.2.106",
         license: "Apache License 2.0",
-        repository: Some("https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support"),
+        repository: Some(
+            "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support",
+        ),
     },
     DependencyInfo {
         name: "wasm-bindgen-macro",
@@ -2778,7 +2780,8 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
 
 /// Get a summary of license usage
 pub fn license_summary() -> Vec<(&'static str, usize)> {
-    let mut counts: std::collections::HashMap<&'static str, usize> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<&'static str, usize> =
+        std::collections::HashMap::new();
     for dep in DEPENDENCIES {
         *counts.entry(dep.license).or_insert(0) += 1;
     }
@@ -2786,4 +2789,3 @@ pub fn license_summary() -> Vec<(&'static str, usize)> {
     result.sort_by(|a, b| b.1.cmp(&a.1));
     result
 }
-

@@ -14,7 +14,7 @@ use crate::state::{
     CollapsibleState, DropdownState, NumberInputState, SliderState, TextInputState, UndoContext,
     UndoStack,
 };
-use crate::widgets::{Column, Row, Scrollable, ScrollDirection, ScrollbarVisibility};
+use crate::widgets::{Column, Row, ScrollDirection, Scrollable, ScrollbarVisibility};
 use crate::Context;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -271,7 +271,11 @@ impl ComprehensiveDemo {
                 let id = resources.register_texture(&texture);
                 self.texture_id = Some(id);
                 self.texture_size = (width, height);
-                log::info!("ComprehensiveDemo: Created test texture {}x{}", width, height);
+                log::info!(
+                    "ComprehensiveDemo: Created test texture {}x{}",
+                    width,
+                    height
+                );
             }
             Err(e) => {
                 log::error!("ComprehensiveDemo: Failed to create texture: {:?}", e);
@@ -341,7 +345,8 @@ impl ComprehensiveDemo {
         );
 
         // Build the center image viewer
-        let center_viewer = self.build_image_viewer(wrap_viewer, viewer_state, texture_id, texture_size);
+        let center_viewer =
+            self.build_image_viewer(wrap_viewer, viewer_state, texture_id, texture_size);
 
         // Build the right sidebar
         let right_sidebar = self.build_right_sidebar(
@@ -363,11 +368,15 @@ impl ComprehensiveDemo {
 
         // Build the main content: Row with [LeftSidebar | ImageViewer | RightSidebar]
         let mut content_row = Row::new(vec![left_sidebar, center_viewer, right_sidebar]);
-        content_row = content_row.width(Length::Fill(1.0)).height(Length::Fill(1.0));
+        content_row = content_row
+            .width(Length::Fill(1.0))
+            .height(Length::Fill(1.0));
 
         // Build the main layout: Column with [Topbar | ContentRow]
         let mut main_column = Column::new(vec![topbar, Element::new(content_row)]);
-        main_column = main_column.width(Length::Fill(1.0)).height(Length::Fill(1.0));
+        main_column = main_column
+            .width(Length::Fill(1.0))
+            .height(Length::Fill(1.0));
         Element::new(main_column)
     }
 
@@ -444,7 +453,10 @@ impl ComprehensiveDemo {
                 let fit_msg = wrap_fit(ComprehensiveMessage::FitToWindow);
                 let actual_msg = wrap_actual(ComprehensiveMessage::ZoomToActual);
 
-                c.text(format!("Zoom: {:.0}%", viewer_state.effective_zoom() * 100.0));
+                c.text(format!(
+                    "Zoom: {:.0}%",
+                    viewer_state.effective_zoom() * 100.0
+                ));
                 c.text(format!(
                     "Pan: ({:.1}, {:.1})",
                     viewer_state.pan.0, viewer_state.pan.1
@@ -453,9 +465,13 @@ impl ComprehensiveDemo {
 
                 // All view control buttons in one row
                 c.row(|r| {
-                    r.button("Reset").width(Length::Fixed(60.0)).on_click(reset_msg);
+                    r.button("Reset")
+                        .width(Length::Fixed(60.0))
+                        .on_click(reset_msg);
                     r.button("Fit").width(Length::Fixed(50.0)).on_click(fit_msg);
-                    r.button("1:1").width(Length::Fixed(50.0)).on_click(actual_msg);
+                    r.button("1:1")
+                        .width(Length::Fixed(50.0))
+                        .on_click(actual_msg);
                 });
 
                 c.text("");
@@ -493,7 +509,8 @@ impl ComprehensiveDemo {
             .max_height(250.0)
             .on_toggle(move |s| wrap_tools(ComprehensiveMessage::ToolsToggled(s)))
             .content(|c| {
-                c.text(format!("Current: {}", selected_tool.name())).size(11.0);
+                c.text(format!("Current: {}", selected_tool.name()))
+                    .size(11.0);
                 c.text("");
                 for tool in Tool::all() {
                     let is_selected = *tool == selected_tool;
@@ -521,31 +538,30 @@ impl ComprehensiveDemo {
                 // Dropdown demo
                 c.text("Dropdown (searchable):").size(12.0);
                 c.text(format!(
-                        "Selected: {}",
-                        selected_blend_mode
-                            .map(|i| BLEND_MODES[i])
-                            .unwrap_or("None")
-                    )).size(10.0);
-                c.add(
-                    Element::new(
-                        crate::Dropdown::new()
-                            .state(&blend_mode_state)
-                            .options(BLEND_MODES.iter().map(|s| s.to_string()))
-                            .selected(selected_blend_mode)
-                            .placeholder("Select blend mode...")
-                            .searchable(true)
-                            .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
-                            .viewport_height(window_height)
-                            .on_select(move |idx| {
-                                wrap_dropdown_select(ComprehensiveMessage::BlendModeSelected(idx))
-                            })
-                            .on_change(move |state| {
-                                wrap_dropdown_change(ComprehensiveMessage::BlendModeDropdownChanged(
-                                    state,
-                                ))
-                            }),
-                    )
-                );
+                    "Selected: {}",
+                    selected_blend_mode
+                        .map(|i| BLEND_MODES[i])
+                        .unwrap_or("None")
+                ))
+                .size(10.0);
+                c.add(Element::new(
+                    crate::Dropdown::new()
+                        .state(&blend_mode_state)
+                        .options(BLEND_MODES.iter().map(|s| s.to_string()))
+                        .selected(selected_blend_mode)
+                        .placeholder("Select blend mode...")
+                        .searchable(true)
+                        .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
+                        .viewport_height(window_height)
+                        .on_select(move |idx| {
+                            wrap_dropdown_select(ComprehensiveMessage::BlendModeSelected(idx))
+                        })
+                        .on_change(move |state| {
+                            wrap_dropdown_change(ComprehensiveMessage::BlendModeDropdownChanged(
+                                state,
+                            ))
+                        }),
+                ));
 
                 c.text("");
                 c.text("Text Input:").size(12.0);
@@ -662,7 +678,8 @@ impl ComprehensiveDemo {
 
         // Zoom slider (percentage) - this one actually works!
         sidebar_ctx.text("Zoom % (controls viewer)").size(12.0);
-        sidebar_ctx.slider(10.0, 500.0)
+        sidebar_ctx
+            .slider(10.0, 500.0)
             .state(&zoom_state)
             .step(1.0)
             .show_input(true)
@@ -674,12 +691,17 @@ impl ComprehensiveDemo {
         // Separator
         sidebar_ctx.text("────────────────────");
         sidebar_ctx.text("Demo Sliders").size(14.0);
-        sidebar_ctx.text("(values stored, no image effect)").size(10.0);
+        sidebar_ctx
+            .text("(values stored, no image effect)")
+            .size(10.0);
         sidebar_ctx.text("");
 
         // Brightness slider
-        sidebar_ctx.text(format!("Brightness: {:.2}", brightness_state.value)).size(12.0);
-        sidebar_ctx.slider(-1.0, 1.0)
+        sidebar_ctx
+            .text(format!("Brightness: {:.2}", brightness_state.value))
+            .size(12.0);
+        sidebar_ctx
+            .slider(-1.0, 1.0)
             .state(&brightness_state)
             .step(0.01)
             .show_input(true)
@@ -690,8 +712,11 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Contrast slider
-        sidebar_ctx.text(format!("Contrast: {:.2}", contrast_state.value)).size(12.0);
-        sidebar_ctx.slider(0.0, 3.0)
+        sidebar_ctx
+            .text(format!("Contrast: {:.2}", contrast_state.value))
+            .size(12.0);
+        sidebar_ctx
+            .slider(0.0, 3.0)
             .state(&contrast_state)
             .step(0.01)
             .show_input(true)
@@ -702,8 +727,11 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Gamma slider
-        sidebar_ctx.text(format!("Gamma: {:.2}", gamma_state.value)).size(12.0);
-        sidebar_ctx.slider(0.1, 3.0)
+        sidebar_ctx
+            .text(format!("Gamma: {:.2}", gamma_state.value))
+            .size(12.0);
+        sidebar_ctx
+            .slider(0.1, 3.0)
             .state(&gamma_state)
             .step(0.01)
             .show_input(true)
@@ -714,8 +742,11 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Saturation slider
-        sidebar_ctx.text(format!("Saturation: {:.2}", saturation_state.value)).size(12.0);
-        sidebar_ctx.slider(0.0, 2.0)
+        sidebar_ctx
+            .text(format!("Saturation: {:.2}", saturation_state.value))
+            .size(12.0);
+        sidebar_ctx
+            .slider(0.0, 2.0)
             .state(&saturation_state)
             .step(0.01)
             .show_input(true)
@@ -726,7 +757,8 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Reset button
-        sidebar_ctx.button("Reset Sliders")
+        sidebar_ctx
+            .button("Reset Sliders")
             .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
             .on_click(wrap_reset(ComprehensiveMessage::ResetAdjustments));
 

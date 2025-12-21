@@ -10,13 +10,22 @@ use crate::model::{AnnotationShape, AnnotationTool, DrawingState};
 impl From<&AnnotationShape> for OverlayShape {
     fn from(shape: &AnnotationShape) -> Self {
         match shape {
-            AnnotationShape::BoundingBox { x, y, width, height } => {
-                OverlayShape::BoundingBox { x: *x, y: *y, width: *width, height: *height }
-            }
+            AnnotationShape::BoundingBox {
+                x,
+                y,
+                width,
+                height,
+            } => OverlayShape::BoundingBox {
+                x: *x,
+                y: *y,
+                width: *width,
+                height: *height,
+            },
             AnnotationShape::Point { x, y } => OverlayShape::Point { x: *x, y: *y },
-            AnnotationShape::Polygon { vertices } => {
-                OverlayShape::Polygon { vertices: vertices.clone(), closed: true }
-            }
+            AnnotationShape::Polygon { vertices } => OverlayShape::Polygon {
+                vertices: vertices.clone(),
+                closed: true,
+            },
         }
     }
 }
@@ -94,16 +103,22 @@ impl HvatApp {
     fn drawing_preview(&self, drawing_state: &DrawingState) -> Option<OverlayShape> {
         match drawing_state {
             DrawingState::Idle => None,
-            DrawingState::BoundingBox { start_x, start_y, current_x, current_y } => {
-                Some(OverlayShape::BoundingBox {
-                    x: start_x.min(*current_x),
-                    y: start_y.min(*current_y),
-                    width: (current_x - start_x).abs(),
-                    height: (current_y - start_y).abs(),
-                })
-            }
+            DrawingState::BoundingBox {
+                start_x,
+                start_y,
+                current_x,
+                current_y,
+            } => Some(OverlayShape::BoundingBox {
+                x: start_x.min(*current_x),
+                y: start_y.min(*current_y),
+                width: (current_x - start_x).abs(),
+                height: (current_y - start_y).abs(),
+            }),
             DrawingState::Polygon { vertices } if !vertices.is_empty() => {
-                Some(OverlayShape::Polygon { vertices: vertices.clone(), closed: false })
+                Some(OverlayShape::Polygon {
+                    vertices: vertices.clone(),
+                    closed: false,
+                })
             }
             DrawingState::Polygon { .. } => None,
         }

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    BorderSides, Collapsible, Column, Context, Element, Panel, Scrollable, ScrollDirection,
+    BorderSides, Collapsible, Column, Context, Element, Panel, ScrollDirection, Scrollable,
     ScrollbarVisibility,
 };
 
@@ -43,7 +43,9 @@ impl HvatApp {
 
         let mut sidebar_ctx = Context::new();
 
-        sidebar_ctx.text("Image Controls").size(FONT_SIZE_SUBSECTION);
+        sidebar_ctx
+            .text("Image Controls")
+            .size(FONT_SIZE_SUBSECTION);
 
         // Band Selection Collapsible
         let band_s = band_state.clone();
@@ -91,7 +93,8 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::AdjustmentsToggled)
             .content(|c| {
-                c.text(format!("Brightness: {:.2}", brightness_slider.value)).size(FONT_SIZE_BODY);
+                c.text(format!("Brightness: {:.2}", brightness_slider.value))
+                    .size(FONT_SIZE_BODY);
                 c.slider(BRIGHTNESS_MIN, BRIGHTNESS_MAX)
                     .state(&brightness_slider)
                     .step(BRIGHTNESS_STEP)
@@ -101,7 +104,8 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("brightness"))
                     .build();
 
-                c.text(format!("Contrast: {:.2}", contrast_slider.value)).size(FONT_SIZE_BODY);
+                c.text(format!("Contrast: {:.2}", contrast_slider.value))
+                    .size(FONT_SIZE_BODY);
                 c.slider(CONTRAST_MIN, CONTRAST_MAX)
                     .state(&contrast_slider)
                     .step(CONTRAST_STEP)
@@ -111,7 +115,8 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("contrast"))
                     .build();
 
-                c.text(format!("Gamma: {:.2}", gamma_slider.value)).size(FONT_SIZE_BODY);
+                c.text(format!("Gamma: {:.2}", gamma_slider.value))
+                    .size(FONT_SIZE_BODY);
                 c.slider(GAMMA_MIN, GAMMA_MAX)
                     .state(&gamma_slider)
                     .step(GAMMA_STEP)
@@ -121,7 +126,8 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("gamma"))
                     .build();
 
-                c.text(format!("Hue: {:.0}°", hue_slider.value)).size(FONT_SIZE_BODY);
+                c.text(format!("Hue: {:.0}°", hue_slider.value))
+                    .size(FONT_SIZE_BODY);
                 c.slider(HUE_MIN, HUE_MAX)
                     .state(&hue_slider)
                     .step(HUE_STEP)
@@ -140,7 +146,9 @@ impl HvatApp {
         // Keyboard shortcuts info
         sidebar_ctx.text("");
         sidebar_ctx.text("────────────────────");
-        sidebar_ctx.text("Keyboard shortcuts:").size(FONT_SIZE_SECONDARY);
+        sidebar_ctx
+            .text("Keyboard shortcuts:")
+            .size(FONT_SIZE_SECONDARY);
         sidebar_ctx.text("Ctrl+Z - Undo").size(FONT_SIZE_SMALL);
         sidebar_ctx.text("Ctrl+Y - Redo").size(FONT_SIZE_SMALL);
         sidebar_ctx.text("0 - Zoom to 100%").size(FONT_SIZE_SMALL);

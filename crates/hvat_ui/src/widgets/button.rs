@@ -113,14 +113,12 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let min_height = content.height + self.padding.vertical();
 
         // Account for margin in the resolved size
-        let inner_width = self.width.resolve(
-            available.width - self.margin.horizontal(),
-            min_width,
-        );
-        let inner_height = self.height.resolve(
-            available.height - self.margin.vertical(),
-            min_height,
-        );
+        let inner_width = self
+            .width
+            .resolve(available.width - self.margin.horizontal(), min_width);
+        let inner_height = self
+            .height
+            .resolve(available.height - self.margin.vertical(), min_height);
 
         Size::new(
             inner_width + self.margin.horizontal(),
@@ -145,7 +143,8 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         // Clamp text width to available inner space
         let text_width = content.width.min(inner_width);
 
-        let text_x = button_bounds.x + self.padding.left + self.text_align.align(inner_width, text_width);
+        let text_x =
+            button_bounds.x + self.padding.left + self.text_align.align(inner_width, text_width);
 
         // Center vertically using font size directly (not line_height)
         // Text rendering positions from top, and the visual center of most fonts
@@ -153,7 +152,13 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         // Using font_size gives better visual centering than line_height
         let text_y = button_bounds.y + (button_bounds.height - self.font_size) / 2.0;
 
-        renderer.text(&self.label, text_x, text_y, self.font_size, Color::TEXT_PRIMARY);
+        renderer.text(
+            &self.label,
+            text_x,
+            text_y,
+            self.font_size,
+            Color::TEXT_PRIMARY,
+        );
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {

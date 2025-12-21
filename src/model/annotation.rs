@@ -87,7 +87,12 @@ impl AnnotationShape {
         let height = (y2 - y1).abs();
 
         if width > MIN_BBOX_SIZE && height > MIN_BBOX_SIZE {
-            Some(AnnotationShape::BoundingBox { x, y, width, height })
+            Some(AnnotationShape::BoundingBox {
+                x,
+                y,
+                width,
+                height,
+            })
         } else {
             None
         }
@@ -190,7 +195,9 @@ impl DrawingState {
                 start_y,
                 current_x,
                 current_y,
-            } => AnnotationShape::bounding_box_from_corners(*start_x, *start_y, *current_x, *current_y),
+            } => AnnotationShape::bounding_box_from_corners(
+                *start_x, *start_y, *current_x, *current_y,
+            ),
             DrawingState::Polygon { vertices } => {
                 if vertices.len() >= MIN_POLYGON_VERTICES {
                     Some(AnnotationShape::Polygon {

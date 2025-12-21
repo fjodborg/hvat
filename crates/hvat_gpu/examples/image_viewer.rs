@@ -182,15 +182,13 @@ impl AppState {
                         ..
                     },
                 ..
-            } => {
-                match keycode {
-                    KeyCode::KeyR => {
-                        self.transform.reset();
-                        return true;
-                    }
-                    _ => {}
+            } => match keycode {
+                KeyCode::KeyR => {
+                    self.transform.reset();
+                    return true;
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
         false
@@ -208,12 +206,12 @@ impl AppState {
             .update_transform(&self.gpu_ctx, self.transform.to_uniform());
 
         // Create command encoder
-        let mut encoder = self
-            .gpu_ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+        let mut encoder =
+            self.gpu_ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         // Render
         self.pipeline
@@ -292,16 +290,14 @@ impl ApplicationHandler for ImageViewerApp {
                     WindowEvent::Resized(physical_size) => {
                         state.resize(physical_size.width, physical_size.height);
                     }
-                    WindowEvent::RedrawRequested => {
-                        match state.render() {
-                            Ok(_) => {}
-                            Err(wgpu::SurfaceError::Lost) => {
-                                state.resize(state.gpu_ctx.width(), state.gpu_ctx.height())
-                            }
-                            Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-                            Err(e) => eprintln!("Render error: {:?}", e),
+                    WindowEvent::RedrawRequested => match state.render() {
+                        Ok(_) => {}
+                        Err(wgpu::SurfaceError::Lost) => {
+                            state.resize(state.gpu_ctx.width(), state.gpu_ctx.height())
                         }
-                    }
+                        Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                        Err(e) => eprintln!("Render error: {:?}", e),
+                    },
                     _ => {}
                 }
             }

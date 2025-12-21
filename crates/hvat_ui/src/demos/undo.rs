@@ -138,7 +138,8 @@ impl UndoDemo {
 
         col(move |c| {
             c.text("Undo/Redo Demo (Global)");
-            c.text("Demonstrates global undo/redo with keyboard shortcuts").size(12.0);
+            c.text("Demonstrates global undo/redo with keyboard shortcuts")
+                .size(12.0);
             c.text("");
 
             // Counter section
@@ -197,29 +198,41 @@ impl UndoDemo {
                         .width(Length::Fixed(120.0))
                         .on_click(wrap_undo(UndoMessage::Undo));
                 } else {
-                    r.button("Undo (Ctrl+Z)").width(Length::Fixed(120.0)).build();
+                    r.button("Undo (Ctrl+Z)")
+                        .width(Length::Fixed(120.0))
+                        .build();
                 }
                 if can_redo {
                     r.button("Redo (Ctrl+Y)")
                         .width(Length::Fixed(120.0))
                         .on_click(wrap_redo(UndoMessage::Redo));
                 } else {
-                    r.button("Redo (Ctrl+Y)").width(Length::Fixed(120.0)).build();
+                    r.button("Redo (Ctrl+Y)")
+                        .width(Length::Fixed(120.0))
+                        .build();
                 }
                 r.button("Clear History")
                     .width(Length::Fixed(120.0))
                     .on_click(wrap_clear(UndoMessage::ClearHistory));
             });
-            c.text(format!("History: {} undo, {} redo steps", undo_count, redo_count));
+            c.text(format!(
+                "History: {} undo, {} redo steps",
+                undo_count, redo_count
+            ));
             c.text("");
 
             // Instructions
             c.text("How it works:").size(14.0);
-            c.text("• Global undo tracks entire demo state (counter + slider + text)").size(11.0);
-            c.text("• Counter changes are recorded immediately").size(11.0);
-            c.text("• Slider snapshots are saved when drag/input starts").size(11.0);
-            c.text("• Text snapshots are saved when input gains focus").size(11.0);
-            c.text("• Undo/Redo restores the full state snapshot").size(11.0);
+            c.text("• Global undo tracks entire demo state (counter + slider + text)")
+                .size(11.0);
+            c.text("• Counter changes are recorded immediately")
+                .size(11.0);
+            c.text("• Slider snapshots are saved when drag/input starts")
+                .size(11.0);
+            c.text("• Text snapshots are saved when input gains focus")
+                .size(11.0);
+            c.text("• Undo/Redo restores the full state snapshot")
+                .size(11.0);
             c.text("");
             c.text("Keyboard shortcuts:").size(14.0);
             c.text("• Ctrl+Z = Undo").size(11.0);
@@ -253,8 +266,12 @@ impl UndoDemo {
                 let prev = self.global_undo.borrow_mut().undo(current);
                 if let Some(prev) = prev {
                     self.restore(&prev);
-                    log::info!("Undo: counter={}, slider={:.1}, text='{}'",
-                        self.counter, self.slider_state.value, self.text_value);
+                    log::info!(
+                        "Undo: counter={}, slider={:.1}, text='{}'",
+                        self.counter,
+                        self.slider_state.value,
+                        self.text_value
+                    );
                 }
             }
             UndoMessage::Redo => {
@@ -262,8 +279,12 @@ impl UndoDemo {
                 let next = self.global_undo.borrow_mut().redo(current);
                 if let Some(next) = next {
                     self.restore(&next);
-                    log::info!("Redo: counter={}, slider={:.1}, text='{}'",
-                        self.counter, self.slider_state.value, self.text_value);
+                    log::info!(
+                        "Redo: counter={}, slider={:.1}, text='{}'",
+                        self.counter,
+                        self.slider_state.value,
+                        self.text_value
+                    );
                 }
             }
             UndoMessage::ClearHistory => {

@@ -105,35 +105,80 @@ impl ColorPipeline {
         // Create 4 rectangles for the stroke (top, right, bottom, left)
         let vertices = vec![
             // Top edge
-            ColorVertex { position: [x1, y1], color },
-            ColorVertex { position: [x2, y1], color },
-            ColorVertex { position: [x2, y1 - t_y], color },
-            ColorVertex { position: [x1, y1 - t_y], color },
+            ColorVertex {
+                position: [x1, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y1 - t_y],
+                color,
+            },
+            ColorVertex {
+                position: [x1, y1 - t_y],
+                color,
+            },
             // Right edge
-            ColorVertex { position: [x2 - t_x, y1], color },
-            ColorVertex { position: [x2, y1], color },
-            ColorVertex { position: [x2, y2], color },
-            ColorVertex { position: [x2 - t_x, y2], color },
+            ColorVertex {
+                position: [x2 - t_x, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y2],
+                color,
+            },
+            ColorVertex {
+                position: [x2 - t_x, y2],
+                color,
+            },
             // Bottom edge
-            ColorVertex { position: [x1, y2 + t_y], color },
-            ColorVertex { position: [x2, y2 + t_y], color },
-            ColorVertex { position: [x2, y2], color },
-            ColorVertex { position: [x1, y2], color },
+            ColorVertex {
+                position: [x1, y2 + t_y],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y2 + t_y],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y2],
+                color,
+            },
+            ColorVertex {
+                position: [x1, y2],
+                color,
+            },
             // Left edge
-            ColorVertex { position: [x1, y1], color },
-            ColorVertex { position: [x1 + t_x, y1], color },
-            ColorVertex { position: [x1 + t_x, y2], color },
-            ColorVertex { position: [x1, y2], color },
+            ColorVertex {
+                position: [x1, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x1 + t_x, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x1 + t_x, y2],
+                color,
+            },
+            ColorVertex {
+                position: [x1, y2],
+                color,
+            },
         ];
 
         let indices: Vec<u16> = vec![
             // Top
-            0, 1, 2, 0, 2, 3,
-            // Right
-            4, 5, 6, 4, 6, 7,
-            // Bottom
-            8, 9, 10, 8, 10, 11,
-            // Left
+            0, 1, 2, 0, 2, 3, // Right
+            4, 5, 6, 4, 6, 7, // Bottom
+            8, 9, 10, 8, 10, 11, // Left
             12, 13, 14, 12, 14, 15,
         ];
 
@@ -184,7 +229,16 @@ impl ColorPipeline {
         let len = (dx * dx + dy * dy).sqrt();
         if len < 0.0001 {
             // Zero-length line
-            return Self::create_rect_vertices(device, x1, y1, 1.0, 1.0, color, window_width, window_height);
+            return Self::create_rect_vertices(
+                device,
+                x1,
+                y1,
+                1.0,
+                1.0,
+                color,
+                window_width,
+                window_height,
+            );
         }
 
         // Normalize and scale by half thickness (in NDC)
@@ -194,10 +248,22 @@ impl ColorPipeline {
         let ny = dx / len * t_x;
 
         let vertices = [
-            ColorVertex { position: [x1_ndc - nx, y1_ndc - ny], color },
-            ColorVertex { position: [x1_ndc + nx, y1_ndc + ny], color },
-            ColorVertex { position: [x2_ndc + nx, y2_ndc + ny], color },
-            ColorVertex { position: [x2_ndc - nx, y2_ndc - ny], color },
+            ColorVertex {
+                position: [x1_ndc - nx, y1_ndc - ny],
+                color,
+            },
+            ColorVertex {
+                position: [x1_ndc + nx, y1_ndc + ny],
+                color,
+            },
+            ColorVertex {
+                position: [x2_ndc + nx, y2_ndc + ny],
+                color,
+            },
+            ColorVertex {
+                position: [x2_ndc - nx, y2_ndc - ny],
+                color,
+            },
         ];
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
@@ -236,14 +302,20 @@ impl ColorPipeline {
 
         let mut vertices = Vec::with_capacity(SEGMENTS + 1);
         // Center vertex
-        vertices.push(ColorVertex { position: [cx_ndc, cy_ndc], color });
+        vertices.push(ColorVertex {
+            position: [cx_ndc, cy_ndc],
+            color,
+        });
 
         // Circle vertices
         for i in 0..SEGMENTS {
             let angle = (i as f32 / SEGMENTS as f32) * std::f32::consts::TAU;
             let x = cx_ndc + rx * angle.cos();
             let y = cy_ndc + ry * angle.sin();
-            vertices.push(ColorVertex { position: [x, y], color });
+            vertices.push(ColorVertex {
+                position: [x, y],
+                color,
+            });
         }
 
         // Indices for triangle fan
@@ -359,15 +431,31 @@ impl ColorPipeline {
         let y2 = 1.0 - ((y + height) / window_height) * 2.0;
 
         vertices.extend_from_slice(&[
-            ColorVertex { position: [x1, y1], color }, // Top-left
-            ColorVertex { position: [x2, y1], color }, // Top-right
-            ColorVertex { position: [x2, y2], color }, // Bottom-right
-            ColorVertex { position: [x1, y2], color }, // Bottom-left
+            ColorVertex {
+                position: [x1, y1],
+                color,
+            }, // Top-left
+            ColorVertex {
+                position: [x2, y1],
+                color,
+            }, // Top-right
+            ColorVertex {
+                position: [x2, y2],
+                color,
+            }, // Bottom-right
+            ColorVertex {
+                position: [x1, y2],
+                color,
+            }, // Bottom-left
         ]);
 
         indices.extend_from_slice(&[
-            base_idx, base_idx + 1, base_idx + 2,
-            base_idx, base_idx + 2, base_idx + 3,
+            base_idx,
+            base_idx + 1,
+            base_idx + 2,
+            base_idx,
+            base_idx + 2,
+            base_idx + 3,
         ]);
 
         6
@@ -399,36 +487,104 @@ impl ColorPipeline {
         // 4 rectangles for the stroke (top, right, bottom, left)
         vertices.extend_from_slice(&[
             // Top edge (0-3)
-            ColorVertex { position: [x1, y1], color },
-            ColorVertex { position: [x2, y1], color },
-            ColorVertex { position: [x2, y1 - t_y], color },
-            ColorVertex { position: [x1, y1 - t_y], color },
+            ColorVertex {
+                position: [x1, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y1 - t_y],
+                color,
+            },
+            ColorVertex {
+                position: [x1, y1 - t_y],
+                color,
+            },
             // Right edge (4-7)
-            ColorVertex { position: [x2 - t_x, y1], color },
-            ColorVertex { position: [x2, y1], color },
-            ColorVertex { position: [x2, y2], color },
-            ColorVertex { position: [x2 - t_x, y2], color },
+            ColorVertex {
+                position: [x2 - t_x, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y2],
+                color,
+            },
+            ColorVertex {
+                position: [x2 - t_x, y2],
+                color,
+            },
             // Bottom edge (8-11)
-            ColorVertex { position: [x1, y2 + t_y], color },
-            ColorVertex { position: [x2, y2 + t_y], color },
-            ColorVertex { position: [x2, y2], color },
-            ColorVertex { position: [x1, y2], color },
+            ColorVertex {
+                position: [x1, y2 + t_y],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y2 + t_y],
+                color,
+            },
+            ColorVertex {
+                position: [x2, y2],
+                color,
+            },
+            ColorVertex {
+                position: [x1, y2],
+                color,
+            },
             // Left edge (12-15)
-            ColorVertex { position: [x1, y1], color },
-            ColorVertex { position: [x1 + t_x, y1], color },
-            ColorVertex { position: [x1 + t_x, y2], color },
-            ColorVertex { position: [x1, y2], color },
+            ColorVertex {
+                position: [x1, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x1 + t_x, y1],
+                color,
+            },
+            ColorVertex {
+                position: [x1 + t_x, y2],
+                color,
+            },
+            ColorVertex {
+                position: [x1, y2],
+                color,
+            },
         ]);
 
         indices.extend_from_slice(&[
             // Top
-            base_idx, base_idx + 1, base_idx + 2, base_idx, base_idx + 2, base_idx + 3,
+            base_idx,
+            base_idx + 1,
+            base_idx + 2,
+            base_idx,
+            base_idx + 2,
+            base_idx + 3,
             // Right
-            base_idx + 4, base_idx + 5, base_idx + 6, base_idx + 4, base_idx + 6, base_idx + 7,
+            base_idx + 4,
+            base_idx + 5,
+            base_idx + 6,
+            base_idx + 4,
+            base_idx + 6,
+            base_idx + 7,
             // Bottom
-            base_idx + 8, base_idx + 9, base_idx + 10, base_idx + 8, base_idx + 10, base_idx + 11,
+            base_idx + 8,
+            base_idx + 9,
+            base_idx + 10,
+            base_idx + 8,
+            base_idx + 10,
+            base_idx + 11,
             // Left
-            base_idx + 12, base_idx + 13, base_idx + 14, base_idx + 12, base_idx + 14, base_idx + 15,
+            base_idx + 12,
+            base_idx + 13,
+            base_idx + 14,
+            base_idx + 12,
+            base_idx + 14,
+            base_idx + 15,
         ]);
 
         24
@@ -455,7 +611,17 @@ impl ColorPipeline {
         let len_px = (dx_px * dx_px + dy_px * dy_px).sqrt();
         if len_px < 0.0001 {
             // Zero-length line - draw a small rect
-            return Self::append_rect(vertices, indices, x1, y1, 1.0, 1.0, color, window_width, window_height);
+            return Self::append_rect(
+                vertices,
+                indices,
+                x1,
+                y1,
+                1.0,
+                1.0,
+                color,
+                window_width,
+                window_height,
+            );
         }
 
         // Calculate perpendicular unit vector in pixel space
@@ -468,15 +634,31 @@ impl ColorPipeline {
         let to_ndc_y = |py: f32| 1.0 - (py / window_height) * 2.0;
 
         vertices.extend_from_slice(&[
-            ColorVertex { position: [to_ndc_x(x1 + nx_px), to_ndc_y(y1 + ny_px)], color },
-            ColorVertex { position: [to_ndc_x(x1 - nx_px), to_ndc_y(y1 - ny_px)], color },
-            ColorVertex { position: [to_ndc_x(x2 - nx_px), to_ndc_y(y2 - ny_px)], color },
-            ColorVertex { position: [to_ndc_x(x2 + nx_px), to_ndc_y(y2 + ny_px)], color },
+            ColorVertex {
+                position: [to_ndc_x(x1 + nx_px), to_ndc_y(y1 + ny_px)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(x1 - nx_px), to_ndc_y(y1 - ny_px)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(x2 - nx_px), to_ndc_y(y2 - ny_px)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(x2 + nx_px), to_ndc_y(y2 + ny_px)],
+                color,
+            },
         ]);
 
         indices.extend_from_slice(&[
-            base_idx, base_idx + 1, base_idx + 2,
-            base_idx, base_idx + 2, base_idx + 3,
+            base_idx,
+            base_idx + 1,
+            base_idx + 2,
+            base_idx,
+            base_idx + 2,
+            base_idx + 3,
         ]);
 
         6
@@ -502,7 +684,10 @@ impl ColorPipeline {
         let ry = (radius / window_height) * 2.0;
 
         // Center vertex
-        vertices.push(ColorVertex { position: [cx_ndc, cy_ndc], color });
+        vertices.push(ColorVertex {
+            position: [cx_ndc, cy_ndc],
+            color,
+        });
 
         // Circle vertices
         for i in 0..SEGMENTS {

@@ -14,8 +14,8 @@ mod number_input;
 pub mod overlay;
 mod panel;
 mod row;
-pub mod scrollbar;
 mod scrollable;
+pub mod scrollbar;
 mod slider;
 mod text;
 pub mod text_core;
@@ -28,12 +28,14 @@ pub use color_swatch::ColorSwatch;
 pub use column::Column;
 pub use config::BaseInputConfig;
 pub use dropdown::{Dropdown, DropdownConfig};
-pub use overlay::OverlayCloseHelper;
-pub use image_viewer::{AnnotationOverlay, ImagePointerEvent, ImageViewer, OverlayShape, PointerEventKind};
+pub use image_viewer::{
+    AnnotationOverlay, ImagePointerEvent, ImageViewer, OverlayShape, PointerEventKind,
+};
 pub use number_input::{NumberInput, NumberInputConfig};
+pub use overlay::OverlayCloseHelper;
 pub use panel::{BorderSides, Panel};
 pub use row::Row;
-pub use scrollable::{Scrollable, ScrollDirection, ScrollbarVisibility, ScrollbarConfig};
+pub use scrollable::{ScrollDirection, Scrollable, ScrollbarConfig, ScrollbarVisibility};
 pub use slider::{Slider, SliderConfig};
 pub use text::Text;
 pub use text_input::{TextInput, TextInputConfig};

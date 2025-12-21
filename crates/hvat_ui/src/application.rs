@@ -14,7 +14,6 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
-
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
@@ -326,12 +325,12 @@ impl<A: Application> AppState<A> {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self
-            .gpu_ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("UI Render Encoder"),
-            });
+        let mut encoder =
+            self.gpu_ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("UI Render Encoder"),
+                });
 
         // Clear background
         {
@@ -493,8 +492,8 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
 impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
-            use winit::platform::web::WindowAttributesExtWebSys;
             use wasm_bindgen::JsCast;
+            use winit::platform::web::WindowAttributesExtWebSys;
 
             let mut window_attrs = WindowAttributes::default()
                 .with_title(&self.settings.title)
@@ -508,13 +507,12 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
                 .and_then(|win| win.document())
                 .and_then(|doc| {
                     // Try to find existing canvas, or create one
-                    doc.get_element_by_id("canvas")
-                        .or_else(|| {
-                            let canvas = doc.create_element("canvas").ok()?;
-                            canvas.set_id("canvas");
-                            doc.body()?.append_child(&canvas).ok()?;
-                            Some(canvas)
-                        })
+                    doc.get_element_by_id("canvas").or_else(|| {
+                        let canvas = doc.create_element("canvas").ok()?;
+                        canvas.set_id("canvas");
+                        doc.body()?.append_child(&canvas).ok()?;
+                        Some(canvas)
+                    })
                 })
                 .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok());
 
@@ -608,7 +606,10 @@ fn handle_window_event<A: Application>(
             }
         }
 
-        WindowEvent::ScaleFactorChanged { scale_factor, inner_size_writer: _ } => {
+        WindowEvent::ScaleFactorChanged {
+            scale_factor,
+            inner_size_writer: _,
+        } => {
             log::info!("Scale factor changed to {}", scale_factor);
             // The window will send a Resized event after this, so we just log here
         }
@@ -646,7 +647,11 @@ fn handle_window_event<A: Application>(
             }
         }
 
-        WindowEvent::MouseInput { state: btn_state, button, .. } => {
+        WindowEvent::MouseInput {
+            state: btn_state,
+            button,
+            ..
+        } => {
             let button = MouseButton::from_winit(button);
 
             // On press, first send a global event to allow focused widgets to blur
@@ -755,11 +760,13 @@ fn handle_window_event<A: Application>(
 
             // Generate TextInput event for text input (on key press only)
             // Don't generate TextInput when Ctrl or Alt is held (those are shortcuts, not text input)
-            if event.state == ElementState::Pressed && !state.modifiers.ctrl && !state.modifiers.alt {
+            if event.state == ElementState::Pressed && !state.modifiers.ctrl && !state.modifiers.alt
+            {
                 if let Some(text) = &event.text {
                     let text_str = text.as_str();
                     // Filter out control characters (but allow space)
-                    if !text_str.is_empty() && text_str.chars().all(|c| !c.is_control() || c == ' ') {
+                    if !text_str.is_empty() && text_str.chars().all(|c| !c.is_control() || c == ' ')
+                    {
                         state.handle_event(Event::TextInput {
                             text: text_str.to_string(),
                         });
@@ -831,9 +838,9 @@ pub fn run<A: Application + 'static>(
 /// Uses debouncing to reduce flashing during resize.
 #[cfg(target_arch = "wasm32")]
 fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc<Window>) {
+    use std::cell::Cell;
     use wasm_bindgen::prelude::*;
     use wasm_bindgen::JsCast;
-    use std::cell::Cell;
 
     // Get the browser window object
     let Some(browser_window) = web_sys::window() else {
@@ -852,8 +859,16 @@ fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc
         let window = window_for_callback.clone();
         move || {
             if let Some(bw) = web_sys::window() {
-                let width = bw.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(800.0) as u32;
-                let height = bw.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(600.0) as u32;
+                let width = bw
+                    .inner_width()
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(800.0) as u32;
+                let height = bw
+                    .inner_height()
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(600.0) as u32;
 
                 if width > 0 && height > 0 {
                     log::debug!("Applying resize to {}x{}", width, height);
@@ -890,10 +905,9 @@ fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc
     });
 
     // Add the resize event listener to the browser window
-    if let Err(e) = browser_window.add_event_listener_with_callback(
-        "resize",
-        resize_callback.as_ref().unchecked_ref(),
-    ) {
+    if let Err(e) = browser_window
+        .add_event_listener_with_callback("resize", resize_callback.as_ref().unchecked_ref())
+    {
         log::error!("Failed to add resize event listener: {:?}", e);
         return;
     }
@@ -904,8 +918,16 @@ fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc
 
     // Also trigger an initial resize to set the correct size
     if let Some(bw) = web_sys::window() {
-        let width = bw.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(800.0) as u32;
-        let height = bw.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(600.0) as u32;
+        let width = bw
+            .inner_width()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(800.0) as u32;
+        let height = bw
+            .inner_height()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(600.0) as u32;
         if width > 0 && height > 0 {
             let _ = window.request_inner_size(winit::dpi::LogicalSize::new(width, height));
         }

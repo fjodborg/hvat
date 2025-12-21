@@ -54,7 +54,10 @@ impl GpuContext {
             // if is_webgpu_supported() { ... try WebGPU first ... }
 
             if is_webgpu_supported() {
-                web_sys::console::log_1(&"🔍 WebGPU detected but skipping (experimental, causes fallback issues)".into());
+                web_sys::console::log_1(
+                    &"🔍 WebGPU detected but skipping (experimental, causes fallback issues)"
+                        .into(),
+                );
             }
             web_sys::console::log_1(&"🔄 Using WebGL backend...".into());
 
@@ -70,7 +73,11 @@ impl GpuContext {
 
     /// Initialize GPU context with a specific backend
     #[cfg(target_arch = "wasm32")]
-    async fn new_with_backend(window: Arc<Window>, backends: wgpu::Backends, config: GpuConfig) -> Result<Self> {
+    async fn new_with_backend(
+        window: Arc<Window>,
+        backends: wgpu::Backends,
+        config: GpuConfig,
+    ) -> Result<Self> {
         web_sys::console::log_1(&format!("Initializing GPU with backend: {:?}", backends).into());
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -89,14 +96,20 @@ impl GpuContext {
             .await?;
 
         let info = adapter.get_info();
-        web_sys::console::log_1(&format!("✓ GPU initialized with backend: {:?}", info.backend).into());
+        web_sys::console::log_1(
+            &format!("✓ GPU initialized with backend: {:?}", info.backend).into(),
+        );
 
         Self::finish_init(adapter, surface, window, config).await
     }
 
     /// Initialize GPU context with a specific backend (native)
     #[cfg(not(target_arch = "wasm32"))]
-    async fn new_with_backend(window: Arc<Window>, backends: wgpu::Backends, config: GpuConfig) -> Result<Self> {
+    async fn new_with_backend(
+        window: Arc<Window>,
+        backends: wgpu::Backends,
+        config: GpuConfig,
+    ) -> Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends,
             ..Default::default()
@@ -122,11 +135,9 @@ impl GpuContext {
         window: Arc<Window>,
         config: GpuConfig,
     ) -> Result<Self> {
-
         // Use adapter limits to ensure compatibility with WebGL
         // WebGL doesn't support compute shaders, so we can't use Limits::default()
-        let limits = wgpu::Limits::downlevel_webgl2_defaults()
-            .using_resolution(adapter.limits());
+        let limits = wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
 
         // Request device and queue
         let (device, queue) = adapter

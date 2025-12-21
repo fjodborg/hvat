@@ -5,12 +5,12 @@ use crate::constants::{
     DEFAULT_INPUT_WIDTH, DROPDOWN_ARROW_WIDTH, DROPDOWN_TEXT_PADDING_X, SCROLLBAR_PADDING,
     SCROLLBAR_WIDTH_COMPACT,
 };
-use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::DropdownState;
 use crate::widget::Widget;
+use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
 
 const SEARCH_BOX_BG_COLOR: Color = Color::rgba(0.12, 0.12, 0.15, 1.0);
 
@@ -196,7 +196,9 @@ impl<M: 'static> Dropdown<M> {
     /// Get filtered option indices based on search text (uses cache when possible)
     fn get_filtered_indices(&mut self) -> &[usize] {
         // Check if cache is valid
-        let cache_valid = self.filtered_cache.as_ref()
+        let cache_valid = self
+            .filtered_cache
+            .as_ref()
             .map(|(cached_search, _)| cached_search == &self.state.search_text)
             .unwrap_or(false);
 
@@ -217,7 +219,11 @@ impl<M: 'static> Dropdown<M> {
         }
 
         // Safe: we just set filtered_cache to Some above if it wasn't valid
-        &self.filtered_cache.as_ref().expect("filtered_cache should be initialized").1
+        &self
+            .filtered_cache
+            .as_ref()
+            .expect("filtered_cache should be initialized")
+            .1
     }
 
     /// Get filtered options based on search text (read-only version for drawing)
@@ -225,7 +231,8 @@ impl<M: 'static> Dropdown<M> {
         // Use cached indices if available and valid
         if let Some((cached_search, indices)) = &self.filtered_cache {
             if cached_search == &self.state.search_text {
-                return indices.iter()
+                return indices
+                    .iter()
                     .filter_map(|&idx| self.options.get(idx).map(|s| (idx, s)))
                     .collect();
             }
@@ -377,7 +384,6 @@ impl<M: 'static> Dropdown<M> {
     }
 }
 
-
 impl<M: 'static> Widget<M> for Dropdown<M> {
     fn layout(&mut self, available: Size) -> Size {
         let width = self.width.resolve(available.width, DEFAULT_INPUT_WIDTH);
@@ -425,7 +431,11 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
-        log::debug!("Dropdown draw: bounds={:?}, is_open={}", bounds, self.state.is_open);
+        log::debug!(
+            "Dropdown draw: bounds={:?}, is_open={}",
+            bounds,
+            self.state.is_open
+        );
 
         // Draw button
         let button_bounds = Bounds::new(
@@ -502,7 +512,8 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                         // Determine popup direction before opening
                         // Use screen_position if available, otherwise fall back to position
                         let screen_y = screen_position.map(|(_, y)| y).unwrap_or(position.1);
-                        self.state.opens_upward = self.should_open_upward(screen_y, button_bounds.height);
+                        self.state.opens_upward =
+                            self.should_open_upward(screen_y, button_bounds.height);
                         self.state.open();
                     }
                     return self.emit_change();
@@ -510,7 +521,9 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
 
                 // Click on option in popup
                 if self.state.is_open && popup_bounds.contains(position.0, position.1) {
-                    if let Some(filtered_index) = self.filtered_index_at_position(popup_bounds, position.1) {
+                    if let Some(filtered_index) =
+                        self.filtered_index_at_position(popup_bounds, position.1)
+                    {
                         if let Some(idx) = self.get_original_index(filtered_index) {
                             log::debug!("Click on popup option {}", idx);
                             self.state.close();
@@ -538,7 +551,9 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
 
                 // Update option hover state
                 if self.state.is_open && popup_bounds.contains(position.0, position.1) {
-                    if let Some(filtered_index) = self.filtered_index_at_position(popup_bounds, position.1) {
+                    if let Some(filtered_index) =
+                        self.filtered_index_at_position(popup_bounds, position.1)
+                    {
                         self.hover_option = Some(filtered_index);
                         self.state.highlighted = Some(filtered_index);
                     } else {
@@ -550,7 +565,9 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                 }
             }
 
-            Event::MouseScroll { delta, position, .. } => {
+            Event::MouseScroll {
+                delta, position, ..
+            } => {
                 if self.state.is_open {
                     // Handle scroll within popup
                     if popup_bounds.contains(position.0, position.1) {
@@ -559,11 +576,15 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
 
                         // Scroll by 1 item per scroll unit (negative delta = scroll down)
                         let scroll_delta = if delta.1 < 0.0 { 1 } else { -1 };
-                        self.state.scroll_by(scroll_delta, filtered_len, visible_count);
+                        self.state
+                            .scroll_by(scroll_delta, filtered_len, visible_count);
 
                         log::debug!(
                             "Dropdown scroll: delta={:?}, new_offset={}, max_items={}, visible={}",
-                            delta, self.state.scroll_offset, filtered_len, visible_count
+                            delta,
+                            self.state.scroll_offset,
+                            filtered_len,
+                            visible_count
                         );
 
                         return self.emit_change();
@@ -602,7 +623,8 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                                 let current = self.state.highlighted.unwrap_or(0);
                                 self.state.highlighted = Some(current.saturating_sub(1));
                                 // Ensure highlighted item is visible
-                                self.state.ensure_highlighted_visible(self.config.max_visible_options);
+                                self.state
+                                    .ensure_highlighted_visible(self.config.max_visible_options);
                                 return self.emit_change();
                             }
                         }
@@ -613,7 +635,8 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                                 let max = filtered_len.saturating_sub(1);
                                 self.state.highlighted = Some((current + 1).min(max));
                                 // Ensure highlighted item is visible
-                                self.state.ensure_highlighted_visible(self.config.max_visible_options);
+                                self.state
+                                    .ensure_highlighted_visible(self.config.max_visible_options);
                                 return self.emit_change();
                             }
                         }
@@ -628,7 +651,10 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                                 } else {
                                     Some(0)
                                 };
-                                log::debug!("Dropdown search backspace: '{}'", self.state.search_text);
+                                log::debug!(
+                                    "Dropdown search backspace: '{}'",
+                                    self.state.search_text
+                                );
                                 return self.emit_change();
                             }
                         }
@@ -724,7 +750,9 @@ impl<M: 'static> Dropdown<M> {
 
             let option_bounds = Bounds::new(
                 popup_bounds.x,
-                popup_bounds.y + options_y_offset + visible_index as f32 * self.config.option_height,
+                popup_bounds.y
+                    + options_y_offset
+                    + visible_index as f32 * self.config.option_height,
                 content_width,
                 self.config.option_height,
             );
@@ -792,7 +820,13 @@ impl<M: 'static> Dropdown<M> {
         };
 
         let (text_x, text_y) = self.text_position(search_bounds);
-        renderer.text(search_text, text_x, text_y, self.config.font_size, text_color);
+        renderer.text(
+            search_text,
+            text_x,
+            text_y,
+            self.config.font_size,
+            text_color,
+        );
 
         // Draw separator line (above when at bottom, below when at top)
         let separator_y = if self.state.opens_upward {

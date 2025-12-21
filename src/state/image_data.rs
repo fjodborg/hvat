@@ -34,7 +34,9 @@ impl ImageDataStore {
 
     /// Get data for an image, creating default if not exists
     pub fn get_or_create(&mut self, path: &PathBuf) -> &mut ImageData {
-        self.data.entry(path.clone()).or_insert_with(ImageData::default)
+        self.data
+            .entry(path.clone())
+            .or_insert_with(ImageData::default)
     }
 
     /// Get data for an image (read-only), returns default if not exists
@@ -57,7 +59,9 @@ impl ImageDataStore {
     /// Ensure data exists for an image path
     #[allow(dead_code)]
     pub fn ensure(&mut self, path: &PathBuf) {
-        self.data.entry(path.clone()).or_insert_with(ImageData::default);
+        self.data
+            .entry(path.clone())
+            .or_insert_with(ImageData::default);
     }
 
     /// Remove a tag from all images' selected tags

@@ -35,7 +35,10 @@ impl OverlayCloseHelper {
     pub fn should_close_on_event(event: &Event) -> bool {
         matches!(
             event,
-            Event::KeyPress { key: KeyCode::Escape, .. } | Event::FocusLost
+            Event::KeyPress {
+                key: KeyCode::Escape,
+                ..
+            } | Event::FocusLost
         )
     }
 
@@ -57,7 +60,11 @@ impl OverlayCloseHelper {
             Event::GlobalMousePress { position, .. } => {
                 Self::should_close_on_global_press(*position, overlay_bounds)
             }
-            Event::KeyPress { key: KeyCode::Escape, .. } | Event::FocusLost => true,
+            Event::KeyPress {
+                key: KeyCode::Escape,
+                ..
+            }
+            | Event::FocusLost => true,
             _ => false,
         }
     }
@@ -71,15 +78,24 @@ mod tests {
     fn test_should_close_on_global_press_outside() {
         let bounds = Bounds::new(100.0, 100.0, 50.0, 50.0);
         // Click outside
-        assert!(OverlayCloseHelper::should_close_on_global_press((50.0, 50.0), bounds));
-        assert!(OverlayCloseHelper::should_close_on_global_press((200.0, 200.0), bounds));
+        assert!(OverlayCloseHelper::should_close_on_global_press(
+            (50.0, 50.0),
+            bounds
+        ));
+        assert!(OverlayCloseHelper::should_close_on_global_press(
+            (200.0, 200.0),
+            bounds
+        ));
     }
 
     #[test]
     fn test_should_close_on_global_press_inside() {
         let bounds = Bounds::new(100.0, 100.0, 50.0, 50.0);
         // Click inside
-        assert!(!OverlayCloseHelper::should_close_on_global_press((125.0, 125.0), bounds));
+        assert!(!OverlayCloseHelper::should_close_on_global_press(
+            (125.0, 125.0),
+            bounds
+        ));
     }
 
     #[test]

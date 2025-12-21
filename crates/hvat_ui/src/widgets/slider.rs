@@ -427,15 +427,25 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
         // Draw value label if enabled (above thumb)
         if self.show_value {
             let text = self.format_current_value();
-            let text_x = thumb.x + SLIDER_THUMB_RADIUS - (text.len() as f32 * SMALL_FONT_SIZE * 0.3);
+            let text_x =
+                thumb.x + SLIDER_THUMB_RADIUS - (text.len() as f32 * SMALL_FONT_SIZE * 0.3);
             let text_y = slider_bounds.y + 2.0;
-            renderer.text(&text, text_x, text_y, SMALL_FONT_SIZE, self.config.label_color);
+            renderer.text(
+                &text,
+                text_x,
+                text_y,
+                SMALL_FONT_SIZE,
+                self.config.label_color,
+            );
         }
 
         // Draw input field if enabled
         if let Some(input_bounds) = self.input_bounds(bounds) {
             // Background and border using input config helpers
-            renderer.fill_rect(input_bounds, self.config.input.background(self.state.input_focused));
+            renderer.fill_rect(
+                input_bounds,
+                self.config.input.background(self.state.input_focused),
+            );
             // Use track_fill_color for focused border to match slider theme
             let border_color = if self.state.input_focused {
                 self.config.track_fill_color
@@ -544,20 +554,26 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             if let Some((start, _)) = self.state.input_selection {
                                 self.state.input_selection = Some((start, new_cursor));
                             } else {
-                                self.state.input_selection = Some((self.state.input_cursor, new_cursor));
+                                self.state.input_selection =
+                                    Some((self.state.input_cursor, new_cursor));
                             }
                         } else {
                             self.state.input_cursor = new_cursor;
                             if !was_focused && !self.state.input_text.is_empty() {
                                 // Select all on focus
-                                self.state.input_selection = Some((0, text_core::char_count(&self.state.input_text)));
-                                self.state.input_cursor = text_core::char_count(&self.state.input_text);
+                                self.state.input_selection =
+                                    Some((0, text_core::char_count(&self.state.input_text)));
+                                self.state.input_cursor =
+                                    text_core::char_count(&self.state.input_text);
                             } else {
                                 self.state.input_selection = None;
                             }
                         }
 
-                        log::debug!("Slider input: clicked, cursor = {}", self.state.input_cursor);
+                        log::debug!(
+                            "Slider input: clicked, cursor = {}",
+                            self.state.input_cursor
+                        );
 
                         // Call on_undo_point when input field gains focus (for undo tracking)
                         if !was_focused {
@@ -702,7 +718,9 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             self.state.input_selection = result.selection;
                         }
                         KeyCode::A if modifiers.ctrl => {
-                            let result = text_core::handle_select_all(text_core::char_count(&self.state.input_text));
+                            let result = text_core::handle_select_all(text_core::char_count(
+                                &self.state.input_text,
+                            ));
                             self.state.input_cursor = result.cursor;
                             self.state.input_selection = result.selection;
                         }
@@ -751,24 +769,32 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             return self.emit_change();
                         }
                         KeyCode::Up => {
-                            let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
+                            let step = self
+                                .step
+                                .unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                             let new_value = (self.state.value + step).clamp(self.min, self.max);
                             if (new_value - self.state.value).abs() > f32::EPSILON {
                                 self.state.value = new_value;
                                 self.state.input_text = self.format_value_for_input(new_value);
-                                self.state.input_cursor = text_core::char_count(&self.state.input_text);
-                                self.state.input_selection = Some((0, text_core::char_count(&self.state.input_text)));
+                                self.state.input_cursor =
+                                    text_core::char_count(&self.state.input_text);
+                                self.state.input_selection =
+                                    Some((0, text_core::char_count(&self.state.input_text)));
                                 return self.emit_change();
                             }
                         }
                         KeyCode::Down => {
-                            let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
+                            let step = self
+                                .step
+                                .unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                             let new_value = (self.state.value - step).clamp(self.min, self.max);
                             if (new_value - self.state.value).abs() > f32::EPSILON {
                                 self.state.value = new_value;
                                 self.state.input_text = self.format_value_for_input(new_value);
-                                self.state.input_cursor = text_core::char_count(&self.state.input_text);
-                                self.state.input_selection = Some((0, text_core::char_count(&self.state.input_text)));
+                                self.state.input_cursor =
+                                    text_core::char_count(&self.state.input_text);
+                                self.state.input_selection =
+                                    Some((0, text_core::char_count(&self.state.input_text)));
                                 return self.emit_change();
                             }
                         }
@@ -782,7 +808,9 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     return None;
                 }
 
-                let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
+                let step = self
+                    .step
+                    .unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                 let big_step = step * BIG_STEP_MULTIPLIER;
 
                 let delta = match key {
@@ -804,7 +832,11 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 };
 
                 if let Some(d) = delta {
-                    let multiplier = if modifiers.shift { FINE_STEP_MULTIPLIER } else { 1.0 };
+                    let multiplier = if modifiers.shift {
+                        FINE_STEP_MULTIPLIER
+                    } else {
+                        1.0
+                    };
                     let new_value = (self.state.value + d * multiplier).clamp(self.min, self.max);
                     if (new_value - self.state.value).abs() > f32::EPSILON {
                         self.state.value = new_value;
@@ -823,7 +855,9 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 // Handle scroll on input field
                 if let Some(ib) = &input_bounds {
                     if ib.contains(position.0, position.1) {
-                        let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
+                        let step = self
+                            .step
+                            .unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                         let scroll_delta = delta.1.signum() * step;
                         let new_value = (self.state.value + scroll_delta).clamp(self.min, self.max);
                         if (new_value - self.state.value).abs() > f32::EPSILON {
@@ -840,7 +874,9 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     return None;
                 }
 
-                let step = self.step.unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
+                let step = self
+                    .step
+                    .unwrap_or((self.max - self.min) / DEFAULT_STEP_DIVIDER);
                 let scroll_delta = delta.1 * step;
                 let new_value = (self.state.value + scroll_delta).clamp(self.min, self.max);
 

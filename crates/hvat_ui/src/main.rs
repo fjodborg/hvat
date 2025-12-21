@@ -9,13 +9,9 @@
 //! Uses reusable demo components from hvat_ui::demos.
 
 use hvat_ui::demos::{
-    BasicDemo, BasicMessage,
-    CollapsibleDemo, CollapsibleMessage,
-    DropdownDemo, DropdownMessage,
-    ImageViewerDemo, ImageViewerMessage,
-    InputWidgetsDemo, InputWidgetsMessage,
-    ScrollableDemo, ScrollableMessage,
-    UndoDemo, UndoMessage,
+    BasicDemo, BasicMessage, CollapsibleDemo, CollapsibleMessage, DropdownDemo, DropdownMessage,
+    ImageViewerDemo, ImageViewerMessage, InputWidgetsDemo, InputWidgetsMessage, ScrollableDemo,
+    ScrollableMessage, UndoDemo, UndoMessage,
 };
 use hvat_ui::prelude::*;
 
@@ -96,16 +92,22 @@ impl Application for UnifiedDemo {
 
             // Tab buttons - first row
             c.row(|r| {
-                r.button("Basic").on_click(Message::SwitchTab(DemoTab::Basic));
-                r.button("Input").on_click(Message::SwitchTab(DemoTab::InputWidgets));
+                r.button("Basic")
+                    .on_click(Message::SwitchTab(DemoTab::Basic));
+                r.button("Input")
+                    .on_click(Message::SwitchTab(DemoTab::InputWidgets));
                 r.button("Undo").on_click(Message::SwitchTab(DemoTab::Undo));
-                r.button("Scrollable").on_click(Message::SwitchTab(DemoTab::Scrollable));
+                r.button("Scrollable")
+                    .on_click(Message::SwitchTab(DemoTab::Scrollable));
             });
             // Tab buttons - second row
             c.row(|r| {
-                r.button("Dropdown").on_click(Message::SwitchTab(DemoTab::Dropdown));
-                r.button("Collapsible").on_click(Message::SwitchTab(DemoTab::Collapsible));
-                r.button("ImageViewer").on_click(Message::SwitchTab(DemoTab::ImageViewer));
+                r.button("Dropdown")
+                    .on_click(Message::SwitchTab(DemoTab::Dropdown));
+                r.button("Collapsible")
+                    .on_click(Message::SwitchTab(DemoTab::Collapsible));
+                r.button("ImageViewer")
+                    .on_click(Message::SwitchTab(DemoTab::ImageViewer));
             });
 
             // Show current tab

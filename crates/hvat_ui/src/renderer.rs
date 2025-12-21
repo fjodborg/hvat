@@ -4,7 +4,8 @@ use crate::constants::{
     LINE_HEIGHT_FACTOR, RENDERER_CLIP_STACK_CAPACITY, RENDERER_COLOR_INDEX_CAPACITY,
     RENDERER_COLOR_VERTEX_CAPACITY, RENDERER_OVERLAY_INDEX_CAPACITY,
     RENDERER_OVERLAY_TEXT_REQUEST_CAPACITY, RENDERER_OVERLAY_VERTEX_CAPACITY,
-    RENDERER_TEXT_CACHE_CAPACITY, RENDERER_TEXT_REQUEST_CAPACITY, RENDERER_TEXTURE_REQUEST_CAPACITY,
+    RENDERER_TEXTURE_REQUEST_CAPACITY, RENDERER_TEXT_CACHE_CAPACITY,
+    RENDERER_TEXT_REQUEST_CAPACITY,
 };
 use crate::layout::Bounds;
 use crate::overlay::OverlayRegistry;
@@ -12,7 +13,10 @@ use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Wrap,
 };
-use hvat_gpu::{ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, Pipeline, Texture, TexturePipeline, TransformUniform};
+use hvat_gpu::{
+    ColorPipeline, ColorVertex, GpuContext, ImageAdjustments, Pipeline, Texture, TexturePipeline,
+    TransformUniform,
+};
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
@@ -290,7 +294,11 @@ impl Renderer {
             // Clear text buffer cache since buffers were created with old size
             self.text_buffer_cache.clear();
             self.text_cache_used_keys.clear();
-            log::debug!("Renderer resized to {}x{}, text cache cleared", width, height);
+            log::debug!(
+                "Renderer resized to {}x{}, text cache cleared",
+                width,
+                height
+            );
         }
     }
 
@@ -316,7 +324,8 @@ impl Renderer {
 
         // Clean up unused text buffers from cache (remove entries not used this frame)
         if !self.text_cache_used_keys.is_empty() {
-            self.text_buffer_cache.retain(|k, _| self.text_cache_used_keys.contains(k));
+            self.text_buffer_cache
+                .retain(|k, _| self.text_cache_used_keys.contains(k));
             self.text_cache_used_keys.clear();
         }
     }
@@ -538,23 +547,36 @@ impl Renderer {
     }
 
     /// Clip line to rectangle using Liang-Barsky algorithm.
-    fn clip_line(x1: f32, y1: f32, x2: f32, y2: f32, clip: &Bounds) -> Option<(f32, f32, f32, f32)> {
+    fn clip_line(
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        clip: &Bounds,
+    ) -> Option<(f32, f32, f32, f32)> {
         let (dx, dy) = (x2 - x1, y2 - y1);
         let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
 
         for (p, q) in [
-            (-dx, x1 - clip.x),                  // left
-            (dx, clip.x + clip.width - x1),      // right
-            (-dy, y1 - clip.y),                  // top
-            (dy, clip.y + clip.height - y1),     // bottom
+            (-dx, x1 - clip.x),              // left
+            (dx, clip.x + clip.width - x1),  // right
+            (-dy, y1 - clip.y),              // top
+            (dy, clip.y + clip.height - y1), // bottom
         ] {
             if p == 0.0 {
-                if q < 0.0 { return None; }
+                if q < 0.0 {
+                    return None;
+                }
             } else {
                 let t = q / p;
-                if p < 0.0 { t0 = t0.max(t); }
-                else { t1 = t1.min(t); }
-                if t0 > t1 { return None; }
+                if p < 0.0 {
+                    t0 = t0.max(t);
+                } else {
+                    t1 = t1.min(t);
+                }
+                if t0 > t1 {
+                    return None;
+                }
             }
         }
 
@@ -677,12 +699,30 @@ impl Renderer {
     }
 
     /// Queue text for rendering with word wrapping at a specified width
-    pub fn text_wrapped(&mut self, text: &str, x: f32, y: f32, size: f32, color: Color, wrap_width: f32, align: TextAlign) {
+    pub fn text_wrapped(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: Color,
+        wrap_width: f32,
+        align: TextAlign,
+    ) {
         self.text_impl(text, x, y, size, color, Some(wrap_width), align);
     }
 
     /// Internal implementation for queuing text
-    fn text_impl(&mut self, text: &str, x: f32, y: f32, size: f32, color: Color, wrap_width: Option<f32>, align: TextAlign) {
+    fn text_impl(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        size: f32,
+        color: Color,
+        wrap_width: Option<f32>,
+        align: TextAlign,
+    ) {
         // Skip clipping when drawing overlays
         let clip = if self.drawing_overlay {
             None
@@ -721,7 +761,10 @@ impl Renderer {
             );
             intersected
         } else {
-            log::debug!("Renderer push_clip: requested={:?} (no existing clip)", bounds);
+            log::debug!(
+                "Renderer push_clip: requested={:?} (no existing clip)",
+                bounds
+            );
             Some(bounds)
         };
 
@@ -740,7 +783,8 @@ impl Renderer {
                 self.clip_stack.len(),
                 self.clip_stack.len() + 1
             );
-            self.clip_stack.push(Bounds::new(bounds.x, bounds.y, 0.0, 0.0));
+            self.clip_stack
+                .push(Bounds::new(bounds.x, bounds.y, 0.0, 0.0));
         }
     }
 
@@ -759,7 +803,9 @@ impl Renderer {
         let id = TextureId(self.next_texture_id);
         self.next_texture_id += 1;
 
-        let bind_group = self.texture_pipeline.create_texture_bind_group(gpu_ctx, texture);
+        let bind_group = self
+            .texture_pipeline
+            .create_texture_bind_group(gpu_ctx, texture);
         self.texture_bind_groups.insert(id, bind_group);
 
         log::debug!("Registered texture {:?}", id);
@@ -773,12 +819,7 @@ impl Renderer {
     }
 
     /// Queue a texture for rendering within bounds with a transform
-    pub fn texture(
-        &mut self,
-        texture_id: TextureId,
-        bounds: Bounds,
-        transform: TransformUniform,
-    ) {
+    pub fn texture(&mut self, texture_id: TextureId, bounds: Bounds, transform: TransformUniform) {
         self.texture_with_adjustments(texture_id, bounds, transform, ImageAdjustments::default());
     }
 
@@ -805,12 +846,13 @@ impl Renderer {
         if self.vertex_buffer_capacity < required_size || self.color_vertex_buffer.is_none() {
             // Round up to next power of 2 for efficient resizing
             let new_capacity = required_size.next_power_of_two().max(1024);
-            self.color_vertex_buffer = Some(gpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("UI Color Vertices (reusable)"),
-                size: (new_capacity * std::mem::size_of::<ColorVertex>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.color_vertex_buffer =
+                Some(gpu_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("UI Color Vertices (reusable)"),
+                    size: (new_capacity * std::mem::size_of::<ColorVertex>()) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
             self.vertex_buffer_capacity = new_capacity;
             log::debug!("Resized vertex buffer to {} vertices", new_capacity);
         }
@@ -977,8 +1019,10 @@ impl Renderer {
             }
 
             // Update transform uniform and image adjustments
-            self.texture_pipeline.update_transform(gpu_ctx, request.transform);
-            self.texture_pipeline.update_adjustments(gpu_ctx, request.adjustments);
+            self.texture_pipeline
+                .update_transform(gpu_ctx, request.transform);
+            self.texture_pipeline
+                .update_adjustments(gpu_ctx, request.adjustments);
 
             // Render with scissor rect
             {
@@ -1052,11 +1096,17 @@ impl Renderer {
         }
 
         // Update viewport
-        self.viewport.update(&gpu_ctx.queue, Resolution { width, height });
+        self.viewport
+            .update(&gpu_ctx.queue, Resolution { width, height });
 
         // Ensure all text buffers are in cache (or create new ones)
         for request in requests {
-            let key = TextCacheKey::new(&request.text, request.size, request.wrap_width, request.align);
+            let key = TextCacheKey::new(
+                &request.text,
+                request.size,
+                request.wrap_width,
+                request.align,
+            );
 
             // Track that this key is used this frame
             if !self.text_cache_used_keys.contains(&key) {
@@ -1072,7 +1122,11 @@ impl Renderer {
 
                 // Set size based on whether wrapping is enabled
                 let buffer_width = request.wrap_width.unwrap_or(width as f32);
-                buffer.set_size(&mut self.font_system, Some(buffer_width), Some(height as f32));
+                buffer.set_size(
+                    &mut self.font_system,
+                    Some(buffer_width),
+                    Some(height as f32),
+                );
 
                 // Enable word wrapping if wrap_width is specified
                 if request.wrap_width.is_some() {
@@ -1106,7 +1160,12 @@ impl Renderer {
         let text_areas: Vec<TextArea> = requests
             .iter()
             .filter_map(|request| {
-                let key = TextCacheKey::new(&request.text, request.size, request.wrap_width, request.align);
+                let key = TextCacheKey::new(
+                    &request.text,
+                    request.size,
+                    request.wrap_width,
+                    request.align,
+                );
                 let buffer = self.text_buffer_cache.get(&key)?;
 
                 let bounds = if let Some(clip) = &request.clip {
@@ -1139,7 +1198,10 @@ impl Renderer {
 
         // Select appropriate renderer and atlas
         let (text_renderer, text_atlas) = if is_overlay {
-            (&mut self.overlay_text_renderer, &mut self.overlay_text_atlas)
+            (
+                &mut self.overlay_text_renderer,
+                &mut self.overlay_text_atlas,
+            )
         } else {
             (&mut self.text_renderer, &mut self.text_atlas)
         };
@@ -1160,7 +1222,11 @@ impl Renderer {
 
         // Render text
         {
-            let label = if is_overlay { "Overlay Text Render Pass" } else { "Text Render Pass" };
+            let label = if is_overlay {
+                "Overlay Text Render Pass"
+            } else {
+                "Text Render Pass"
+            };
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(label),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

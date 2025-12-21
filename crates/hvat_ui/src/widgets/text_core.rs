@@ -187,11 +187,7 @@ pub struct NavResult {
 }
 
 /// Handle left arrow key
-pub fn handle_left(
-    cursor: usize,
-    selection: Option<(usize, usize)>,
-    shift: bool,
-) -> NavResult {
+pub fn handle_left(cursor: usize, selection: Option<(usize, usize)>, shift: bool) -> NavResult {
     if shift {
         // Extend selection
         if cursor > 0 {
@@ -463,10 +459,7 @@ pub fn handle_blur_on_outside_click(
 /// Handle blur when window loses focus
 ///
 /// Returns true if focus state changed (was focused).
-pub fn handle_focus_lost(
-    is_focused: &mut bool,
-    selection: &mut Option<(usize, usize)>,
-) -> bool {
+pub fn handle_focus_lost(is_focused: &mut bool, selection: &mut Option<(usize, usize)>) -> bool {
     if *is_focused {
         *is_focused = false;
         *selection = None;

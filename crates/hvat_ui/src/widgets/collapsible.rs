@@ -273,10 +273,11 @@ impl<M: 'static> Collapsible<M> {
     }
 }
 
-
 impl<M: 'static> Widget<M> for Collapsible<M> {
     fn has_active_overlay(&self) -> bool {
-        self.content.as_ref().map_or(false, |c| c.has_active_overlay())
+        self.content
+            .as_ref()
+            .map_or(false, |c| c.has_active_overlay())
     }
 
     fn has_active_drag(&self) -> bool {
@@ -317,7 +318,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             let content_available = if self.config.max_content_height.is_some() {
                 Size::new(content_width, f32::MAX)
             } else {
-                Size::new(content_width, available.height - self.config.header_height - padding * 2.0)
+                Size::new(
+                    content_width,
+                    available.height - self.config.header_height - padding * 2.0,
+                )
             };
             self.content_size = content.layout(content_available);
 
@@ -376,7 +380,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
         // Draw header text
         let text_x = icon_x + COLLAPSIBLE_ICON_SIZE + COLLAPSIBLE_ICON_MARGIN;
-        let text_y = header_bounds.y + (self.config.header_height - self.config.header_font_size) / 2.0;
+        let text_y =
+            header_bounds.y + (self.config.header_height - self.config.header_font_size) / 2.0;
         renderer.text(
             &self.header_text,
             text_x,
@@ -455,7 +460,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                                 // Clicked on thumb - start dragging
                                 self.scrollbar_dragging = true;
                                 self.scrollbar_drag_offset = position.1 - thumb.bounds.y;
-                                log::debug!("Collapsible scrollbar drag started, offset={}", self.scrollbar_drag_offset);
+                                log::debug!(
+                                    "Collapsible scrollbar drag started, offset={}",
+                                    self.scrollbar_drag_offset
+                                );
                             } else {
                                 // Clicked on track - jump to position (center thumb on click)
                                 let thumb_y = position.1 - thumb.bounds.height / 2.0;
@@ -466,7 +474,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                                     self.content_size.height,
                                     self.visible_content_height,
                                 );
-                                log::debug!("Collapsible scrollbar track clicked, new offset={}", self.scroll_state.offset.1);
+                                log::debug!(
+                                    "Collapsible scrollbar track clicked, new offset={}",
+                                    self.scroll_state.offset.1
+                                );
                             }
                         }
                         return None;
@@ -507,7 +518,11 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
             }
 
-            Event::MouseMove { position, overlay_hint, .. } => {
+            Event::MouseMove {
+                position,
+                overlay_hint,
+                ..
+            } => {
                 // Only show header hover if not in an overlay area
                 // The overlay hint tells us if the cursor is over an overlay (e.g., dropdown popup)
                 self.hover_header = header_bounds.contains(position.0, position.1) && !overlay_hint;
@@ -524,7 +539,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             self.content_size.height,
                             self.visible_content_height,
                         );
-                        log::debug!("Collapsible scrollbar dragging, offset={}", self.scroll_state.offset.1);
+                        log::debug!(
+                            "Collapsible scrollbar dragging, offset={}",
+                            self.scroll_state.offset.1
+                        );
                     }
                     return None;
                 }
@@ -535,7 +553,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                     // Forward if within viewport, if event is for an overlay, or if content has active drag
                     let in_viewport = viewport_bounds.contains(position.0, position.1);
-                    let content_has_drag = self.content.as_ref().map_or(false, |c| c.has_active_drag());
+                    let content_has_drag =
+                        self.content.as_ref().map_or(false, |c| c.has_active_drag());
                     if in_viewport || *overlay_hint || content_has_drag {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
@@ -560,7 +579,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 }
             }
 
-            Event::MouseScroll { delta, position, modifiers, overlay_hint } => {
+            Event::MouseScroll {
+                delta,
+                position,
+                modifiers,
+                overlay_hint,
+            } => {
                 if self.state.is_expanded {
                     let content_bounds = self.calc_content_bounds_for_events(bounds);
 
@@ -571,7 +595,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
                         let scroll_offset = self.scroll_state.offset.1;
-                        let content_bounds_val = content_bounds;  // Use already calculated value
+                        let content_bounds_val = content_bounds; // Use already calculated value
 
                         if let Some(content) = &mut self.content {
                             let adjusted_pos = if needs_scroll {
@@ -587,7 +611,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                                 overlay_hint: *overlay_hint,
                             };
 
-                            if let Some(msg) = content.on_event(&adjusted_event, content_bounds_val) {
+                            if let Some(msg) = content.on_event(&adjusted_event, content_bounds_val)
+                            {
                                 return Some(msg);
                             }
                             // If event was for an overlay, it was handled
@@ -598,8 +623,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                     }
 
                     // Handle scrolling in content area (only if not for an overlay)
-                    if !overlay_hint && self.needs_scrolling() && viewport_bounds.contains(position.0, position.1) {
-                        let max_scroll = (self.content_size.height - self.visible_content_height).max(0.0);
+                    if !overlay_hint
+                        && self.needs_scrolling()
+                        && viewport_bounds.contains(position.0, position.1)
+                    {
+                        let max_scroll =
+                            (self.content_size.height - self.visible_content_height).max(0.0);
                         // Negative delta.1 means scroll down (content moves up), positive means scroll up
                         let scroll_amount = -delta.1 * SCROLL_SPEED;
                         self.scroll_state.offset.1 =
@@ -630,7 +659,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 return None;
             }
 
-            Event::MouseRelease { button, position, overlay_hint, .. } => {
+            Event::MouseRelease {
+                button,
+                position,
+                overlay_hint,
+                ..
+            } => {
                 // Stop scrollbar dragging
                 if self.scrollbar_dragging {
                     self.scrollbar_dragging = false;
@@ -667,7 +701,11 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             }
 
             Event::KeyPress { key, .. } => {
-                log::trace!("Collapsible: KeyPress {:?}, expanded={}", key, self.state.is_expanded);
+                log::trace!(
+                    "Collapsible: KeyPress {:?}, expanded={}",
+                    key,
+                    self.state.is_expanded
+                );
                 // Forward to content FIRST if expanded (so focused inputs can handle Enter)
                 if self.state.is_expanded {
                     let content_bounds = self.calc_content_bounds_for_events(bounds);

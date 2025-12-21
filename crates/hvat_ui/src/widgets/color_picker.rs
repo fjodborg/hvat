@@ -286,9 +286,15 @@ impl<M> ColorPicker<M> {
         let size = Self::picker_size();
         // Determine the anchor point (where the picker attaches to)
         let anchor = if self.overlay_position == (0.0, 0.0) {
-            (layout_bounds.x + self.x_offset, layout_bounds.y + self.y_offset)
+            (
+                layout_bounds.x + self.x_offset,
+                layout_bounds.y + self.y_offset,
+            )
         } else {
-            (self.overlay_position.0 + self.x_offset, self.overlay_position.1 + self.y_offset)
+            (
+                self.overlay_position.0 + self.x_offset,
+                self.overlay_position.1 + self.y_offset,
+            )
         };
         // Apply alignment
         match self.alignment {
@@ -389,14 +395,25 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
             let label_y = track.y;
 
             // Draw label
-            renderer.text(label, label_x, label_y, DEFAULT_FONT_SIZE, Color::TEXT_PRIMARY);
+            renderer.text(
+                label,
+                label_x,
+                label_y,
+                DEFAULT_FONT_SIZE,
+                Color::TEXT_PRIMARY,
+            );
 
             // Draw track background
             renderer.fill_rect(track, Color::rgba(0.2, 0.2, 0.2, 1.0));
             renderer.stroke_rect(track, Color::BORDER, 1.0);
 
             // Draw gradient on track
-            let gradient = Bounds::new(track.x + 1.0, track.y + 1.0, track.width - 2.0, track.height - 2.0);
+            let gradient = Bounds::new(
+                track.x + 1.0,
+                track.y + 1.0,
+                track.width - 2.0,
+                track.height - 2.0,
+            );
             renderer.fill_rect(gradient, *color);
 
             // Draw thumb
@@ -455,7 +472,10 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                 // Handle slider dragging
                 if self.state.is_dragging() {
                     self.update_slider_value(pos, x);
-                    log::debug!("ColorPicker: dragging slider, color={:?}", self.current_color);
+                    log::debug!(
+                        "ColorPicker: dragging slider, color={:?}",
+                        self.current_color
+                    );
                     return self.on_change.call(self.current_color);
                 }
                 None

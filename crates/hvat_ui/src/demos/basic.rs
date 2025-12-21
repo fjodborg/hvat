@@ -20,7 +20,10 @@ impl BasicDemo {
         Self::default()
     }
 
-    pub fn view<M: Clone + 'static>(&self, wrap: impl Fn(BasicMessage) -> M + Clone + 'static) -> Element<M> {
+    pub fn view<M: Clone + 'static>(
+        &self,
+        wrap: impl Fn(BasicMessage) -> M + Clone + 'static,
+    ) -> Element<M> {
         let click_count = self.click_count;
         col(move |c| {
             c.text("Basic Demo");

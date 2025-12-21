@@ -52,7 +52,10 @@ impl CollapsibleDemo {
         Self::default()
     }
 
-    pub fn view<M: Clone + 'static>(&self, wrap: impl Fn(CollapsibleMessage) -> M + Clone + 'static) -> Element<M> {
+    pub fn view<M: Clone + 'static>(
+        &self,
+        wrap: impl Fn(CollapsibleMessage) -> M + Clone + 'static,
+    ) -> Element<M> {
         let section_states = self.section_states.clone();
         let accordion_states = self.accordion_states.clone();
         let nested_outer = self.nested_outer.clone();
@@ -70,7 +73,11 @@ impl CollapsibleDemo {
                 let section_title = format!(
                     "Section {} - Click to {}",
                     i + 1,
-                    if state.is_expanded { "collapse" } else { "expand" }
+                    if state.is_expanded {
+                        "collapse"
+                    } else {
+                        "expand"
+                    }
                 );
                 let wrap_section = wrap.clone();
                 let state_clone = state.clone();
@@ -90,14 +97,20 @@ impl CollapsibleDemo {
 
             // Accordion sections
             let accordion_titles = ["First Panel", "Second Panel", "Third Panel"];
-            for (i, (state, title)) in accordion_states.iter().zip(accordion_titles.iter()).enumerate() {
+            for (i, (state, title)) in accordion_states
+                .iter()
+                .zip(accordion_titles.iter())
+                .enumerate()
+            {
                 let wrap_accordion = wrap.clone();
                 let state_clone = state.clone();
                 c.add(Element::new(
                     collapsible(*title)
                         .state(&state_clone)
                         .header_color(Color::rgba(0.2, 0.15, 0.25, 1.0))
-                        .on_toggle(move |s| wrap_accordion(CollapsibleMessage::AccordionToggled(i, s)))
+                        .on_toggle(move |s| {
+                            wrap_accordion(CollapsibleMessage::AccordionToggled(i, s))
+                        })
                         .content(|content| {
                             content.text(format!("Content for: {}", title));
                             content.text("In accordion mode, opening one panel closes the others.");
@@ -115,10 +128,15 @@ impl CollapsibleDemo {
                     .state(&scrollable_section)
                     .header_color(Color::rgba(0.15, 0.25, 0.2, 1.0))
                     .max_height(120.0)
-                    .on_toggle(move |s| wrap_scrollable(CollapsibleMessage::ScrollableSectionToggled(s)))
+                    .on_toggle(move |s| {
+                        wrap_scrollable(CollapsibleMessage::ScrollableSectionToggled(s))
+                    })
                     .content(|content| {
                         for i in 1..=20 {
-                            content.text(format!("Line {} - This content scrolls when it exceeds max_height", i));
+                            content.text(format!(
+                                "Line {} - This content scrolls when it exceeds max_height",
+                                i
+                            ));
                         }
                     }),
             ));
@@ -143,11 +161,15 @@ impl CollapsibleDemo {
                             collapsible("Inner Section")
                                 .state(&nested_inner)
                                 .header_color(Color::rgba(0.15, 0.2, 0.25, 1.0))
-                                .on_toggle(move |s| wrap_inner_clone(CollapsibleMessage::NestedInnerToggled(s)))
+                                .on_toggle(move |s| {
+                                    wrap_inner_clone(CollapsibleMessage::NestedInnerToggled(s))
+                                })
                                 .content(move |inner| {
                                     inner.text("This is nested inside the outer section.");
                                     inner.text(format!("Button clicks: {}", click_count));
-                                    inner.button("Click Me!").on_click(wrap_button_clone(CollapsibleMessage::ButtonClicked));
+                                    inner.button("Click Me!").on_click(wrap_button_clone(
+                                        CollapsibleMessage::ButtonClicked,
+                                    ));
                                 }),
                         ));
                     }),
@@ -167,7 +189,11 @@ impl CollapsibleDemo {
                 }
             }
             CollapsibleMessage::AccordionToggled(index, state) => {
-                log::info!("Accordion {} toggled: expanded={}", index, state.is_expanded);
+                log::info!(
+                    "Accordion {} toggled: expanded={}",
+                    index,
+                    state.is_expanded
+                );
                 if state.is_expanded {
                     for (i, s) in self.accordion_states.iter_mut().enumerate() {
                         if i == index {

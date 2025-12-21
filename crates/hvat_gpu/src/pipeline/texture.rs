@@ -23,32 +23,44 @@ pub struct TexturePipeline {
 
 impl TexturePipeline {
     pub fn new(ctx: &GpuContext) -> Self {
-        let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Texture Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/texture.wgsl").into()),
-        });
+        let shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Texture Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/texture.wgsl").into()),
+            });
 
         // Create uniform buffers
         let transform_uniform = TransformUniform::new();
-        let uniform_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Transform Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[transform_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Transform Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[transform_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         let adjustments = ImageAdjustments::new();
-        let adjustments_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Image Adjustments Buffer"),
-            contents: bytemuck::cast_slice(&[adjustments]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let adjustments_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Image Adjustments Buffer"),
+                contents: bytemuck::cast_slice(&[adjustments]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         // Create bind group layouts using builder
         // Binding numbers must match those in shaders/texture.wgsl
         let uniform_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
             .with_label("Uniform Bind Group Layout")
-            .add_uniform_buffer(bindings::UNIFORM_TRANSFORM_BINDING, wgpu::ShaderStages::VERTEX)
-            .add_uniform_buffer(bindings::UNIFORM_ADJUSTMENTS_BINDING, wgpu::ShaderStages::FRAGMENT)
+            .add_uniform_buffer(
+                bindings::UNIFORM_TRANSFORM_BINDING,
+                wgpu::ShaderStages::VERTEX,
+            )
+            .add_uniform_buffer(
+                bindings::UNIFORM_ADJUSTMENTS_BINDING,
+                wgpu::ShaderStages::FRAGMENT,
+            )
             .build();
 
         let texture_bind_group_layout = BindGroupLayoutBuilder::new(&ctx.device)
@@ -87,25 +99,41 @@ impl TexturePipeline {
 
         // Create fullscreen quad vertices
         let vertices = [
-            Vertex { position: [-1.0, -1.0], tex_coords: [0.0, 1.0] }, // Bottom-left
-            Vertex { position: [1.0, -1.0], tex_coords: [1.0, 1.0] },  // Bottom-right
-            Vertex { position: [1.0, 1.0], tex_coords: [1.0, 0.0] },   // Top-right
-            Vertex { position: [-1.0, 1.0], tex_coords: [0.0, 0.0] },  // Top-left
+            Vertex {
+                position: [-1.0, -1.0],
+                tex_coords: [0.0, 1.0],
+            }, // Bottom-left
+            Vertex {
+                position: [1.0, -1.0],
+                tex_coords: [1.0, 1.0],
+            }, // Bottom-right
+            Vertex {
+                position: [1.0, 1.0],
+                tex_coords: [1.0, 0.0],
+            }, // Top-right
+            Vertex {
+                position: [-1.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            }, // Top-left
         ];
 
         let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
 
-        let vertex_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
-        let index_buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let index_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         Self {
             render_pipeline,
@@ -120,7 +148,11 @@ impl TexturePipeline {
     }
 
     /// Create bind group for a texture
-    pub fn create_texture_bind_group(&self, ctx: &GpuContext, texture: &Texture) -> wgpu::BindGroup {
+    pub fn create_texture_bind_group(
+        &self,
+        ctx: &GpuContext,
+        texture: &Texture,
+    ) -> wgpu::BindGroup {
         ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Texture Bind Group"),
             layout: &self.texture_bind_group_layout,
@@ -145,8 +177,11 @@ impl TexturePipeline {
 
     /// Update image adjustments
     pub fn update_adjustments(&self, ctx: &GpuContext, adjustments: ImageAdjustments) {
-        ctx.queue
-            .write_buffer(&self.adjustments_buffer, 0, bytemuck::cast_slice(&[adjustments]));
+        ctx.queue.write_buffer(
+            &self.adjustments_buffer,
+            0,
+            bytemuck::cast_slice(&[adjustments]),
+        );
     }
 
     /// Render textured quad
