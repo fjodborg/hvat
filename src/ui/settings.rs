@@ -9,6 +9,7 @@ use hvat_ui::{
 };
 
 use crate::app::HvatApp;
+use crate::constants::MAX_GPU_PRELOAD_COUNT;
 use crate::licenses::{DEPENDENCIES, DependencyInfo};
 use crate::message::Message;
 
@@ -47,6 +48,8 @@ impl HvatApp {
         let export_folder_state = self.export_folder_state.clone();
         let import_folder = self.import_folder.clone();
         let import_folder_state = self.import_folder_state.clone();
+        let gpu_preload_count = self.gpu_preload_count;
+        let gpu_preload_slider = self.gpu_preload_slider.clone();
 
         let mut ctx = Context::new();
 
@@ -110,6 +113,25 @@ impl HvatApp {
                         .on_change(Message::ImportFolderChanged)
                         .build();
                 });
+
+                c.text("");
+
+                // Performance subsection
+                c.text("Performance");
+                c.text("");
+
+                c.row(|r| {
+                    r.text("GPU Preload:");
+                    r.slider(0.0, MAX_GPU_PRELOAD_COUNT as f32)
+                        .step(1.0)
+                        .state(&gpu_preload_slider)
+                        .width(Length::Fixed(120.0))
+                        .on_change(Message::GpuPreloadCountChanged)
+                        .build();
+                    r.text(format!("{}", gpu_preload_count));
+                });
+                c.text("Number of images to preload before/after current (0 = disabled)")
+                    .size(FONT_SIZE_SMALL);
 
                 c.text("");
 

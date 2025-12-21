@@ -300,19 +300,23 @@ impl<A: Application> AppState<A> {
         self.app.tick();
 
         // Call tick_with_resources for GPU updates (e.g., texture updates)
-        {
+        // If it returns true, there's more work to do (e.g., preloading images)
+        let needs_more_ticks = {
             let mut resources = Resources {
                 gpu_ctx: &self.gpu_ctx,
                 renderer: &mut self.renderer,
             };
-            if self.app.tick_with_resources(&mut resources) {
+            let result = self.app.tick_with_resources(&mut resources);
+            if result {
                 self.needs_rebuild = true;
             }
-        }
+            result
+        };
 
         // Update frame timing
         self.last_frame_time = Instant::now();
-        self.redraw_requested = false;
+        // Keep requesting redraws if tick_with_resources indicated more work
+        self.redraw_requested = needs_more_ticks;
 
         // Only rebuild view if needed (dirty flag)
         if self.needs_rebuild || self.root.is_none() {

@@ -41,7 +41,7 @@ impl HvatApp {
             r.button("Redo")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::Redo);
-            r.button("⚙")
+            r.button("Settings")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ToggleSettings);
         });

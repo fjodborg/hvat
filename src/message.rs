@@ -136,4 +136,8 @@ pub enum Message {
     DeleteAnnotation,
     /// Finish polygon annotation (close the shape)
     FinishPolygon,
+
+    // Settings - GPU Preloading
+    /// GPU preload count slider changed
+    GpuPreloadCountChanged(SliderState),
 }

@@ -20,8 +20,9 @@ use hvat_ui::prelude::*;
 use hvat_ui::{Application, Column, Element, Event, KeyCode, Resources, Row};
 
 use crate::constants::{
-    DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_HUE, DEFAULT_RED_BAND,
-    DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH, UNDO_HISTORY_SIZE,
+    DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_GPU_PRELOAD_COUNT, DEFAULT_HUE,
+    DEFAULT_RED_BAND, DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH,
+    MAX_GPU_PRELOAD_COUNT, UNDO_HISTORY_SIZE,
 };
 use crate::data::HyperspectralData;
 use crate::message::Message;
@@ -29,7 +30,10 @@ use crate::model::{
     Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, MIN_POLYGON_VERTICES,
     POLYGON_CLOSE_THRESHOLD,
 };
-use crate::state::{AppSnapshot, GpuRenderState, ImageDataStore, LoadedImage, ProjectState};
+use crate::state::{
+    AppSnapshot, GpuRenderState, GpuTextureCache, ImageDataStore, LoadedImage, ProjectState,
+    SharedGpuPipeline,
+};
 use crate::test_image::generate_test_hyperspectral;
 
 // ============================================================================
@@ -71,11 +75,27 @@ pub struct HvatApp {
     pub(crate) num_bands: usize,
     band_selection: (usize, usize, usize), // R, G, B band indices
 
-    // GPU rendering state (initialized in setup())
+    // GPU rendering state
+    /// Shared GPU pipeline (created once in setup, reused for all images)
+    shared_pipeline: Option<SharedGpuPipeline>,
+    /// Per-image GPU state (band textures + render target)
     gpu_state: Option<GpuRenderState>,
+    /// Path of the currently displayed image (for returning to cache)
+    current_gpu_image_path: Option<PathBuf>,
+    /// GPU texture cache for preloaded images
+    gpu_cache: GpuTextureCache,
 
-    // Flag indicating we need to load a new image
+    // Flags for pending operations
+    /// Flag indicating we need to load a new image
     pending_image_load: bool,
+    /// Flag indicating we should preload adjacent images
+    pending_preload: bool,
+
+    // GPU preload settings
+    /// Number of images to preload in each direction (before and after current)
+    pub(crate) gpu_preload_count: usize,
+    /// Slider state for preload count in settings
+    pub(crate) gpu_preload_slider: SliderState,
 
     // Left sidebar states
     pub(crate) tools_collapsed: CollapsibleState,
@@ -178,8 +198,16 @@ impl HvatApp {
             num_bands,
             band_selection: (0, 1, 2),
 
+            shared_pipeline: None,
             gpu_state: None,
+            current_gpu_image_path: None,
+            gpu_cache: GpuTextureCache::new(DEFAULT_GPU_PRELOAD_COUNT),
+
             pending_image_load: false,
+            pending_preload: false,
+
+            gpu_preload_count: DEFAULT_GPU_PRELOAD_COUNT,
+            gpu_preload_slider: SliderState::new(DEFAULT_GPU_PRELOAD_COUNT as f32),
 
             tools_collapsed: CollapsibleState::expanded(),
             categories_collapsed: CollapsibleState::expanded(),
@@ -352,17 +380,22 @@ impl HvatApp {
             log::error!("Cannot init GPU state: no hyperspectral data");
             return;
         };
+        let Some(ref pipeline) = self.shared_pipeline else {
+            log::error!("Cannot init GPU state: no shared pipeline");
+            return;
+        };
 
         let gpu_ctx = resources.gpu_context();
 
         match GpuRenderState::new(
             gpu_ctx,
+            pipeline,
             hyper,
             self.band_selection,
             self.image_adjustments(),
         ) {
             Ok(state) => {
-                self.image_size = (hyper.width, hyper.height);
+                self.image_size = (state.width, state.height);
                 self.gpu_state = Some(state);
                 self.needs_gpu_render = true;
                 log::info!("GPU state initialized successfully");
@@ -378,11 +411,15 @@ impl HvatApp {
         let Some(ref gpu_state) = self.gpu_state else {
             return;
         };
+        let Some(ref pipeline) = self.shared_pipeline else {
+            return;
+        };
 
         let gpu_ctx = resources.gpu_context();
 
         gpu_state.render(
             gpu_ctx,
+            pipeline,
             self.band_selection_uniform(),
             self.image_adjustments(),
         );
@@ -407,9 +444,85 @@ impl HvatApp {
     }
 
     /// Load an image file and reinitialize GPU state.
+    ///
+    /// If the image is already in the GPU cache, uses the cached textures.
+    /// Otherwise, loads from disk and uploads to GPU.
     fn load_image_file(&mut self, path: PathBuf, resources: &mut Resources<'_>) {
-        log::info!("Loading image: {:?}", path);
+        log::info!(
+            "Loading image: {:?} (cache_size={}, contains={})",
+            path,
+            self.gpu_cache.len(),
+            self.gpu_cache.contains(&path)
+        );
 
+        if self.shared_pipeline.is_none() {
+            log::error!("Cannot load image: no shared pipeline");
+            return;
+        }
+
+        // Return current GPU state to cache before loading new image
+        // This preserves the GPU textures for instant switching back
+        if let (Some(old_state), Some(old_path)) =
+            (self.gpu_state.take(), self.current_gpu_image_path.take())
+        {
+            // Only cache if it's not the same image we're about to load
+            if old_path != path {
+                log::debug!("Returning {:?} to GPU cache", old_path);
+                self.gpu_cache.insert(old_path, old_state.into_cached());
+            }
+        }
+
+        // Evict out-of-range entries immediately to free GPU memory
+        // We need project info to know the new current index
+        if let Some(ref project) = self.project {
+            let to_keep = self
+                .gpu_cache
+                .paths_to_keep(&project.images, project.current_index);
+            self.gpu_cache.retain_only(&to_keep);
+        }
+
+        // Check if image is cached in GPU
+        if let Some(cached) = self.gpu_cache.take(&path) {
+            log::info!("*** CACHE HIT *** Using cached GPU data for {:?}", path);
+
+            self.num_bands = cached.num_bands;
+            self.reset_band_sliders();
+            self.reset_adjustment_sliders();
+            self.texture_id = None;
+
+            let gpu_ctx = resources.gpu_context();
+            let pipeline = self.shared_pipeline.as_ref().unwrap();
+
+            match GpuRenderState::from_cached(
+                gpu_ctx,
+                pipeline,
+                cached,
+                self.band_selection,
+                self.image_adjustments(),
+            ) {
+                Ok(state) => {
+                    self.image_size = (state.width, state.height);
+                    self.gpu_state = Some(state);
+                    self.current_gpu_image_path = Some(path.clone());
+                    // Render immediately so image displays in same frame
+                    self.render_to_texture(resources);
+                    self.needs_gpu_render = false;
+                    self.pending_preload = true; // Trigger preloading for adjacent images
+                    log::info!(
+                        "Loaded from cache: {}x{} with {} bands",
+                        self.image_size.0,
+                        self.image_size.1,
+                        self.num_bands
+                    );
+                }
+                Err(e) => {
+                    log::error!("Failed to create state from cache: {:?}", e);
+                }
+            }
+            return;
+        }
+
+        // Not cached - load from disk/memory
         let hyper_result = {
             #[cfg(not(target_arch = "wasm32"))]
             {
@@ -441,7 +554,9 @@ impl HvatApp {
                 self.hyperspectral = Some(hyper);
 
                 self.init_gpu_state(resources);
+                self.current_gpu_image_path = Some(path.clone());
                 self.render_to_texture(resources);
+                self.pending_preload = true; // Trigger preloading for adjacent images
 
                 log::info!(
                     "Loaded image: {}x{} with {} bands",
@@ -454,6 +569,82 @@ impl HvatApp {
                 log::error!("Failed to load image {:?}: {}", path, e);
             }
         }
+    }
+
+    /// Preload ONE adjacent image into the GPU cache.
+    ///
+    /// Called each tick to progressively preload images without blocking the UI.
+    /// Returns true if there are more images to preload.
+    fn do_preloading_step(&mut self, resources: &mut Resources<'_>) -> bool {
+        let Some(ref project) = self.project else {
+            return false;
+        };
+        let Some(ref pipeline) = self.shared_pipeline else {
+            return false;
+        };
+
+        if project.images.is_empty() || self.gpu_preload_count == 0 {
+            return false;
+        }
+
+        // Evict out-of-range entries to free GPU memory (do this once per navigation)
+        let to_keep = self
+            .gpu_cache
+            .paths_to_keep(&project.images, project.current_index);
+        self.gpu_cache.retain_only(&to_keep);
+
+        // Get paths to preload (not cached, within range)
+        let to_preload = self
+            .gpu_cache
+            .paths_to_preload(&project.images, project.current_index);
+
+        if to_preload.is_empty() {
+            log::debug!(
+                "Preloading complete: {} images in GPU cache",
+                self.gpu_cache.len()
+            );
+            return false;
+        }
+
+        // Preload just ONE image per tick to avoid blocking the UI
+        let path = &to_preload[0];
+        log::info!("Preloading (1 of {}): {:?}", to_preload.len(), path);
+
+        let gpu_ctx = resources.gpu_context();
+
+        let hyper_result = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                HyperspectralData::from_image_file(path)
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                project
+                    .loaded_images
+                    .iter()
+                    .find(|img| PathBuf::from(&img.name) == *path)
+                    .ok_or_else(|| format!("Image not found: {:?}", path))
+                    .and_then(|img| HyperspectralData::from_bytes(&img.data))
+            }
+        };
+
+        match hyper_result {
+            Ok(hyper) => {
+                self.gpu_cache.upload_and_cache(
+                    gpu_ctx,
+                    path.clone(),
+                    &hyper,
+                    pipeline.band_texture_layout(),
+                );
+            }
+            Err(e) => {
+                log::warn!("Failed to load image for preloading {:?}: {}", path, e);
+            }
+        }
+
+        // Return true if there are more images to preload
+        to_preload.len() > 1
     }
 
     /// Handle pointer events for annotation drawing.
@@ -696,8 +887,14 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn setup(&mut self, resources: &mut Resources<'_>) {
-        log::info!("HVAT setup: generating hyperspectral test image...");
+        log::info!("HVAT setup: initializing GPU pipeline...");
 
+        // Create shared pipeline (once, reusable for all images)
+        let gpu_ctx = resources.gpu_context();
+        self.shared_pipeline = Some(SharedGpuPipeline::new(gpu_ctx));
+
+        // Generate test image
+        log::info!("Generating hyperspectral test image...");
         let hyper = generate_test_hyperspectral(
             DEFAULT_TEST_WIDTH,
             DEFAULT_TEST_HEIGHT,
@@ -745,6 +942,9 @@ impl Application for HvatApp {
                     if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                         match ProjectState::from_folder(folder) {
                             Ok(project) => {
+                                // Clear GPU cache when folder changes
+                                self.gpu_cache.clear();
+
                                 log::info!(
                                     "Loaded project with {} images from {:?}",
                                     project.images.len(),
@@ -789,6 +989,8 @@ impl Application for HvatApp {
             }
             Message::FolderLoaded(project) => {
                 log::info!("Folder loaded with {} images", project.images.len());
+                // Clear GPU cache when folder changes
+                self.gpu_cache.clear();
                 self.project = Some(project);
                 self.pending_image_load = true;
             }
@@ -808,7 +1010,7 @@ impl Application for HvatApp {
             }
             Message::ToggleSettings => {
                 self.settings_open = !self.settings_open;
-                log::info!("Settings toggled: {}", self.settings_open);
+                log::info!("****** Settings toggled: {} ******", self.settings_open);
             }
             Message::CloseSettings => {
                 self.settings_open = false;
@@ -1093,6 +1295,20 @@ impl Application for HvatApp {
             Message::FinishPolygon => {
                 self.finalize_polygon();
             }
+
+            // Settings - GPU Preloading
+            Message::GpuPreloadCountChanged(state) => {
+                self.gpu_preload_slider = state;
+                let count = (self.gpu_preload_slider.value as usize).min(MAX_GPU_PRELOAD_COUNT);
+                self.gpu_preload_count = count;
+                self.gpu_cache.set_preload_count(count);
+                log::info!("GPU preload count changed to: {}", count);
+
+                // Trigger preloading with new count if we have a project
+                if count > 0 && self.project.is_some() {
+                    self.pending_preload = true;
+                }
+            }
         }
     }
 
@@ -1108,6 +1324,8 @@ impl Application for HvatApp {
                         log::info!("Processing folder from async picker: {:?}", folder);
                         match ProjectState::from_folder(folder) {
                             Ok(project) => {
+                                // Clear GPU cache when folder changes
+                                self.gpu_cache.clear();
                                 log::info!(
                                     "Loaded project with {} images from {:?}",
                                     project.images.len(),
@@ -1126,6 +1344,8 @@ impl Application for HvatApp {
                         log::info!("Processing {} files from async picker", loaded_images.len());
                         match ProjectState::from_loaded_images(loaded_images) {
                             Ok(project) => {
+                                // Clear GPU cache when folder changes
+                                self.gpu_cache.clear();
                                 log::info!("Loaded project with {} images", project.images.len());
                                 self.project = Some(project);
                                 self.pending_image_load = true;
@@ -1152,6 +1372,9 @@ impl Application for HvatApp {
                     needs_rebuild = true;
                 }
             }
+            // Don't preload in the same tick - let the frame render first
+            // But return true if preloading is pending so the framework keeps calling us
+            return needs_rebuild || self.pending_preload;
         }
 
         // Re-render to texture if band selection or adjustments changed
@@ -1159,6 +1382,21 @@ impl Application for HvatApp {
             self.render_to_texture(resources);
             self.needs_gpu_render = false;
             needs_rebuild = true;
+            // Don't preload in the same tick as a render
+            return needs_rebuild;
+        }
+
+        // Handle progressive preloading of adjacent images (one per tick)
+        // Only runs when no image load or render is pending
+        if self.pending_preload && self.gpu_preload_count > 0 {
+            // Preload one image per tick; keep pending_preload=true if more to do
+            self.pending_preload = self.do_preloading_step(resources);
+
+            // Return true if there's more preloading to do, so the framework
+            // keeps calling tick_with_resources() without requiring user input
+            if self.pending_preload {
+                return true;
+            }
         }
 
         needs_rebuild
