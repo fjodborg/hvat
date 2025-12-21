@@ -3,16 +3,19 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::model::{Annotation, AnnotationId, DrawingState};
 
 /// Data associated with a specific image (tags, annotations, etc.)
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ImageData {
     /// Which global tags are selected/active for this image
     pub selected_tags: HashSet<String>,
     /// Annotations on this image
     pub annotations: Vec<Annotation>,
-    /// Current drawing state for this image
+    /// Current drawing state for this image (transient, not serialized)
+    #[serde(skip)]
     pub drawing_state: DrawingState,
     /// Next annotation ID for this image
     pub next_annotation_id: AnnotationId,

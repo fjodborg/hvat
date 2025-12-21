@@ -140,4 +140,28 @@ pub enum Message {
     // Settings - GPU Preloading
     /// GPU preload count slider changed
     GpuPreloadCountChanged(SliderState),
+
+    // Import/Export
+    /// Show export format selection dialog
+    ShowExportDialog,
+    /// Close export dialog
+    CloseExportDialog,
+    /// Export annotations in a specific format (format id)
+    ExportAnnotations(String),
+    /// Import annotations from file
+    ImportAnnotations,
+    /// Export completed successfully
+    ExportCompleted(usize, usize), // (images, annotations)
+    /// Export failed with error message
+    ExportFailed(String),
+    /// Import completed successfully
+    ImportCompleted(usize, usize), // (images, annotations)
+    /// Import failed with error message
+    ImportFailed(String),
+    /// Auto-save triggered
+    AutoSave,
+    /// Auto-save completed
+    AutoSaveCompleted,
+    /// Auto-save failed with error
+    AutoSaveFailed(String),
 }

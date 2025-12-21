@@ -1,7 +1,9 @@
 //! Category data model for annotation categories.
 
+use serde::{Deserialize, Serialize};
+
 /// An annotation category with a name and color.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Category {
     /// Unique identifier for the category
     pub id: u32,

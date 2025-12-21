@@ -41,6 +41,14 @@ impl HvatApp {
             r.button("Redo")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::Redo);
+            r.text(" │ ");
+            r.button("Export")
+                .padding(BUTTON_PADDING_COMPACT)
+                .on_click(Message::ShowExportDialog);
+            r.button("Import")
+                .padding(BUTTON_PADDING_COMPACT)
+                .on_click(Message::ImportAnnotations);
+            r.text(" │ ");
             r.button("Settings")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ToggleSettings);

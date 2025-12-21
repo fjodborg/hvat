@@ -1,5 +1,7 @@
 //! Annotation tool types and data structures.
 
+use serde::{Deserialize, Serialize};
+
 /// Unique identifier for an annotation.
 pub type AnnotationId = u32;
 
@@ -16,7 +18,7 @@ pub const POINT_HIT_RADIUS: f32 = 10.0;
 pub const POLYGON_CLOSE_THRESHOLD: f32 = 15.0;
 
 /// Annotation tools available in the application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnnotationTool {
     /// Selection tool for selecting existing annotations
     Select,
@@ -62,7 +64,7 @@ impl AnnotationTool {
 }
 
 /// Shape data for an annotation (in image coordinates).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnnotationShape {
     /// Bounding box defined by top-left corner and size.
     BoundingBox {
@@ -134,7 +136,7 @@ impl AnnotationShape {
 }
 
 /// A completed annotation with metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Annotation {
     /// Unique identifier.
     pub id: AnnotationId,

@@ -25,6 +25,7 @@ use crate::constants::{
     MAX_GPU_PRELOAD_COUNT, UNDO_HISTORY_SIZE,
 };
 use crate::data::HyperspectralData;
+use crate::format::{AutoSaveManager, ExportOptions, FormatRegistry, ProjectData};
 use crate::message::Message;
 use crate::model::{
     Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, MIN_POLYGON_VERTICES,
@@ -174,6 +175,16 @@ pub struct HvatApp {
     /// Default import folder path
     pub(crate) import_folder: String,
     pub(crate) import_folder_state: TextInputState,
+
+    // Format system
+    /// Format registry with all supported formats
+    pub(crate) format_registry: FormatRegistry,
+    /// Auto-save manager for automatic project persistence
+    pub(crate) auto_save: AutoSaveManager,
+    /// Path to the current project file (for auto-save)
+    pub(crate) project_file_path: Option<PathBuf>,
+    /// Whether the export dialog is open
+    pub(crate) export_dialog_open: bool,
 }
 
 impl Default for HvatApp {
@@ -266,6 +277,11 @@ impl HvatApp {
             export_folder_state: TextInputState::default(),
             import_folder: String::new(),
             import_folder_state: TextInputState::default(),
+
+            format_registry: FormatRegistry::new(),
+            auto_save: AutoSaveManager::new(),
+            project_file_path: None,
+            export_dialog_open: false,
         }
     }
 
@@ -764,6 +780,7 @@ impl HvatApp {
                     );
                     image_data.next_annotation_id += 1;
                     image_data.annotations.push(annotation);
+                    self.auto_save.mark_dirty();
                     log::info!(
                         "Created bounding box annotation (total: {})",
                         image_data.annotations.len()
@@ -860,6 +877,7 @@ impl HvatApp {
                     image_data.annotations.len() + 1
                 );
                 image_data.annotations.push(annotation);
+                self.auto_save.mark_dirty();
             }
         }
         image_data.drawing_state = DrawingState::Idle;
@@ -875,7 +893,138 @@ impl HvatApp {
             Annotation::new(image_data.next_annotation_id, shape, self.selected_category);
         image_data.next_annotation_id += 1;
         image_data.annotations.push(annotation);
+        self.auto_save.mark_dirty();
         log::info!("Created point annotation at ({:.1}, {:.1})", x, y);
+    }
+
+    // =========================================================================
+    // Format System Integration
+    // =========================================================================
+
+    /// Convert current app state to ProjectData for export.
+    pub fn to_project_data(&self) -> ProjectData {
+        let folder = self
+            .project
+            .as_ref()
+            .map(|p| p.folder.clone())
+            .unwrap_or_default();
+
+        let image_paths: Vec<PathBuf> = self
+            .project
+            .as_ref()
+            .map(|p| p.images.clone())
+            .unwrap_or_default();
+
+        ProjectData::from_app_state(
+            folder,
+            &image_paths,
+            &self.categories,
+            &self.global_tags,
+            |path| self.image_data_store.get(path),
+            |path| self.get_image_dimensions(path),
+        )
+    }
+
+    /// Get image dimensions for a path (from hyperspectral data if current image).
+    fn get_image_dimensions(&self, path: &PathBuf) -> Option<(u32, u32)> {
+        // If this is the current image, we have dimensions
+        if let Some(ref project) = self.project {
+            if project.current_image() == Some(path) {
+                if self.image_size.0 > 0 && self.image_size.1 > 0 {
+                    return Some(self.image_size);
+                }
+            }
+        }
+        // Otherwise we'd need to load the image to get dimensions
+        // For now, return None - dimensions will be filled during export if needed
+        None
+    }
+
+    /// Apply imported ProjectData to app state.
+    pub fn apply_project_data(&mut self, data: ProjectData, merge: bool) {
+        if !merge {
+            // Clear existing data
+            self.categories.clear();
+            self.global_tags.clear();
+            self.image_data_store = ImageDataStore::new();
+        }
+
+        // Apply categories
+        for cat_entry in &data.categories {
+            let exists = self.categories.iter().any(|c| c.id == cat_entry.id);
+            if !exists {
+                self.categories.push(cat_entry.to_category());
+            }
+        }
+
+        // Apply global tags
+        for tag in &data.global_tags {
+            if !self.global_tags.contains(tag) {
+                self.global_tags.push(tag.clone());
+            }
+        }
+
+        // Apply image annotations
+        for image_entry in &data.images {
+            let image_data = self.image_data_store.get_or_create(&image_entry.path);
+
+            if !merge {
+                image_data.annotations.clear();
+                image_data.selected_tags.clear();
+            }
+
+            for ann_entry in &image_entry.annotations {
+                image_data.annotations.push(ann_entry.to_annotation());
+            }
+
+            image_data.selected_tags.extend(image_entry.tags.clone());
+
+            // Update next_annotation_id
+            if let Some(max_id) = image_data.annotations.iter().map(|a| a.id).max() {
+                image_data.next_annotation_id = max_id + 1;
+            }
+        }
+
+        log::info!(
+            "Applied project data: {} categories, {} images, {} annotations",
+            data.categories.len(),
+            data.images.len(),
+            data.total_annotations()
+        );
+    }
+
+    /// Perform auto-save of project data.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn do_auto_save(&mut self) {
+        let path = if let Some(ref p) = self.project_file_path {
+            p.clone()
+        } else if let Some(ref project) = self.project {
+            project.folder.join(".hvat_project.json")
+        } else {
+            log::debug!("Auto-save skipped: no project loaded");
+            return;
+        };
+
+        log::info!("Auto-saving to {:?}", path);
+
+        let data = self.to_project_data();
+        let format = self.format_registry.native();
+
+        match format.export(&data, &path, &ExportOptions::default()) {
+            Ok(result) => {
+                log::info!(
+                    "Auto-save complete: {} images, {} annotations",
+                    result.images_exported,
+                    result.annotations_exported
+                );
+                self.auto_save.mark_saved();
+                self.project_file_path = Some(path);
+            }
+            Err(e) => {
+                log::error!("Auto-save failed: {:?}", e);
+                self.auto_save.mark_save_failed();
+            }
+        }
     }
 }
 
@@ -913,6 +1062,11 @@ impl Application for HvatApp {
         // Show settings view when settings_open is true
         if self.settings_open {
             return self.build_settings_view();
+        }
+
+        // Show export dialog when export_dialog_open is true
+        if self.export_dialog_open {
+            return self.build_export_dialog();
         }
 
         // Main application view
@@ -1076,6 +1230,7 @@ impl Application for HvatApp {
                     &format!("Category {}", new_id),
                     [200, 200, 100],
                 ));
+                self.auto_save.mark_dirty();
                 log::info!("Added new category: {}", new_id);
             }
             Message::StartEditingCategory(id) => {
@@ -1096,6 +1251,7 @@ impl Application for HvatApp {
                     if !self.category_name_input.is_empty() {
                         if let Some(cat) = self.categories.iter_mut().find(|c| c.id == id) {
                             cat.name = self.category_name_input.clone();
+                            self.auto_save.mark_dirty();
                             log::info!("Renamed category {} to '{}'", id, cat.name);
                         }
                     }
@@ -1136,6 +1292,7 @@ impl Application for HvatApp {
                 if let Some(id) = self.color_picker_category {
                     if let Some(cat) = self.categories.iter_mut().find(|c| c.id == id) {
                         cat.color = color;
+                        self.auto_save.mark_dirty();
                         log::info!("Applied color for category {}: {:?}", id, color);
                     }
                 }
@@ -1167,6 +1324,7 @@ impl Application for HvatApp {
                     let path = self.current_image_path();
                     let image_data = self.image_data_store.get_or_create(&path);
                     image_data.selected_tags.insert(tag.clone());
+                    self.auto_save.mark_dirty();
                     log::info!("Selected tag '{}' for image {:?}", tag, path);
 
                     self.tag_input_text.clear();
@@ -1183,12 +1341,14 @@ impl Application for HvatApp {
                     image_data.selected_tags.insert(tag.clone());
                     log::info!("Selected tag '{}' on image {:?}", tag, path);
                 }
+                self.auto_save.mark_dirty();
             }
             Message::RemoveTag(tag) => {
                 // Remove from global registry (affects all images)
                 self.global_tags.retain(|t| t != &tag);
                 // Also remove from all per-image selections
                 self.image_data_store.remove_tag_from_all(&tag);
+                self.auto_save.mark_dirty();
                 log::info!("Removed tag '{}' from global registry", tag);
             }
 
@@ -1289,6 +1449,7 @@ impl Application for HvatApp {
                 image_data.annotations.retain(|a| !a.selected);
                 let deleted = before_count - image_data.annotations.len();
                 if deleted > 0 {
+                    self.auto_save.mark_dirty();
                     log::info!("Deleted {} annotation(s)", deleted);
                 }
             }
@@ -1308,6 +1469,143 @@ impl Application for HvatApp {
                 if count > 0 && self.project.is_some() {
                     self.pending_preload = true;
                 }
+            }
+
+            // Import/Export
+            Message::ShowExportDialog => {
+                self.export_dialog_open = true;
+                log::info!("Export dialog opened");
+            }
+            Message::CloseExportDialog => {
+                self.export_dialog_open = false;
+                log::info!("Export dialog closed");
+            }
+            Message::ExportAnnotations(format_id) => {
+                log::info!("Export requested in format: {}", format_id);
+                self.export_dialog_open = false;
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Some(format) = self.format_registry.get(&format_id) {
+                        // Determine file extension for picker
+                        let ext = format.extensions().first().copied().unwrap_or("json");
+                        let default_name = format!("annotations.{}", ext);
+
+                        // Use per-image export for YOLO/VOC (pick folder), single file for others
+                        if format.supports_per_image() {
+                            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                let data = self.to_project_data();
+                                match format.export(&data, &folder, &ExportOptions::default()) {
+                                    Ok(result) => {
+                                        log::info!(
+                                            "Exported {} images with {} annotations to {:?}",
+                                            result.images_exported,
+                                            result.annotations_exported,
+                                            folder
+                                        );
+                                        for warning in &result.warnings {
+                                            log::warn!("Export warning: {}", warning.message);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!("Export failed: {:?}", e);
+                                    }
+                                }
+                            }
+                        } else {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name(&default_name)
+                                .save_file()
+                            {
+                                let data = self.to_project_data();
+                                match format.export(&data, &path, &ExportOptions::default()) {
+                                    Ok(result) => {
+                                        log::info!(
+                                            "Exported {} images with {} annotations to {:?}",
+                                            result.images_exported,
+                                            result.annotations_exported,
+                                            path
+                                        );
+                                    }
+                                    Err(e) => {
+                                        log::error!("Export failed: {:?}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Message::ImportAnnotations => {
+                log::info!("Import requested");
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Annotations", &["json", "hvat", "hvat.json"])
+                        .pick_file()
+                    {
+                        // Try to detect format from extension
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let format =
+                            if ext == "hvat" || path.to_string_lossy().ends_with(".hvat.json") {
+                                self.format_registry.get("hvat")
+                            } else {
+                                // Try COCO for generic JSON
+                                self.format_registry.get("coco")
+                            };
+
+                        if let Some(format) = format {
+                            match format.import(&path, &crate::format::ImportOptions::default()) {
+                                Ok(data) => {
+                                    let images = data.images.len();
+                                    let annotations = data.total_annotations();
+                                    self.apply_project_data(data, false);
+                                    log::info!(
+                                        "Imported {} images with {} annotations from {:?}",
+                                        images,
+                                        annotations,
+                                        path
+                                    );
+                                }
+                                Err(e) => {
+                                    log::error!("Import failed: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Message::ExportCompleted(images, annotations) => {
+                log::info!(
+                    "Export completed: {} images, {} annotations",
+                    images,
+                    annotations
+                );
+            }
+            Message::ExportFailed(error) => {
+                log::error!("Export failed: {}", error);
+            }
+            Message::ImportCompleted(images, annotations) => {
+                log::info!(
+                    "Import completed: {} images, {} annotations",
+                    images,
+                    annotations
+                );
+            }
+            Message::ImportFailed(error) => {
+                log::error!("Import failed: {}", error);
+            }
+            Message::AutoSave => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.do_auto_save();
+                }
+            }
+            Message::AutoSaveCompleted => {
+                log::debug!("Auto-save completed");
+            }
+            Message::AutoSaveFailed(error) => {
+                log::error!("Auto-save failed: {}", error);
             }
         }
     }
@@ -1397,6 +1695,12 @@ impl Application for HvatApp {
             if self.pending_preload {
                 return true;
             }
+        }
+
+        // Auto-save check (native only, not in WASM)
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.auto_save.should_save() {
+            self.do_auto_save();
         }
 
         needs_rebuild
