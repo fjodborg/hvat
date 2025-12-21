@@ -95,6 +95,14 @@ trunk serve --release  # Open the app under localhost:8080
 </details>
 
 <details>
+<summary>Known Limitations</summary>
+
+- **Native drag-and-drop not supported on Wayland** — Winit doesn't support drag-and-drop on Wayland. I use Wayland so i couldn't test it properly. 
+- **Only tested on Linux** — Windows and macOS support not verified.
+
+</details>
+
+<details>
 <summary>Known Bugs (Yes, bugs are a subset of features)</summary>
 
 </details>

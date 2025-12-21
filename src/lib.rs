@@ -28,13 +28,23 @@ const DEFAULT_WINDOW_HEIGHT: u32 = 900;
 /// Target frames per second
 const TARGET_FPS: u32 = 60;
 
+/// Embedded window icon (128x128 PNG)
+#[cfg(not(target_arch = "wasm32"))]
+const WINDOW_ICON: &[u8] = include_bytes!("../assets/icon.png");
+
 /// Create default application settings for both native and WASM builds.
 pub fn default_settings() -> Settings {
-    Settings::new()
+    let settings = Settings::new()
         .title(APP_TITLE)
         .size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         .background(ClearColor::rgb(0.12, 0.12, 0.15))
-        .target_fps(TARGET_FPS)
+        .target_fps(TARGET_FPS);
+
+    // Add embedded window icon for native builds
+    #[cfg(not(target_arch = "wasm32"))]
+    let settings = settings.icon_bytes(WINDOW_ICON);
+
+    settings
 }
 
 // WASM entry point

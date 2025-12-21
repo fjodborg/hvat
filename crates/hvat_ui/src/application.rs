@@ -18,6 +18,60 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use std::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
+
+// ============================================================================
+// WASM Drag-Drop State (global state for receiving drag-drop events from JS)
+// ============================================================================
+
+/// Represents a dropped file from WASM drag-drop
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+pub struct WasmDroppedFile {
+    /// Filename of the dropped file
+    pub name: String,
+    /// Raw file data bytes
+    pub data: Vec<u8>,
+}
+
+/// Pending drag-drop events from WASM
+#[cfg(target_arch = "wasm32")]
+pub enum WasmDragDropEvent {
+    /// Files dropped on the canvas
+    FilesDropped(Vec<WasmDroppedFile>),
+    /// Drag hover started
+    HoverStarted,
+    /// Drag hover ended
+    HoverEnded,
+}
+
+#[cfg(target_arch = "wasm32")]
+static PENDING_DRAG_DROP: std::sync::OnceLock<Mutex<Vec<WasmDragDropEvent>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_arch = "wasm32")]
+fn pending_drag_drop_state() -> &'static Mutex<Vec<WasmDragDropEvent>> {
+    PENDING_DRAG_DROP.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Push a drag-drop event to the pending queue (called from JS callbacks)
+#[cfg(target_arch = "wasm32")]
+pub fn push_wasm_drag_drop_event(event: WasmDragDropEvent) {
+    if let Ok(mut pending) = pending_drag_drop_state().lock() {
+        pending.push(event);
+    }
+}
+
+/// Take all pending drag-drop events
+#[cfg(target_arch = "wasm32")]
+fn take_pending_drag_drop_events() -> Vec<WasmDragDropEvent> {
+    if let Ok(mut pending) = pending_drag_drop_state().lock() {
+        std::mem::take(&mut *pending)
+    } else {
+        Vec::new()
+    }
+}
 
 /// Application settings
 #[derive(Debug, Clone)]
@@ -32,6 +86,10 @@ pub struct Settings {
     pub vsync: bool,
     /// Target frames per second (0 = unlimited, respects vsync)
     pub target_fps: u32,
+    /// Path to window icon (PNG format, native only)
+    pub icon_path: Option<String>,
+    /// Embedded icon bytes (PNG format, native only) - takes precedence over icon_path
+    pub icon_bytes: Option<&'static [u8]>,
 }
 
 impl Default for Settings {
@@ -42,6 +100,8 @@ impl Default for Settings {
             background: ClearColor::DARK_GRAY,
             vsync: true,
             target_fps: 60,
+            icon_path: None,
+            icon_bytes: None,
         }
     }
 }
@@ -73,6 +133,16 @@ impl Settings {
 
     pub fn target_fps(mut self, fps: u32) -> Self {
         self.target_fps = fps;
+        self
+    }
+
+    pub fn icon(mut self, path: impl Into<String>) -> Self {
+        self.icon_path = Some(path.into());
+        self
+    }
+
+    pub fn icon_bytes(mut self, bytes: &'static [u8]) -> Self {
+        self.icon_bytes = Some(bytes);
         self
     }
 }
@@ -162,6 +232,14 @@ struct AppState<A: Application> {
     /// Whether the current click was consumed by GlobalMousePress (e.g., closing an overlay).
     /// When true, the subsequent MousePress/MouseRelease from the same physical click are skipped.
     click_consumed: bool,
+    /// Accumulated dropped file paths (native only).
+    /// Files are accumulated here and then sent as a batch when the drop ends.
+    #[cfg(not(target_arch = "wasm32"))]
+    pending_dropped_files: Vec<std::path::PathBuf>,
+    /// Whether we need to flush dropped files on the next frame (native only).
+    /// Set to true after DroppedFile events, checked on RedrawRequested.
+    #[cfg(not(target_arch = "wasm32"))]
+    flush_dropped_files_pending: bool,
 }
 
 impl<A: Application> AppState<A> {
@@ -213,6 +291,21 @@ impl<A: Application> AppState<A> {
             frame_duration,
             redraw_requested: true, // Initial redraw needed
             click_consumed: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            pending_dropped_files: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            flush_dropped_files_pending: false,
+        }
+    }
+
+    /// Flush any pending dropped files as a single batch event.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn flush_pending_dropped_files(&mut self) {
+        if !self.pending_dropped_files.is_empty() {
+            let paths = std::mem::take(&mut self.pending_dropped_files);
+            log::info!("Flushing {} dropped files as batch", paths.len());
+            self.handle_event(Event::FilesDropped { paths });
+            self.request_redraw();
         }
     }
 
@@ -297,6 +390,36 @@ impl<A: Application> AppState<A> {
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // Process pending WASM drag-drop events
+        #[cfg(target_arch = "wasm32")]
+        {
+            use std::path::PathBuf;
+            for event in take_pending_drag_drop_events() {
+                match event {
+                    WasmDragDropEvent::FilesDropped(files) => {
+                        log::info!("Processing {} dropped files from WASM", files.len());
+                        // Send each file as a DroppedFileData event first (for reading data)
+                        for file in &files {
+                            self.handle_event(Event::DroppedFileData {
+                                name: file.name.clone(),
+                                data: file.data.clone(),
+                            });
+                        }
+                        // Then send the FilesDropped event with virtual paths
+                        let paths: Vec<PathBuf> =
+                            files.iter().map(|f| PathBuf::from(&f.name)).collect();
+                        self.handle_event(Event::FilesDropped { paths });
+                    }
+                    WasmDragDropEvent::HoverStarted => {
+                        self.handle_event(Event::FileHoverStarted { paths: vec![] });
+                    }
+                    WasmDragDropEvent::HoverEnded => {
+                        self.handle_event(Event::FileHoverEnded);
+                    }
+                }
+            }
+        }
+
         self.app.tick();
 
         // Call tick_with_resources for GPU updates (e.g., texture updates)
@@ -425,13 +548,77 @@ impl<A: Application> WinitApp<A> {
 impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
+            // Load window icon - try embedded bytes first, then file path
+            log::info!(
+                "Loading window icon: icon_bytes={}, icon_path={:?}",
+                self.settings.icon_bytes.is_some(),
+                self.settings.icon_path
+            );
+            let window_icon = self
+                .settings
+                .icon_bytes
+                .and_then(|bytes| match image::load_from_memory(bytes) {
+                    Ok(img) => {
+                        let rgba = img.into_rgba8();
+                        let (width, height) = rgba.dimensions();
+                        match winit::window::Icon::from_rgba(rgba.into_raw(), width, height) {
+                            Ok(icon) => {
+                                log::info!(
+                                    "Loaded window icon from embedded bytes ({}x{})",
+                                    width,
+                                    height
+                                );
+                                Some(icon)
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to create window icon from bytes: {}", e);
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to decode embedded icon bytes: {}", e);
+                        None
+                    }
+                })
+                .or_else(|| {
+                    self.settings
+                        .icon_path
+                        .as_ref()
+                        .and_then(|path| match image::open(path) {
+                            Ok(img) => {
+                                let rgba = img.into_rgba8();
+                                let (width, height) = rgba.dimensions();
+                                match winit::window::Icon::from_rgba(rgba.into_raw(), width, height)
+                                {
+                                    Ok(icon) => {
+                                        log::info!("Loaded window icon from file: {}", path);
+                                        Some(icon)
+                                    }
+                                    Err(e) => {
+                                        log::warn!("Failed to create window icon: {}", e);
+                                        None
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to load window icon from {}: {}", path, e);
+                                None
+                            }
+                        })
+                });
+
             // Use LogicalSize - this is what worked before and respects DPI scaling properly
-            let window_attrs = WindowAttributes::default()
+            let mut window_attrs = WindowAttributes::default()
                 .with_title(&self.settings.title)
                 .with_inner_size(winit::dpi::LogicalSize::new(
                     self.settings.size.0,
                     self.settings.size.1,
                 ));
+
+            if let Some(icon) = window_icon {
+                window_attrs = window_attrs.with_window_icon(Some(icon));
+            }
 
             let window = Arc::new(
                 event_loop
@@ -534,10 +721,12 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
             );
             self.window = Some(window.clone());
 
-            // Set up ResizeObserver for the canvas to handle browser resize
-            if let Some(canvas) = canvas {
+            // Set up ResizeObserver and drag-drop for the canvas
+            if let Some(ref canvas) = canvas {
                 let window_for_resize = window.clone();
-                setup_canvas_resize_observer(canvas, window_for_resize);
+                setup_canvas_resize_observer(canvas.clone(), window_for_resize);
+                let window_for_dragdrop = window.clone();
+                setup_canvas_drag_drop(canvas.clone(), window_for_dragdrop);
             }
 
             if let Some(app) = self.app.take() {
@@ -619,6 +808,14 @@ fn handle_window_event<A: Application>(
         }
 
         WindowEvent::RedrawRequested => {
+            // Flush any pending dropped files before rendering (native only)
+            // This ensures all DroppedFile events are batched together
+            #[cfg(not(target_arch = "wasm32"))]
+            if state.flush_dropped_files_pending {
+                state.flush_dropped_files_pending = false;
+                state.flush_pending_dropped_files();
+            }
+
             // Always render when requested - this is critical for Wayland where
             // the window won't appear until it has rendered its first frame
             match state.render() {
@@ -747,6 +944,26 @@ fn handle_window_event<A: Application>(
 
         WindowEvent::KeyboardInput { event, .. } => {
             if let PhysicalKey::Code(keycode) = event.physical_key {
+                // Allow browser dev tools shortcuts to pass through (WASM only)
+                // F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C are common dev tools shortcuts
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use winit::keyboard::KeyCode as WK;
+                    let dominated = matches!(
+                        keycode,
+                        WK::F12
+                            | WK::F5  // Refresh
+                            | WK::F11 // Fullscreen
+                    ) || (state.modifiers.ctrl
+                        && state.modifiers.shift
+                        && matches!(keycode, WK::KeyI | WK::KeyJ | WK::KeyC));
+
+                    if dominated {
+                        // Don't handle this key - let the browser handle it
+                        return;
+                    }
+                }
+
                 let key = KeyCode::from_winit(keycode);
                 let ui_event = if event.state == ElementState::Pressed {
                     Event::KeyPress {
@@ -799,6 +1016,48 @@ fn handle_window_event<A: Application>(
             // Cursor left the window - release any drag states
             log::debug!("Cursor left window");
             state.handle_event(Event::CursorLeft);
+            state.request_redraw();
+            if let Some(w) = window {
+                w.request_redraw();
+            }
+        }
+
+        WindowEvent::DroppedFile(path) => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Accumulate dropped files - winit sends one event per file
+                // We'll flush them as a batch on the next redraw
+                log::info!("File dropped (accumulating): {:?}", path);
+                state.pending_dropped_files.push(path);
+                state.flush_dropped_files_pending = true;
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                // On WASM, drag-drop is handled separately via HTML5 events
+                log::info!("File dropped: {:?}", path);
+                state.handle_event(Event::FilesDropped { paths: vec![path] });
+            }
+            state.request_redraw();
+            if let Some(w) = window {
+                w.request_redraw();
+            }
+        }
+
+        WindowEvent::HoveredFile(path) => {
+            log::debug!("File hover started: {:?}", path);
+            state.handle_event(Event::FileHoverStarted { paths: vec![path] });
+            state.request_redraw();
+            if let Some(w) = window {
+                w.request_redraw();
+            }
+        }
+
+        WindowEvent::HoveredFileCancelled => {
+            log::debug!("File hover cancelled");
+            // Flush any accumulated dropped files first (native only)
+            #[cfg(not(target_arch = "wasm32"))]
+            state.flush_pending_dropped_files();
+            state.handle_event(Event::FileHoverEnded);
             state.request_redraw();
             if let Some(w) = window {
                 w.request_redraw();
@@ -936,4 +1195,393 @@ fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc
             let _ = window.request_inner_size(winit::dpi::LogicalSize::new(width, height));
         }
     }
+}
+
+/// Set up drag-drop event listeners for WASM.
+/// This enables file/folder drop support on the canvas element.
+#[cfg(target_arch = "wasm32")]
+fn setup_canvas_drag_drop(canvas: web_sys::HtmlCanvasElement, window: Arc<Window>) {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+
+    // Prevent default behavior for dragover (required for drop to work)
+    let dragover_callback =
+        Closure::<dyn Fn(web_sys::DragEvent)>::new(|event: web_sys::DragEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            // Set drop effect to copy
+            if let Some(dt) = event.data_transfer() {
+                dt.set_drop_effect("copy");
+            }
+        });
+
+    if let Err(e) = canvas
+        .add_event_listener_with_callback("dragover", dragover_callback.as_ref().unchecked_ref())
+    {
+        log::error!("Failed to add dragover listener: {:?}", e);
+    }
+    dragover_callback.forget();
+
+    // Prevent default for dragenter
+    let dragenter_callback =
+        Closure::<dyn Fn(web_sys::DragEvent)>::new(|event: web_sys::DragEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            log::debug!("Drag enter on canvas");
+            push_wasm_drag_drop_event(WasmDragDropEvent::HoverStarted);
+        });
+
+    if let Err(e) = canvas
+        .add_event_listener_with_callback("dragenter", dragenter_callback.as_ref().unchecked_ref())
+    {
+        log::error!("Failed to add dragenter listener: {:?}", e);
+    }
+    dragenter_callback.forget();
+
+    // Handle dragleave
+    let dragleave_callback =
+        Closure::<dyn Fn(web_sys::DragEvent)>::new(|event: web_sys::DragEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            log::debug!("Drag leave from canvas");
+            push_wasm_drag_drop_event(WasmDragDropEvent::HoverEnded);
+        });
+
+    if let Err(e) = canvas
+        .add_event_listener_with_callback("dragleave", dragleave_callback.as_ref().unchecked_ref())
+    {
+        log::error!("Failed to add dragleave listener: {:?}", e);
+    }
+    dragleave_callback.forget();
+
+    // Handle drop event - read files and folders asynchronously
+    let window_for_drop = window.clone();
+    let drop_callback =
+        Closure::<dyn Fn(web_sys::DragEvent)>::new(move |event: web_sys::DragEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            log::info!("Drop event on canvas");
+
+            // End hover state
+            push_wasm_drag_drop_event(WasmDragDropEvent::HoverEnded);
+
+            let Some(data_transfer) = event.data_transfer() else {
+                log::warn!("No data transfer in drop event");
+                return;
+            };
+
+            // Try to use DataTransferItemList for folder support
+            let items = data_transfer.items();
+            let item_count = items.length();
+            log::info!("Dropped {} items (using DataTransferItemList)", item_count);
+
+            if item_count == 0 {
+                log::warn!("No items in drop event");
+                return;
+            }
+
+            // Collect entries from all items (files and folders)
+            // We need to get all entries synchronously during the drop event,
+            // then process them asynchronously
+            let mut entries: Vec<web_sys::FileSystemEntry> = Vec::new();
+            for i in 0..item_count {
+                if let Some(item) = items.get(i) {
+                    // Use webkitGetAsEntry to detect files vs folders
+                    // Returns Result<Option<FileSystemEntry>, JsValue>
+                    match item.webkit_get_as_entry() {
+                        Ok(Some(entry)) => {
+                            log::info!(
+                                "Entry {}: name='{}', isFile={}, isDirectory={}",
+                                i,
+                                entry.name(),
+                                entry.is_file(),
+                                entry.is_directory()
+                            );
+                            entries.push(entry);
+                        }
+                        Ok(None) => {
+                            log::debug!("Item {} has no entry (might be non-file data)", i);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to get entry for item {}: {:?}", i, e);
+                        }
+                    }
+                }
+            }
+
+            if entries.is_empty() {
+                log::warn!("No file/folder entries found in drop");
+                return;
+            }
+
+            // Process entries asynchronously (handles both files and folders)
+            let window_for_redraw = window_for_drop.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let dropped_files = process_entries(entries).await;
+
+                if !dropped_files.is_empty() {
+                    log::info!(
+                        "Pushing {} dropped files to event queue",
+                        dropped_files.len()
+                    );
+                    push_wasm_drag_drop_event(WasmDragDropEvent::FilesDropped(dropped_files));
+                    window_for_redraw.request_redraw();
+                } else {
+                    log::warn!("No valid image files found in drop");
+                }
+            });
+        });
+
+    if let Err(e) =
+        canvas.add_event_listener_with_callback("drop", drop_callback.as_ref().unchecked_ref())
+    {
+        log::error!("Failed to add drop listener: {:?}", e);
+    }
+    drop_callback.forget();
+
+    log::info!("Canvas drag-drop event listeners set up");
+}
+
+/// Read a File asynchronously using FileReader (WASM only).
+/// This is a utility function for reading web_sys::File objects.
+#[cfg(target_arch = "wasm32")]
+pub async fn read_file_async(file: &web_sys::File) -> Result<Vec<u8>, String> {
+    use js_sys::{ArrayBuffer, Uint8Array};
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    // Use the blob's arrayBuffer() method which returns a Promise
+    let array_buffer_promise = file.array_buffer();
+    let array_buffer = JsFuture::from(array_buffer_promise)
+        .await
+        .map_err(|e| format!("Failed to read file: {:?}", e))?;
+
+    let array_buffer: ArrayBuffer = array_buffer
+        .dyn_into()
+        .map_err(|_| "Failed to convert to ArrayBuffer")?;
+
+    let uint8_array = Uint8Array::new(&array_buffer);
+    Ok(uint8_array.to_vec())
+}
+
+/// Check if a filename has a supported image extension
+#[cfg(target_arch = "wasm32")]
+fn is_image_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".bmp")
+        || lower.ends_with(".tiff")
+        || lower.ends_with(".tif")
+        || lower.ends_with(".webp")
+}
+
+/// Process a list of FileSystemEntry objects (files and folders) and return all image files
+#[cfg(target_arch = "wasm32")]
+async fn process_entries(entries: Vec<web_sys::FileSystemEntry>) -> Vec<WasmDroppedFile> {
+    use wasm_bindgen::JsCast;
+
+    let mut all_files: Vec<WasmDroppedFile> = Vec::new();
+
+    for entry in entries {
+        if entry.is_file() {
+            // It's a file - read it directly
+            if let Some(file_entry) = entry.dyn_ref::<web_sys::FileSystemFileEntry>() {
+                match read_file_entry(file_entry).await {
+                    Ok(dropped_file) => {
+                        if is_image_file(&dropped_file.name) {
+                            log::info!("Read file: {}", dropped_file.name);
+                            all_files.push(dropped_file);
+                        } else {
+                            log::debug!("Skipping non-image file: {}", dropped_file.name);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read file entry: {}", e);
+                    }
+                }
+            }
+        } else if entry.is_directory() {
+            // It's a directory - read all files recursively
+            if let Some(dir_entry) = entry.dyn_ref::<web_sys::FileSystemDirectoryEntry>() {
+                log::info!("Processing directory: {}", dir_entry.name());
+                match read_directory_recursive(dir_entry, "").await {
+                    Ok(files) => {
+                        for dropped_file in files {
+                            if is_image_file(&dropped_file.name) {
+                                log::info!("Read file from folder: {}", dropped_file.name);
+                                all_files.push(dropped_file);
+                            } else {
+                                log::debug!("Skipping non-image file: {}", dropped_file.name);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read directory: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort files by name for consistent ordering
+    all_files.sort_by(|a, b| a.name.cmp(&b.name));
+    log::info!("Total image files found: {}", all_files.len());
+
+    all_files
+}
+
+/// Read a FileSystemFileEntry and return its contents
+#[cfg(target_arch = "wasm32")]
+async fn read_file_entry(entry: &web_sys::FileSystemFileEntry) -> Result<WasmDroppedFile, String> {
+    use js_sys::Promise;
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    // FileSystemFileEntry.file() takes a callback, so we wrap it in a Promise
+    let promise = Promise::new(&mut |resolve, reject| {
+        // The file() method calls success callback with the File object
+        let success_cb = Closure::once(move |file: web_sys::File| {
+            resolve.call1(&wasm_bindgen::JsValue::NULL, &file).unwrap();
+        });
+        let error_cb = Closure::once(move |err: wasm_bindgen::JsValue| {
+            reject.call1(&wasm_bindgen::JsValue::NULL, &err).unwrap();
+        });
+
+        entry.file_with_callback_and_callback(
+            success_cb.as_ref().unchecked_ref(),
+            error_cb.as_ref().unchecked_ref(),
+        );
+
+        // Prevent closures from being dropped
+        success_cb.forget();
+        error_cb.forget();
+    });
+
+    let file: web_sys::File = JsFuture::from(promise)
+        .await
+        .map_err(|e| format!("Failed to get file: {:?}", e))?
+        .dyn_into()
+        .map_err(|_| "Failed to convert to File")?;
+
+    let name = file.name();
+    let data = read_file_async(&file).await?;
+
+    Ok(WasmDroppedFile { name, data })
+}
+
+/// Read all files from a directory recursively
+/// Uses Box::pin to handle recursive async calls
+#[cfg(target_arch = "wasm32")]
+fn read_directory_recursive<'a>(
+    dir_entry: &'a web_sys::FileSystemDirectoryEntry,
+    prefix: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<WasmDroppedFile>, String>> + 'a>>
+{
+    use wasm_bindgen::JsCast;
+
+    let prefix = prefix.to_string();
+
+    Box::pin(async move {
+        let mut all_files: Vec<WasmDroppedFile> = Vec::new();
+        let reader = dir_entry.create_reader();
+
+        // Read entries in batches (browsers limit to ~100 entries per call)
+        loop {
+            let entries = read_entries_batch(&reader).await?;
+            if entries.is_empty() {
+                break;
+            }
+
+            for entry in entries {
+                let entry_name = entry.name();
+                let full_path = if prefix.is_empty() {
+                    entry_name.clone()
+                } else {
+                    format!("{}/{}", prefix, entry_name)
+                };
+
+                if entry.is_file() {
+                    if let Some(file_entry) = entry.dyn_ref::<web_sys::FileSystemFileEntry>() {
+                        match read_file_entry(file_entry).await {
+                            Ok(mut dropped_file) => {
+                                // Use full path as name for nested files
+                                dropped_file.name = full_path;
+                                all_files.push(dropped_file);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to read file {}: {}", full_path, e);
+                            }
+                        }
+                    }
+                } else if entry.is_directory() {
+                    if let Some(sub_dir) = entry.dyn_ref::<web_sys::FileSystemDirectoryEntry>() {
+                        match read_directory_recursive(sub_dir, &full_path).await {
+                            Ok(sub_files) => {
+                                all_files.extend(sub_files);
+                            }
+                            Err(e) => {
+                                log::error!("Failed to read subdirectory {}: {}", full_path, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(all_files)
+    })
+}
+
+/// Read a batch of entries from a directory reader
+/// Note: readEntries may need to be called multiple times to get all entries
+#[cfg(target_arch = "wasm32")]
+async fn read_entries_batch(
+    reader: &web_sys::FileSystemDirectoryReader,
+) -> Result<Vec<web_sys::FileSystemEntry>, String> {
+    use js_sys::Promise;
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+
+    let promise = Promise::new(&mut |resolve, reject| {
+        let success_cb = Closure::once(move |entries: js_sys::Array| {
+            resolve
+                .call1(&wasm_bindgen::JsValue::NULL, &entries)
+                .unwrap();
+        });
+        let error_cb = Closure::once(move |err: wasm_bindgen::JsValue| {
+            reject.call1(&wasm_bindgen::JsValue::NULL, &err).unwrap();
+        });
+
+        if let Err(e) = reader.read_entries_with_callback_and_callback(
+            success_cb.as_ref().unchecked_ref(),
+            error_cb.as_ref().unchecked_ref(),
+        ) {
+            log::error!("Failed to call readEntries: {:?}", e);
+        }
+
+        success_cb.forget();
+        error_cb.forget();
+    });
+
+    let result = JsFuture::from(promise)
+        .await
+        .map_err(|e| format!("readEntries failed: {:?}", e))?;
+
+    let array: js_sys::Array = result
+        .dyn_into()
+        .map_err(|_| "Failed to convert to Array")?;
+
+    let mut entries = Vec::new();
+    for i in 0..array.length() {
+        if let Ok(entry) = array.get(i).dyn_into::<web_sys::FileSystemEntry>() {
+            entries.push(entry);
+        }
+    }
+
+    log::debug!("Read {} entries from directory", entries.len());
+    Ok(entries)
 }

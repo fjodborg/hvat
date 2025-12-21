@@ -345,6 +345,18 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
         repository: Some("https://github.com/daxpedda/web-time"),
     },
     DependencyInfo {
+        name: "moxcms",
+        version: "0.7.11",
+        license: "Apache License 2.0",
+        repository: Some("https://github.com/awxkee/moxcms.git"),
+    },
+    DependencyInfo {
+        name: "pxfm",
+        version: "0.1.27",
+        license: "Apache License 2.0",
+        repository: Some("https://github.com/awxkee/pxfm"),
+    },
+    DependencyInfo {
         name: "codespan-reporting",
         version: "0.12.0",
         license: "Apache License 2.0",
@@ -1041,6 +1053,12 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
         repository: Some("https://github.com/image-rs/image-png"),
     },
     DependencyInfo {
+        name: "png",
+        version: "0.18.0",
+        license: "Apache License 2.0",
+        repository: Some("https://github.com/image-rs/image-png"),
+    },
+    DependencyInfo {
         name: "polling",
         version: "3.11.0",
         license: "Apache License 2.0",
@@ -1585,6 +1603,12 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
     DependencyInfo {
         name: "image",
         version: "0.24.9",
+        license: "Apache License 2.0",
+        repository: Some("https://github.com/image-rs/image"),
+    },
+    DependencyInfo {
+        name: "image",
+        version: "0.25.9",
         license: "Apache License 2.0",
         repository: Some("https://github.com/image-rs/image"),
     },
@@ -2778,12 +2802,23 @@ pub const DEPENDENCIES: &[DependencyInfo] = &[
     },
 ];
 
+/// Bundled assets that are not Rust crates (fonts, icons, etc.)
+pub const BUNDLED_ASSETS: &[DependencyInfo] = &[DependencyInfo {
+    name: "Noto Sans",
+    version: "2022",
+    license: "SIL Open Font License 1.1",
+    repository: Some("https://github.com/notofonts/latin-greek-cyrillic"),
+}];
+
 /// Get a summary of license usage
 pub fn license_summary() -> Vec<(&'static str, usize)> {
     let mut counts: std::collections::HashMap<&'static str, usize> =
         std::collections::HashMap::new();
     for dep in DEPENDENCIES {
         *counts.entry(dep.license).or_insert(0) += 1;
+    }
+    for asset in BUNDLED_ASSETS {
+        *counts.entry(asset.license).or_insert(0) += 1;
     }
     let mut result: Vec<_> = counts.into_iter().collect();
     result.sort_by(|a, b| b.1.cmp(&a.1));

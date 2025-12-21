@@ -5,6 +5,8 @@ target = "index.html"
 public_url = "/"
 # Whether to include hash values in the output file names
 filehash = true
+# Disable subresource integrity hashes - they conflict with Service Worker caching
+integrity = "none"
 
 [watch]
 # Paths to watch for changes

@@ -20,6 +20,8 @@ mod widgets;
 /// Reusable demo components
 pub mod demos;
 
+#[cfg(target_arch = "wasm32")]
+pub use application::read_file_async;
 pub use application::{Application, Resources, Settings};
 pub use callback::{Callback, Callback0, SideEffect};
 pub use context::Context;

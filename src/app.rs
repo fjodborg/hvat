@@ -58,6 +58,179 @@ fn pending_picker_state() -> &'static std::sync::Mutex<Option<AsyncPickerResult>
 }
 
 // ============================================================================
+// WASM Folder Picker using File System Access API
+// ============================================================================
+
+#[cfg(target_arch = "wasm32")]
+mod wasm_folder_picker {
+    use crate::state::{LoadedImage, is_image_filename};
+    use hvat_ui::read_file_async;
+    use js_sys::Reflect;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen::prelude::*;
+
+    /// Show folder picker using hidden input with webkitdirectory attribute.
+    /// Works in Firefox, Chrome, and Edge.
+    pub fn show_folder_picker_via_input(on_complete: impl Fn(Vec<LoadedImage>) + 'static) {
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                log::error!("No window object");
+                return;
+            }
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => {
+                log::error!("No document object");
+                return;
+            }
+        };
+
+        // Create hidden input element
+        let input: web_sys::HtmlInputElement = match document.create_element("input") {
+            Ok(el) => match el.dyn_into() {
+                Ok(input) => input,
+                Err(_) => {
+                    log::error!("Failed to cast to HtmlInputElement");
+                    return;
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to create input element: {:?}", e);
+                return;
+            }
+        };
+
+        input.set_type("file");
+        // webkitdirectory enables folder selection in Firefox, Chrome, and Edge
+        input.set_attribute("webkitdirectory", "").ok();
+        input.set_attribute("directory", "").ok();
+        input.set_multiple(true);
+        input.style().set_property("display", "none").ok();
+
+        // Append to body temporarily
+        if let Some(body) = document.body() {
+            if let Err(e) = body.append_child(&input) {
+                log::error!("Failed to append input to body: {:?}", e);
+                return;
+            }
+        }
+
+        // Create callback for when files are selected
+        let input_clone = input.clone();
+        let callback = Rc::new(RefCell::new(Some(on_complete)));
+        let callback_clone = callback.clone();
+
+        let change_closure = Closure::once(Box::new(move |_event: web_sys::Event| {
+            log::info!("Folder input change event fired");
+
+            // Get the files from the input
+            let files = match input_clone.files() {
+                Some(f) => f,
+                None => {
+                    log::warn!("No files in input");
+                    // Clean up
+                    if let Some(parent) = input_clone.parent_element() {
+                        parent.remove_child(&input_clone).ok();
+                    }
+                    return;
+                }
+            };
+
+            let file_count = files.length();
+            log::info!("Selected {} files from folder", file_count);
+
+            if file_count == 0 {
+                // Clean up
+                if let Some(parent) = input_clone.parent_element() {
+                    parent.remove_child(&input_clone).ok();
+                }
+                return;
+            }
+
+            // Collect all files
+            let mut web_files: Vec<web_sys::File> = Vec::new();
+            for i in 0..file_count {
+                if let Some(file) = files.get(i) {
+                    let name = file.name();
+                    if is_image_filename(&name) {
+                        web_files.push(file);
+                    } else {
+                        log::debug!("Skipping non-image file: {}", name);
+                    }
+                }
+            }
+
+            log::info!("Found {} image files", web_files.len());
+
+            // Clean up input element
+            if let Some(parent) = input_clone.parent_element() {
+                parent.remove_child(&input_clone).ok();
+            }
+
+            if web_files.is_empty() {
+                log::warn!("No image files found in selected folder");
+                return;
+            }
+
+            // Read files asynchronously
+            let cb = callback_clone.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                use js_sys::Reflect;
+                use wasm_bindgen::JsValue;
+
+                let mut loaded_images: Vec<LoadedImage> = Vec::new();
+
+                for file in web_files {
+                    let name = file.name();
+                    // Try to get the relative path (webkitRelativePath) via JS reflection
+                    // since web-sys may not expose it directly
+                    let display_name =
+                        Reflect::get(&file, &JsValue::from_str("webkitRelativePath"))
+                            .ok()
+                            .and_then(|v| v.as_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| name.clone());
+
+                    match read_file_async(&file).await {
+                        Ok(data) => {
+                            log::debug!("Read file: {} ({} bytes)", display_name, data.len());
+                            loaded_images.push(LoadedImage {
+                                name: display_name,
+                                data,
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("Failed to read file {}: {}", name, e);
+                        }
+                    }
+                }
+
+                // Sort by name for consistent ordering
+                loaded_images.sort_by(|a, b| a.name.cmp(&b.name));
+                log::info!("Successfully read {} image files", loaded_images.len());
+
+                // Call the completion callback
+                if let Some(callback) = cb.borrow_mut().take() {
+                    callback(loaded_images);
+                }
+            });
+        }));
+
+        input.set_onchange(Some(change_closure.as_ref().unchecked_ref()));
+        change_closure.forget(); // Don't drop the closure
+
+        // Trigger the file picker
+        log::info!("Opening folder picker dialog...");
+        input.click();
+    }
+}
+
+// ============================================================================
 // HVAT Application State
 // ============================================================================
 
@@ -185,6 +358,12 @@ pub struct HvatApp {
     pub(crate) project_file_path: Option<PathBuf>,
     /// Whether the export dialog is open
     pub(crate) export_dialog_open: bool,
+
+    // Drag-Drop State
+    /// Whether files are being dragged over the window
+    pub(crate) drag_hover_active: bool,
+    /// Pending dropped files from WASM (collects DroppedFileData events)
+    pub(crate) pending_wasm_files: Vec<LoadedImage>,
 }
 
 impl Default for HvatApp {
@@ -282,6 +461,9 @@ impl HvatApp {
             auto_save: AutoSaveManager::new(),
             project_file_path: None,
             export_dialog_open: false,
+
+            drag_hover_active: false,
+            pending_wasm_files: Vec::new(),
         }
     }
 
@@ -457,6 +639,42 @@ impl HvatApp {
             self.gamma_slider.value,
             self.hue_slider.value,
         );
+    }
+
+    /// Handle native file drop (files and/or folders).
+    /// Supports dropping folders (scanned recursively) and/or multiple image files.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn handle_native_file_drop(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+
+        log::info!("Native file drop: {} paths", paths.len());
+        for path in &paths {
+            log::debug!(
+                "  - {:?} (is_dir={}, is_file={})",
+                path,
+                path.is_dir(),
+                path.is_file()
+            );
+        }
+
+        // Use the new from_paths method which handles both files and folders recursively
+        match ProjectState::from_paths(paths) {
+            Ok(project) => {
+                self.gpu_cache.clear();
+                log::info!(
+                    "Loaded project with {} images from drop, folder: {:?}",
+                    project.images.len(),
+                    project.folder
+                );
+                self.project = Some(project);
+                self.pending_image_load = true;
+            }
+            Err(e) => {
+                log::error!("Failed to load dropped items: {}", e);
+            }
+        }
     }
 
     /// Load an image file and reinitialize GPU state.
@@ -1094,7 +1312,7 @@ impl Application for HvatApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                        match ProjectState::from_folder(folder) {
+                        match ProjectState::from_folder_recursive(folder) {
                             Ok(project) => {
                                 // Clear GPU cache when folder changes
                                 self.gpu_cache.clear();
@@ -1115,28 +1333,16 @@ impl Application for HvatApp {
                 }
                 #[cfg(target_arch = "wasm32")]
                 {
-                    wasm_bindgen_futures::spawn_local(async {
-                        let files = rfd::AsyncFileDialog::new()
-                            .add_filter(
-                                "images",
-                                &["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"],
-                            )
-                            .pick_files()
-                            .await;
-
-                        if let Some(file_handles) = files {
-                            let mut loaded_images = Vec::new();
-
-                            for handle in file_handles {
-                                let name = handle.file_name();
-                                let data = handle.read().await;
-                                loaded_images.push(LoadedImage { name, data });
-                            }
-
-                            log::info!("WASM: loaded {} files", loaded_images.len());
+                    // Use webkitdirectory input for folder selection
+                    // Works in Firefox, Chrome, and Edge
+                    wasm_folder_picker::show_folder_picker_via_input(|loaded_images| {
+                        if !loaded_images.is_empty() {
+                            log::info!("WASM: loaded {} files from folder", loaded_images.len());
                             if let Ok(mut pending) = pending_picker_state().lock() {
                                 *pending = Some(AsyncPickerResult::Files(loaded_images));
                             }
+                        } else {
+                            log::warn!("No image files found in selected folder");
                         }
                     });
                 }
@@ -1607,6 +1813,58 @@ impl Application for HvatApp {
             Message::AutoSaveFailed(error) => {
                 log::error!("Auto-save failed: {}", error);
             }
+
+            // Drag-Drop Events
+            #[allow(unused_variables)]
+            Message::FilesDropped(paths) => {
+                log::info!("Files dropped: {} paths", paths.len());
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // Check if we have pending WASM files (this means we're on WASM)
+                    if !self.pending_wasm_files.is_empty() {
+                        // Use the pending file data directly (WASM can't read from disk)
+                        let loaded_images = std::mem::take(&mut self.pending_wasm_files);
+                        log::info!("Processing {} dropped files from WASM", loaded_images.len());
+
+                        match ProjectState::from_loaded_images(loaded_images) {
+                            Ok(project) => {
+                                self.gpu_cache.clear();
+                                log::info!(
+                                    "Loaded project with {} images from drop",
+                                    project.images.len()
+                                );
+                                self.project = Some(project);
+                                self.pending_image_load = true;
+                            }
+                            Err(e) => {
+                                log::error!("Failed to load dropped images: {}", e);
+                            }
+                        }
+                    } else {
+                        log::warn!("FilesDropped received but no pending WASM files");
+                    }
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Native: read files from filesystem
+                    self.handle_native_file_drop(paths);
+                }
+            }
+            Message::FileDataDropped(_loaded_images) => {
+                // This is handled in on_event by storing to pending_wasm_files
+                // The FilesDropped message will then process them
+                log::debug!("FileDataDropped - handled via pending_wasm_files");
+            }
+            Message::FileHoverStarted => {
+                self.drag_hover_active = true;
+                log::debug!("Drag hover started");
+            }
+            Message::FileHoverEnded => {
+                self.drag_hover_active = false;
+                log::debug!("Drag hover ended");
+            }
         }
     }
 
@@ -1707,6 +1965,36 @@ impl Application for HvatApp {
     }
 
     fn on_event(&mut self, event: &Event) -> Option<Self::Message> {
+        // Handle drag-drop events
+        match event {
+            Event::FilesDropped { paths } => {
+                log::info!("on_event: FilesDropped with {} paths", paths.len());
+                return Some(Message::FilesDropped(paths.clone()));
+            }
+            Event::DroppedFileData { name, data } => {
+                // Store dropped file data for WASM processing
+                // This is handled before FilesDropped in WASM
+                log::info!("on_event: DroppedFileData for {}", name);
+                // We'll collect these and process them when FilesDropped arrives
+                // For now, store them in pending state
+                self.pending_wasm_files.push(LoadedImage {
+                    name: name.clone(),
+                    data: data.clone(),
+                });
+                return None; // Don't return a message, wait for FilesDropped
+            }
+            Event::FileHoverStarted { .. } => {
+                log::debug!("on_event: FileHoverStarted");
+                return Some(Message::FileHoverStarted);
+            }
+            Event::FileHoverEnded => {
+                log::debug!("on_event: FileHoverEnded");
+                return Some(Message::FileHoverEnded);
+            }
+            _ => {}
+        }
+
+        // Handle keyboard events
         Self::handle_key_event(event)
     }
 

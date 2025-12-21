@@ -210,7 +210,8 @@ pub struct Renderer {
 }
 
 /// Embedded font for WASM compatibility (no system font access)
-const EMBEDDED_FONT: &[u8] = include_bytes!("../assets/DejaVuSansMono.ttf");
+/// Using Noto Sans (SIL Open Font License - commercial use allowed)
+const EMBEDDED_FONT: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
 
 impl Renderer {
     /// Create a new renderer

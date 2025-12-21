@@ -2,11 +2,13 @@
 //!
 //! All UI events and actions are represented as messages in the Elm architecture style.
 
+use std::path::PathBuf;
+
 use hvat_ui::ImagePointerEvent;
 use hvat_ui::prelude::*;
 
 use crate::model::AnnotationTool;
-use crate::state::ProjectState;
+use crate::state::{LoadedImage, ProjectState};
 
 /// Messages that can be sent to update application state.
 #[derive(Clone)]
@@ -164,4 +166,14 @@ pub enum Message {
     AutoSaveCompleted,
     /// Auto-save failed with error
     AutoSaveFailed(String),
+
+    // Drag-Drop Events
+    /// Files/folders were dropped on the window (native: filesystem paths)
+    FilesDropped(Vec<PathBuf>),
+    /// File data dropped (WASM: contains actual file bytes since we can't read from disk)
+    FileDataDropped(Vec<LoadedImage>),
+    /// Files are being dragged over the window (for visual feedback)
+    FileHoverStarted,
+    /// File drag hover ended
+    FileHoverEnded,
 }

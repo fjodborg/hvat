@@ -1,5 +1,7 @@
 //! Event types for user input handling
 
+use std::path::PathBuf;
+
 /// Keyboard key codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyCode {
@@ -311,6 +313,35 @@ pub enum Event {
 
     /// Cursor left the window - used to release drag states
     CursorLeft,
+
+    /// Files or folders were dropped onto the window.
+    /// Contains paths to the dropped items (files and/or folders).
+    /// On WASM, paths are virtual filenames and the actual data
+    /// is provided via a separate mechanism (DroppedFileData).
+    FilesDropped {
+        /// Paths of dropped files/folders
+        paths: Vec<PathBuf>,
+    },
+
+    /// File is being dragged over the window (for visual feedback).
+    /// Sent when files first enter the window area.
+    FileHoverStarted {
+        /// Paths of files being hovered (if available)
+        paths: Vec<PathBuf>,
+    },
+
+    /// File hover ended (files left window or were dropped).
+    FileHoverEnded,
+
+    /// File data from WASM drag-drop (contains actual file contents).
+    /// On native platforms, files are read from disk using FilesDropped paths.
+    /// On WASM, this event provides the file data directly since we can't read from disk.
+    DroppedFileData {
+        /// Filename of the dropped file
+        name: String,
+        /// Raw file data bytes
+        data: Vec<u8>,
+    },
 }
 
 impl Event {
