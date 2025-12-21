@@ -102,8 +102,6 @@ pub struct HvatApp {
     pub(crate) color_picker_category: Option<u32>,
     /// Color picker state (drag tracking)
     pub(crate) color_picker_state: ColorPickerState,
-    /// Tracks which category's picker was just closed to prevent immediate reopen
-    pub(crate) color_picker_just_closed: Option<u32>,
 
     // Per-image data (tags selection, annotations, etc.)
     pub(crate) image_data_store: ImageDataStore,
@@ -183,7 +181,6 @@ impl HvatApp {
             category_name_input_state: TextInputState::default(),
             color_picker_category: None,
             color_picker_state: ColorPickerState::default(),
-            color_picker_just_closed: None,
 
             image_data_store: ImageDataStore::new(),
             global_tags: Vec::new(),
@@ -775,30 +772,18 @@ impl Application for HvatApp {
                 log::info!("Cancelled category editing");
             }
             Message::ToggleCategoryColorPicker(id) => {
-                // If picker was just closed for this same category, skip reopening
-                // This handles the case where GlobalMousePress closes the picker and then
-                // MouseRelease on the swatch tries to toggle it (which would reopen it)
-                if self.color_picker_just_closed == Some(id) {
-                    log::debug!("Skipping toggle - picker was just closed for category {}", id);
-                    self.color_picker_just_closed = None; // Reset after skipping
-                    return;
-                }
                 // Toggle: if already open for this category, close it; otherwise open for this category
                 if self.color_picker_category == Some(id) {
                     self.color_picker_category = None;
                     log::info!("Closed color picker for category: {}", id);
                 } else {
                     self.color_picker_category = Some(id);
-                    self.color_picker_just_closed = None; // Reset when opening
                     log::info!("Opened color picker for category: {}", id);
                 }
             }
             Message::CloseCategoryColorPicker => {
-                // Track which category's picker was closed to prevent immediate reopen
-                let closed_for = self.color_picker_category;
                 self.color_picker_category = None;
                 self.color_picker_state = ColorPickerState::default();
-                self.color_picker_just_closed = closed_for;
                 log::info!("Closed color picker");
             }
             Message::CategoryColorLiveUpdate(color) => {

@@ -160,6 +160,9 @@ struct AppState<A: Application> {
     frame_duration: Duration,
     /// Whether a redraw was requested (by user interaction)
     redraw_requested: bool,
+    /// Whether the current click was consumed by GlobalMousePress (e.g., closing an overlay).
+    /// When true, the subsequent MousePress/MouseRelease from the same physical click are skipped.
+    click_consumed: bool,
 }
 
 impl<A: Application> AppState<A> {
@@ -210,6 +213,7 @@ impl<A: Application> AppState<A> {
             last_frame_time: Instant::now(),
             frame_duration,
             redraw_requested: true, // Initial redraw needed
+            click_consumed: false,
         }
     }
 
@@ -647,15 +651,51 @@ fn handle_window_event<A: Application>(
 
             // On press, first send a global event to allow focused widgets to blur
             if btn_state == ElementState::Pressed {
+                // Reset consumption flag at the start of a new click
+                state.click_consumed = false;
+
+                // Check if an overlay is open BEFORE sending GlobalMousePress
+                // This is crucial: we only consume clicks that close overlays,
+                // NOT clicks that merely blur focused text inputs
+                let had_overlay = state
+                    .root
+                    .as_ref()
+                    .map(|r| r.has_active_overlay())
+                    .unwrap_or(false);
+
+                // Send GlobalMousePress but DON'T rebuild the view yet IF no overlay is open.
+                // This is critical: if we rebuild on text input blur, buttons lose their state
+                // between MousePress and MouseRelease, breaking click detection.
+                // However, if an overlay IS open, we need to rebuild so it closes visually.
+                let saved_needs_rebuild = state.needs_rebuild;
                 let handled = state.handle_event(Event::GlobalMousePress {
                     button,
                     position: state.cursor_position,
                 });
-                // If GlobalMousePress was handled (e.g., closing an overlay), clear the
-                // overlay registry so subsequent MousePress doesn't get stale overlay_hint
-                if handled {
-                    state.renderer.clear_overlay_registry();
+                // Only skip rebuild if there was no overlay open.
+                // - With overlay: rebuild needed so overlay disappears
+                // - Without overlay (just text blur): skip rebuild so button keeps Pressed state
+                if !had_overlay {
+                    state.needs_rebuild = saved_needs_rebuild;
                 }
+
+                // Only consume the click if:
+                // 1. An overlay was open before the event, AND
+                // 2. The event was handled (overlay closed)
+                // This allows text input blur to NOT consume the click,
+                // so the button underneath still receives the click
+                if handled && had_overlay {
+                    state.renderer.clear_overlay_registry();
+                    state.click_consumed = true;
+                    log::debug!("Click consumed by overlay close");
+                }
+            }
+
+            // Skip regular MousePress/MouseRelease if the click was consumed by GlobalMousePress
+            // This prevents the trigger widget from receiving events that would reopen the overlay
+            if state.click_consumed {
+                log::trace!("Skipping MousePress/MouseRelease - click was consumed");
+                return;
             }
 
             let event = if btn_state == ElementState::Pressed {

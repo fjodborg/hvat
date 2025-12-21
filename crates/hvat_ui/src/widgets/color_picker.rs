@@ -11,6 +11,7 @@ use crate::layout::{Bounds, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{ColorPickerDragging, ColorPickerState};
 use crate::widget::Widget;
+use crate::widgets::overlay::OverlayCloseHelper;
 
 /// Predefined color palette for quick selection
 const COLOR_PALETTE: [[u8; 3]; 16] = [
@@ -73,9 +74,6 @@ pub struct ColorPicker<M> {
     on_close: Option<M>,
     /// Callback when state changes (drag start/stop)
     on_state_change: Callback<ColorPickerState, M>,
-    /// Optional bounds of the trigger element (e.g., color swatch button)
-    /// Clicks within these bounds won't trigger close via GlobalMousePress
-    trigger_bounds: Option<Bounds>,
 }
 
 impl<M> ColorPicker<M> {
@@ -91,7 +89,6 @@ impl<M> ColorPicker<M> {
             on_select: Callback::none(),
             on_close: None,
             on_state_change: Callback::none(),
-            trigger_bounds: None,
         }
     }
 
@@ -149,14 +146,6 @@ impl<M> ColorPicker<M> {
         F: Fn(ColorPickerState) -> M + 'static,
     {
         self.on_state_change = Callback::new(handler);
-        self
-    }
-
-    /// Set the trigger bounds (e.g., the color swatch button that opens this picker)
-    /// Clicks within these bounds won't close the picker via GlobalMousePress,
-    /// allowing the trigger's toggle logic to handle open/close properly.
-    pub fn trigger_bounds(mut self, bounds: Bounds) -> Self {
-        self.trigger_bounds = Some(bounds);
         self
     }
 
@@ -465,28 +454,9 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                 None
             }
 
-            Event::GlobalMousePress { position, .. } => {
-                // Close color picker if click is outside overlay bounds AND trigger bounds
-                let (x, y) = *position;
-                let in_overlay = overlay_bounds.contains(x, y);
-                let in_trigger = self.trigger_bounds.map_or(false, |b| b.contains(x, y));
-
-                if !in_overlay && !in_trigger {
-                    log::debug!("ColorPicker: GlobalMousePress outside, closing");
-                    return self.on_close.clone();
-                }
-                None
-            }
-
-            Event::FocusLost => {
-                // Close color picker when focus is lost
-                log::debug!("ColorPicker: FocusLost, closing");
-                self.on_close.clone()
-            }
-
-            Event::KeyPress { key: crate::event::KeyCode::Escape, .. } => {
-                // Close on Escape key
-                log::debug!("ColorPicker: Escape pressed, closing");
+            // Use OverlayCloseHelper for consistent close behavior
+            _ if OverlayCloseHelper::should_close(&event, overlay_bounds) => {
+                log::debug!("ColorPicker: closing via OverlayCloseHelper");
                 self.on_close.clone()
             }
 
