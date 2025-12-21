@@ -45,7 +45,8 @@ impl<M> FlexLayout<M> {
             padding: Padding::ZERO,
             width: Length::Shrink,
             height: Length::Shrink,
-            cross_align: Alignment::Start,
+            // Default to Center alignment for better vertical centering in rows
+            cross_align: Alignment::Center,
             direction,
             child_bounds: Vec::new(),
         }
@@ -189,9 +190,10 @@ impl<M: 'static> FlexLayout<M> {
             }
         }
 
-        // Add spacing
-        if !self.children.is_empty() {
-            total_fixed_width += self.spacing * (self.children.len() - 1) as f32;
+        // Add spacing for non-zero width children only
+        let non_zero_count = child_widths.iter().filter(|&&w| w > 0.0).count();
+        if non_zero_count > 1 {
+            total_fixed_width += self.spacing * (non_zero_count - 1) as f32;
         }
 
         // Calculate fill space and distribute to fill children
@@ -229,26 +231,38 @@ impl<M: 'static> FlexLayout<M> {
         // Third pass: calculate actual positions
         self.child_bounds.clear();
         let mut x = self.padding.left;
+        let mut had_visible_child = false;
 
         for (i, child) in self.children.iter().enumerate() {
             let child_width = child_widths[i];
             let child_height = child.cached_size().height;
-            let y_offset = self.cross_align.align(max_height, child_height);
+            // Don't apply cross-alignment offset to zero-sized children (overlays)
+            // They handle their own positioning and should use the row's top edge as reference
+            let y_offset = if child_width > 0.0 || child_height > 0.0 {
+                self.cross_align.align(max_height, child_height)
+            } else {
+                0.0
+            };
+
+            // Add spacing before this child if there was a previous visible child
+            if child_width > 0.0 && had_visible_child {
+                x += self.spacing;
+            }
 
             let bounds = Bounds::new(x, self.padding.top + y_offset, child_width, child_height);
             log::debug!("  Row child {} final bounds: {:?}", i, bounds);
             self.child_bounds.push(bounds);
 
-            x += child_width + self.spacing;
+            // Only advance x for non-zero width children
+            if child_width > 0.0 {
+                x += child_width;
+                had_visible_child = true;
+            }
         }
 
         // Calculate content dimensions (without padding - padding added in resolve)
-        // x currently points past the last child, so subtract last spacing and starting padding
-        let children_width = if self.children.is_empty() {
-            0.0
-        } else {
-            x - self.spacing - self.padding.left
-        };
+        // x currently points past the last visible child
+        let children_width = x - self.padding.left;
 
         // Resolve final size, adding padding to content dimensions
         Size::new(
@@ -292,9 +306,10 @@ impl<M: 'static> FlexLayout<M> {
             }
         }
 
-        // Add spacing
-        if !self.children.is_empty() {
-            total_fixed_height += self.spacing * (self.children.len() - 1) as f32;
+        // Add spacing for non-zero height children only
+        let non_zero_count = child_heights.iter().filter(|&&h| h > 0.0).count();
+        if non_zero_count > 1 {
+            total_fixed_height += self.spacing * (non_zero_count - 1) as f32;
         }
 
         // Calculate fill space and distribute to fill children
@@ -324,11 +339,23 @@ impl<M: 'static> FlexLayout<M> {
         // Second pass: calculate actual positions
         self.child_bounds.clear();
         let mut y = self.padding.top;
+        let mut had_visible_child = false;
 
         for (i, child) in self.children.iter().enumerate() {
             let child_height = child_heights[i];
             let child_width = child.cached_size().width;
-            let x_offset = self.cross_align.align(max_width, child_width);
+            // Don't apply cross-alignment offset to zero-sized children (overlays)
+            // They handle their own positioning and should use the column's left edge as reference
+            let x_offset = if child_width > 0.0 || child_height > 0.0 {
+                self.cross_align.align(max_width, child_width)
+            } else {
+                0.0
+            };
+
+            // Add spacing before this child if there was a previous visible child
+            if child_height > 0.0 && had_visible_child {
+                y += self.spacing;
+            }
 
             let bounds = Bounds::new(
                 self.padding.left + x_offset,
@@ -339,16 +366,17 @@ impl<M: 'static> FlexLayout<M> {
             log::debug!("  Column child {} bounds: {:?}", i, bounds);
             self.child_bounds.push(bounds);
 
-            y += child_height + self.spacing;
+            // Only advance y for non-zero height children
+            if child_height > 0.0 {
+                y += child_height;
+                had_visible_child = true;
+            }
+            // Zero-height children don't advance y or add spacing
         }
 
         // Calculate content dimensions (without padding - padding added in resolve)
-        // y currently points past the last child, so subtract last spacing and starting padding
-        let children_height = if self.children.is_empty() {
-            0.0
-        } else {
-            y - self.spacing - self.padding.top
-        };
+        // y currently points past the last visible child
+        let children_height = y - self.padding.top;
 
         // Resolve final size, adding padding to content dimensions
         Size::new(

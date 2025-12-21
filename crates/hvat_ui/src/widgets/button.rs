@@ -2,7 +2,7 @@
 
 use crate::constants::{char_width, line_height, BUTTON_PADDING, DEFAULT_FONT_SIZE};
 use crate::event::{Event, MouseButton};
-use crate::layout::{Bounds, Length, Padding, Size};
+use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::widget::Widget;
 
@@ -22,7 +22,12 @@ pub struct Button<M> {
     width: Length,
     height: Length,
     padding: Padding,
+    margin: Padding,
     state: ButtonState,
+    /// Horizontal text alignment
+    text_align: Alignment,
+    /// Font size for button label
+    font_size: f32,
 }
 
 impl<M> Button<M> {
@@ -34,7 +39,10 @@ impl<M> Button<M> {
             width: Length::Shrink,
             height: Length::Shrink,
             padding: BUTTON_PADDING,
+            margin: Padding::ZERO,
             state: ButtonState::Normal,
+            text_align: Alignment::Center,
+            font_size: DEFAULT_FONT_SIZE,
         }
     }
 
@@ -62,11 +70,29 @@ impl<M> Button<M> {
         self
     }
 
+    /// Set the margin (space around the button)
+    pub fn margin(mut self, margin: impl Into<Padding>) -> Self {
+        self.margin = margin.into();
+        self
+    }
+
+    /// Set horizontal text alignment
+    pub fn text_align(mut self, align: Alignment) -> Self {
+        self.text_align = align;
+        self
+    }
+
+    /// Set the font size for the button label
+    pub fn font_size(mut self, size: f32) -> Self {
+        self.font_size = size;
+        self
+    }
+
     /// Calculate content size
     fn content_size(&self) -> Size {
         // Approximate text size using centralized constants
-        let text_width = self.label.len() as f32 * char_width(DEFAULT_FONT_SIZE);
-        let text_height = line_height(DEFAULT_FONT_SIZE);
+        let text_width = self.label.len() as f32 * char_width(self.font_size);
+        let text_height = line_height(self.font_size);
         Size::new(text_width, text_height)
     }
 
@@ -86,32 +112,57 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let min_width = content.width + self.padding.horizontal();
         let min_height = content.height + self.padding.vertical();
 
+        // Account for margin in the resolved size
+        let inner_width = self.width.resolve(
+            available.width - self.margin.horizontal(),
+            min_width,
+        );
+        let inner_height = self.height.resolve(
+            available.height - self.margin.vertical(),
+            min_height,
+        );
+
         Size::new(
-            self.width.resolve(available.width, min_width),
-            self.height.resolve(available.height, min_height),
+            inner_width + self.margin.horizontal(),
+            inner_height + self.margin.vertical(),
         )
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
+        // Apply margin to get the actual button bounds
+        let button_bounds = bounds.shrink(self.margin);
+
         // Draw background
-        renderer.fill_rect(bounds, self.background_color());
+        renderer.fill_rect(button_bounds, self.background_color());
 
         // Draw border
-        renderer.stroke_rect(bounds, Color::BORDER, 1.0);
+        renderer.stroke_rect(button_bounds, Color::BORDER, 1.0);
 
-        // Draw centered label
+        // Calculate text position based on alignment
         let content = self.content_size();
-        let text_x = bounds.x + (bounds.width - content.width) / 2.0;
-        // Center vertically, accounting for text baseline
-        let text_y = bounds.y + (bounds.height - content.height) / 2.0;
+        let inner_width = button_bounds.width - self.padding.horizontal();
 
-        renderer.text(&self.label, text_x, text_y, DEFAULT_FONT_SIZE, Color::TEXT_PRIMARY);
+        // Clamp text width to available inner space
+        let text_width = content.width.min(inner_width);
+
+        let text_x = button_bounds.x + self.padding.left + self.text_align.align(inner_width, text_width);
+
+        // Center vertically using font size directly (not line_height)
+        // Text rendering positions from top, and the visual center of most fonts
+        // is slightly above the mathematical center due to descenders
+        // Using font_size gives better visual centering than line_height
+        let text_y = button_bounds.y + (button_bounds.height - self.font_size) / 2.0;
+
+        renderer.text(&self.label, text_x, text_y, self.font_size, Color::TEXT_PRIMARY);
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+        // Apply margin to get the clickable button area
+        let button_bounds = bounds.shrink(self.margin);
+
         match event {
             Event::MouseMove { position, .. } => {
-                let inside = bounds.contains(position.0, position.1);
+                let inside = button_bounds.contains(position.0, position.1);
                 if inside && self.state != ButtonState::Pressed {
                     self.state = ButtonState::Hovered;
                 } else if !inside && self.state == ButtonState::Hovered {
@@ -125,7 +176,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                 position,
                 ..
             } => {
-                if bounds.contains(position.0, position.1) {
+                if button_bounds.contains(position.0, position.1) {
                     self.state = ButtonState::Pressed;
                 }
                 None
@@ -137,7 +188,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                 ..
             } => {
                 let was_pressed = self.state == ButtonState::Pressed;
-                let inside = bounds.contains(position.0, position.1);
+                let inside = button_bounds.contains(position.0, position.1);
 
                 self.state = if inside {
                     ButtonState::Hovered

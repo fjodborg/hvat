@@ -54,6 +54,25 @@ pub const BUTTON_PADDING: Padding = Padding {
     left: PADDING_COMFORTABLE,
 };
 
+/// Compact padding for small/icon buttons
+pub const BUTTON_PADDING_COMPACT: Padding = Padding {
+    top: PADDING_COMPACT,
+    right: PADDING_STANDARD,
+    bottom: PADDING_COMPACT,
+    left: PADDING_STANDARD,
+};
+
+/// Standard row item height for consistent sizing
+/// Derived from: line_height(DEFAULT_FONT_SIZE) + PADDING_COMPACT * 2.0
+pub const ROW_ITEM_HEIGHT: f32 = DEFAULT_FONT_SIZE * LINE_HEIGHT_FACTOR + PADDING_COMPACT * 2.0;
+
+/// Default content padding inside collapsible sections
+/// This ensures borders of child elements are visible
+pub const COLLAPSIBLE_CONTENT_PADDING: f32 = 2.0;
+
+/// Offset to align color picker with swatch (compensates for content padding)
+pub const COLOR_PICKER_SWATCH_OFFSET: f32 = -COLLAPSIBLE_CONTENT_PADDING;
+
 // =============================================================================
 // Text Input
 // =============================================================================

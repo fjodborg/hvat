@@ -25,7 +25,7 @@ pub use callback::{Callback, Callback0, SideEffect};
 pub use context::Context;
 pub use element::Element;
 pub use event::{Event, KeyCode, KeyModifiers, MouseButton};
-pub use layout::{Bounds, Length, Padding, Size};
+pub use layout::{Alignment, Bounds, Length, Padding, Size};
 pub use renderer::{Color, Renderer, TextureId};
 pub use state::*;
 pub use theme::Theme;
@@ -35,10 +35,11 @@ pub use widget::Widget;
 // Re-export widgets
 pub use widgets::{
     button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
-    slider, text, text_input, AnnotationOverlay, BaseInputConfig, Collapsible, CollapsibleConfig,
-    ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig, ImagePointerEvent, NumberInput,
-    NumberInputConfig, OverlayShape, PointerEventKind, Row, Scrollable, ScrollDirection,
-    ScrollbarConfig, ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
+    slider, text, text_input, AnnotationOverlay, BaseInputConfig, BorderSides, Collapsible,
+    CollapsibleConfig, ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig,
+    ImagePointerEvent, NumberInput, NumberInputConfig, OverlayShape, Panel, PickerAlignment,
+    PointerEventKind, Row, Scrollable, ScrollDirection, ScrollbarConfig, ScrollbarVisibility,
+    Slider, SliderConfig, Text, TextInput, TextInputConfig,
 };
 
 // Re-export hvat_gpu types that users need
@@ -51,7 +52,7 @@ pub mod prelude {
     pub use crate::context::Context;
     pub use crate::element::Element;
     pub use crate::event::{Event, KeyCode, KeyModifiers, MouseButton};
-    pub use crate::layout::{Bounds, Length, Padding, Size};
+    pub use crate::layout::{Alignment, Bounds, Length, Padding, Size};
     pub use crate::renderer::TextureId;
     pub use crate::state::*;
     pub use crate::theme::Theme;

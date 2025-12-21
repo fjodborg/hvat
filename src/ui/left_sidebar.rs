@@ -1,9 +1,10 @@
 //! Left sidebar UI component.
 
+use hvat_ui::constants::{BUTTON_PADDING_COMPACT, COLOR_PICKER_SWATCH_OFFSET, ROW_ITEM_HEIGHT};
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, Scrollable, ScrollDirection,
-    ScrollbarVisibility,
+    BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, Panel, Scrollable,
+    ScrollDirection, ScrollbarVisibility,
 };
 
 use crate::app::HvatApp;
@@ -76,28 +77,29 @@ impl HvatApp {
 
                     c.row(|r| {
                         // Color swatch (clickable to toggle color picker)
+                        // Use consistent height with other row items
                         let swatch = ColorSwatch::new(cat_color)
                             .width(Length::Fixed(20.0))
-                            .height(Length::Fixed(20.0))
+                            .height(Length::Fixed(ROW_ITEM_HEIGHT))
                             .on_click(Message::ToggleCategoryColorPicker(cat_id));
                         r.add(Element::new(swatch));
 
                         if is_editing {
-                            // Show text input for editing
+                            // Show text input for editing (use Fill to match button width)
                             r.text_input()
                                 .value(&category_name_input)
                                 .state(&category_name_input_state)
                                 .placeholder("Category name...")
-                                .width(Length::Fixed(SIDEBAR_WIDTH - 80.0))
+                                .width(Length::Fill(1.0))
                                 .on_change(Message::CategoryNameChanged)
                                 .on_submit(|_| Message::FinishEditingCategory)
                                 .build();
                             // Show checkmark to confirm (Enter also works)
                             r.button("✓")
-                                .width(Length::Fixed(25.0))
+                                .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::FinishEditingCategory);
                         } else {
-                            // Show category name as button
+                            // Show category name as button with compact padding for consistent height
                             let label = if is_selected {
                                 format!("● {}", cat_name)
                             } else {
@@ -105,19 +107,22 @@ impl HvatApp {
                             };
                             r.button(label)
                                 .width(Length::Fill(1.0))
+                                .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::CategorySelected(cat_id));
                             // Edit button (pen icon)
                             r.button("✎")
-                                .width(Length::Fixed(25.0))
+                                .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::StartEditingCategory(cat_id));
                         }
                     });
 
-                    // Show color picker if open for this category
+                    // Show color picker if open for this category (opens below the swatch)
                     if color_picker_category == Some(cat_id) {
+                        // Position picker below the color swatch, aligned with its left edge
                         let picker = ColorPicker::new()
                             .selected(cat_color)
                             .open(true)
+                            .x_offset(COLOR_PICKER_SWATCH_OFFSET)
                             .state(&color_picker_state)
                             .on_change(Message::CategoryColorLiveUpdate)  // Live updates from sliders
                             .on_select(Message::CategoryColorApply)       // Palette click applies and closes
@@ -155,10 +160,11 @@ impl HvatApp {
                         };
                         r.button(label)
                             .width(Length::Fill(1.0))
+                            .padding(BUTTON_PADDING_COMPACT)
                             .on_click(Message::ToggleTag(tag_for_toggle));
                         // Remove button
                         r.button("×")
-                            .width(Length::Fixed(25.0))
+                            .padding(BUTTON_PADDING_COMPACT)
                             .on_click(Message::RemoveTag(tag_for_remove));
                     });
                 }
@@ -168,12 +174,12 @@ impl HvatApp {
                         .value(&tag_input_text)
                         .state(&tag_input_state)
                         .placeholder("Add tag...")
-                        .width(Length::Fixed(SIDEBAR_WIDTH - 55.0))
+                        .width(Length::Fill(1.0))
                         .on_change(Message::TagInputChanged)
                         .on_submit(|_| Message::AddTag)
                         .build();
                     r.button("✓")
-                        .width(Length::Fixed(25.0))
+                        .padding(BUTTON_PADDING_COMPACT)
                         .on_click(Message::AddTag);
                 });
                 // Add padding at the bottom so text input isn't cut off when scrolled
@@ -195,6 +201,12 @@ impl HvatApp {
             .height(Length::Fill(1.0))
             .on_scroll(Message::LeftScrolled);
 
-        Element::new(scrollable)
+        // Wrap in panel with right and top borders
+        let panel = Panel::new(Element::new(scrollable))
+            .borders(BorderSides::right_top())
+            .width(Length::Fixed(SIDEBAR_WIDTH))
+            .height(Length::Fill(1.0));
+
+        Element::new(panel)
     }
 }

@@ -2,17 +2,17 @@
 
 use crate::callback::Callback;
 use crate::constants::{
-    COLLAPSIBLE_HEADER_HEIGHT, COLLAPSIBLE_HEADER_PADDING_X, COLLAPSIBLE_ICON_MARGIN,
-    COLLAPSIBLE_ICON_SIZE, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING, SCROLLBAR_WIDTH_COMPACT,
-    SCROLL_SPEED,
+    COLLAPSIBLE_CONTENT_PADDING, COLLAPSIBLE_HEADER_HEIGHT, COLLAPSIBLE_HEADER_PADDING_X,
+    COLLAPSIBLE_ICON_MARGIN, COLLAPSIBLE_ICON_SIZE, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING,
+    SCROLLBAR_WIDTH_COMPACT, SCROLL_SPEED,
 };
-use crate::widgets::scrollbar::{self, draw_simple_vertical_scrollbar, ScrollbarParams};
 use crate::element::Element;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{CollapsibleState, ScrollState};
 use crate::widget::Widget;
+use crate::widgets::scrollbar::{self, draw_simple_vertical_scrollbar, ScrollbarParams};
 // Note: Scrollable not used directly here - we handle scrolling manually
 use crate::Context;
 
@@ -35,6 +35,8 @@ pub struct CollapsibleConfig {
     pub header_height: f32,
     /// Maximum content height before scrolling (None = no limit)
     pub max_content_height: Option<f32>,
+    /// Content padding (ensures child borders are visible)
+    pub content_padding: f32,
 }
 
 impl Default for CollapsibleConfig {
@@ -48,6 +50,7 @@ impl Default for CollapsibleConfig {
             header_font_size: 14.0,
             header_height: COLLAPSIBLE_HEADER_HEIGHT,
             max_content_height: None,
+            content_padding: COLLAPSIBLE_CONTENT_PADDING,
         }
     }
 }
@@ -218,25 +221,27 @@ impl<M: 'static> Collapsible<M> {
         )
     }
 
-    /// Calculate content bounds for drawing (applies scroll offset)
+    /// Calculate content bounds for drawing (applies scroll offset and padding)
     #[inline]
     fn calc_content_bounds_for_draw(&self, layout_bounds: Bounds) -> Bounds {
         let header_bounds = self.calc_header_bounds(layout_bounds);
+        let padding = self.config.content_padding;
         Bounds::new(
-            layout_bounds.x,
-            header_bounds.bottom() - self.scroll_state.offset.1,
+            layout_bounds.x + padding,
+            header_bounds.bottom() + padding - self.scroll_state.offset.1,
             self.content_size.width,
             self.content_size.height,
         )
     }
 
-    /// Calculate content bounds for events (no scroll offset applied)
+    /// Calculate content bounds for events (no scroll offset applied, includes padding)
     #[inline]
     fn calc_content_bounds_for_events(&self, layout_bounds: Bounds) -> Bounds {
         let header_bounds = self.calc_header_bounds(layout_bounds);
+        let padding = self.config.content_padding;
         Bounds::new(
-            layout_bounds.x,
-            header_bounds.bottom(),
+            layout_bounds.x + padding,
+            header_bounds.bottom() + padding,
             self.content_size.width,
             self.content_size.height,
         )
@@ -299,17 +304,20 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
     fn layout(&mut self, available: Size) -> Size {
         let width = self.width.resolve(available.width, available.width);
+        let padding = self.config.content_padding;
 
         // Header is always visible
         self.header_bounds = Bounds::new(0.0, 0.0, width, self.config.header_height);
 
         // Layout content if present
         if let Some(content) = &mut self.content {
+            // Account for content padding when calculating available space
+            let content_width = width - padding * 2.0;
             // For scrollable content, give it unlimited height to measure full size
             let content_available = if self.config.max_content_height.is_some() {
-                Size::new(width, f32::MAX)
+                Size::new(content_width, f32::MAX)
             } else {
-                Size::new(width, available.height - self.config.header_height)
+                Size::new(content_width, available.height - self.config.header_height - padding * 2.0)
             };
             self.content_size = content.layout(content_available);
 
@@ -327,8 +335,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             self.content_size = Size::ZERO;
         }
 
-        // Calculate visible height
-        self.visible_content_height = self.get_visible_height();
+        // Calculate visible height (includes padding)
+        self.visible_content_height = self.get_visible_height() + padding * 2.0;
         let total_height = self.config.header_height + self.visible_content_height;
 
         Size::new(width, total_height)

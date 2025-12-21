@@ -1,5 +1,6 @@
 //! Top bar UI component.
 
+use hvat_ui::constants::BUTTON_PADDING_COMPACT;
 use hvat_ui::prelude::*;
 use hvat_ui::{Context, Element, Row};
 
@@ -19,14 +20,15 @@ impl HvatApp {
 
         let mut ctx = Context::new();
         ctx.row(|r| {
+            // Use compact padding for topbar buttons so they fit better
             r.button("Open Folder")
-                .width(Length::Fixed(90.0))
+                .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::OpenFolder);
             r.button("◄ Prev")
-                .width(Length::Fixed(60.0))
+                .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::PrevImage);
             r.button("Next ►")
-                .width(Length::Fixed(60.0))
+                .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::NextImage);
             r.text(" │ ");
             r.text(format!("{} [{}]", image_name, progress));
@@ -34,13 +36,13 @@ impl HvatApp {
             r.text(format!("Zoom: {:.0}%", viewer_state.zoom * 100.0));
             r.text(" │ ");
             r.button("Undo")
-                .width(Length::Fixed(50.0))
+                .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::Undo);
             r.button("Redo")
-                .width(Length::Fixed(50.0))
+                .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::Redo);
             r.button("⚙")
-                .width(Length::Fixed(30.0))
+                .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ToggleSettings);
         });
 

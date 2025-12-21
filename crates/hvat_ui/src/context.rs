@@ -1,7 +1,7 @@
 //! Builder context for constructing widget trees
 
 use crate::element::Element;
-use crate::layout::Length;
+use crate::layout::{Length, Padding};
 use crate::renderer::TextureId;
 use crate::state::{InteractionMode, NumberInputState, SliderState, TextInputState};
 use crate::widgets::{
@@ -151,6 +151,17 @@ impl<'a, M: Clone + 'static> ButtonBuilder<'a, M> {
         self
     }
 
+    /// Set button padding
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.button = self.button.padding(padding);
+        self
+    }
+
+    /// Set button margin (space around the button)
+    pub fn margin(mut self, margin: impl Into<Padding>) -> Self {
+        self.button = self.button.margin(margin);
+        self
+    }
 }
 
 impl<'a, M: 'static> ButtonBuilder<'a, M> {

@@ -2,7 +2,7 @@
 
 use crate::constants::{char_width, line_height, DEFAULT_FONT_SIZE};
 use crate::event::Event;
-use crate::layout::{Bounds, Length, Size};
+use crate::layout::{Alignment, Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::widget::Widget;
 
@@ -12,6 +12,8 @@ pub struct Text {
     size: f32,
     color: Color,
     width: Length,
+    /// Horizontal text alignment
+    text_align: Alignment,
 }
 
 impl Text {
@@ -22,6 +24,7 @@ impl Text {
             size: DEFAULT_FONT_SIZE,
             color: Color::TEXT_PRIMARY,
             width: Length::Shrink,
+            text_align: Alignment::Start,
         }
     }
 
@@ -40,6 +43,18 @@ impl Text {
     /// Set the width
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// Set horizontal text alignment
+    pub fn text_align(mut self, align: Alignment) -> Self {
+        self.text_align = align;
+        self
+    }
+
+    /// Center the text horizontally
+    pub fn centered(mut self) -> Self {
+        self.text_align = Alignment::Center;
         self
     }
 
@@ -64,8 +79,12 @@ impl<M> Widget<M> for Text {
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
         log::trace!("Text draw: '{}' at {:?}", self.content, bounds);
 
+        // Calculate text position based on alignment
+        let content_size = self.measure();
+        let text_x = bounds.x + self.text_align.align(bounds.width, content_size.width);
+
         // Draw text using glyphon
-        renderer.text(&self.content, bounds.x, bounds.y, self.size, self.color);
+        renderer.text(&self.content, text_x, bounds.y, self.size, self.color);
     }
 
     fn on_event(&mut self, _event: &Event, _bounds: Bounds) -> Option<M> {

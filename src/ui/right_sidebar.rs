@@ -3,7 +3,10 @@
 use std::rc::Rc;
 
 use hvat_ui::prelude::*;
-use hvat_ui::{Collapsible, Column, Context, Element, Scrollable, ScrollDirection, ScrollbarVisibility};
+use hvat_ui::{
+    BorderSides, Collapsible, Column, Context, Element, Panel, Scrollable, ScrollDirection,
+    ScrollbarVisibility,
+};
 
 use crate::app::HvatApp;
 use crate::constants::SIDEBAR_WIDTH;
@@ -34,7 +37,6 @@ impl HvatApp {
         let mut sidebar_ctx = Context::new();
 
         sidebar_ctx.text_sized("Image Controls", 14.0);
-        sidebar_ctx.text("");
 
         // Band Selection Collapsible
         let band_s = band_state.clone();
@@ -53,7 +55,6 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("red_band"))
                     .build();
 
-                c.text("");
                 c.text_sized("Green Channel", 12.0);
                 c.slider(0.0, max_band)
                     .state(&green_slider)
@@ -64,7 +65,6 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("green_band"))
                     .build();
 
-                c.text("");
                 c.text_sized("Blue Channel", 12.0);
                 c.slider(0.0, max_band)
                     .state(&blue_slider)
@@ -94,7 +94,6 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("brightness"))
                     .build();
 
-                c.text("");
                 c.text_sized(format!("Contrast: {:.2}", contrast_slider.value), 12.0);
                 c.slider(0.1, 3.0)
                     .state(&contrast_slider)
@@ -105,7 +104,6 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("contrast"))
                     .build();
 
-                c.text("");
                 c.text_sized(format!("Gamma: {:.2}", gamma_slider.value), 12.0);
                 c.slider(0.1, 3.0)
                     .state(&gamma_slider)
@@ -116,7 +114,6 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("gamma"))
                     .build();
 
-                c.text("");
                 c.text_sized(format!("Hue: {:.0}°", hue_slider.value), 12.0);
                 c.slider(0.0, 360.0)
                     .state(&hue_slider)
@@ -127,7 +124,6 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("hue"))
                     .build();
 
-                c.text("");
                 c.button("Reset Adjustments")
                     .width(Length::Fixed(SIDEBAR_WIDTH - 20.0))
                     .on_click(Message::ResetAdjustments);
@@ -154,6 +150,12 @@ impl HvatApp {
             .height(Length::Fill(1.0))
             .on_scroll(Message::RightScrolled);
 
-        Element::new(scrollable)
+        // Wrap in panel with left and top borders
+        let panel = Panel::new(Element::new(scrollable))
+            .borders(BorderSides::left_top())
+            .width(Length::Fixed(SIDEBAR_WIDTH))
+            .height(Length::Fill(1.0));
+
+        Element::new(panel)
     }
 }

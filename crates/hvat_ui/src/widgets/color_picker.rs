@@ -54,6 +54,16 @@ const PREVIEW_WIDTH: f32 = 20.0;
 /// Gap between preview and label
 const PREVIEW_GAP: f32 = 4.0;
 
+/// Horizontal alignment for the color picker overlay
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PickerAlignment {
+    /// Align to the right of the anchor point (default)
+    #[default]
+    Right,
+    /// Align to the left of the anchor point (picker opens leftward)
+    Left,
+}
+
 /// A color picker popup widget with a palette of predefined colors and RGB sliders
 pub struct ColorPicker<M> {
     /// Currently selected/editing color (RGB)
@@ -62,6 +72,12 @@ pub struct ColorPicker<M> {
     is_open: bool,
     /// Position to render the overlay at (set by parent via layout bounds)
     overlay_position: (f32, f32),
+    /// Horizontal alignment of the picker relative to anchor
+    alignment: PickerAlignment,
+    /// Horizontal offset from anchor position (positive = move right)
+    x_offset: f32,
+    /// Vertical offset from anchor position (negative = move up)
+    y_offset: f32,
     /// Hovered cell index in palette
     hovered_cell: Option<usize>,
     /// External state (cloned from app state)
@@ -83,6 +99,9 @@ impl<M> ColorPicker<M> {
             current_color: [128, 128, 128],
             is_open: false,
             overlay_position: (0.0, 0.0),
+            alignment: PickerAlignment::default(),
+            x_offset: 0.0,
+            y_offset: 0.0,
             hovered_cell: None,
             state: ColorPickerState::default(),
             on_change: Callback::none(),
@@ -113,6 +132,37 @@ impl<M> ColorPicker<M> {
     /// Set the overlay position (top-left corner)
     pub fn position(mut self, x: f32, y: f32) -> Self {
         self.overlay_position = (x, y);
+        self
+    }
+
+    /// Set the horizontal alignment of the picker
+    ///
+    /// - `PickerAlignment::Right`: Opens to the right of the anchor (default)
+    /// - `PickerAlignment::Left`: Opens to the left of the anchor
+    pub fn alignment(mut self, alignment: PickerAlignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
+
+    /// Convenience: open picker to the left of the anchor point
+    pub fn align_left(mut self) -> Self {
+        self.alignment = PickerAlignment::Left;
+        self
+    }
+
+    /// Set the horizontal offset from the anchor position
+    ///
+    /// Use positive values to move the picker right (e.g., past a swatch)
+    pub fn x_offset(mut self, offset: f32) -> Self {
+        self.x_offset = offset;
+        self
+    }
+
+    /// Set the vertical offset from the anchor position
+    ///
+    /// Use negative values to move the picker up (e.g., to align with a button above)
+    pub fn y_offset(mut self, offset: f32) -> Self {
+        self.y_offset = offset;
         self
     }
 
@@ -229,6 +279,23 @@ impl<M> ColorPicker<M> {
             ColorPickerDragging::None => {}
         }
     }
+
+    /// Calculate the actual overlay position, applying alignment and offsets.
+    /// This ensures draw(), on_event(), and capture_bounds() all use consistent positioning.
+    fn calculate_overlay_position(&self, layout_bounds: Bounds) -> (f32, f32) {
+        let size = Self::picker_size();
+        // Determine the anchor point (where the picker attaches to)
+        let anchor = if self.overlay_position == (0.0, 0.0) {
+            (layout_bounds.x + self.x_offset, layout_bounds.y + self.y_offset)
+        } else {
+            (self.overlay_position.0 + self.x_offset, self.overlay_position.1 + self.y_offset)
+        };
+        // Apply alignment
+        match self.alignment {
+            PickerAlignment::Right => anchor,
+            PickerAlignment::Left => (anchor.0 - size.width, anchor.1),
+        }
+    }
 }
 
 impl<M> Default for ColorPicker<M> {
@@ -248,13 +315,8 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
             return;
         }
 
-        // Use bounds position - place directly at bounds.y
-        let pos = if self.overlay_position == (0.0, 0.0) {
-            (bounds.x, bounds.y)
-        } else {
-            self.overlay_position
-        };
-
+        // Use consistent position calculation (applies alignment and offsets)
+        let pos = self.calculate_overlay_position(bounds);
         let size = Self::picker_size();
         let overlay_bounds = Bounds::new(pos.0, pos.1, size.width, size.height);
 
@@ -363,13 +425,8 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
             return None;
         }
 
-        // Calculate actual overlay position
-        let pos = if self.overlay_position == (0.0, 0.0) {
-            (bounds.x, bounds.y)
-        } else {
-            self.overlay_position
-        };
-
+        // Use consistent position calculation (applies alignment and offsets)
+        let pos = self.calculate_overlay_position(bounds);
         let size = Self::picker_size();
         let overlay_bounds = Bounds::new(pos.0, pos.1, size.width, size.height);
 
@@ -474,11 +531,8 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
 
     fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
         if self.is_open {
-            let pos = if self.overlay_position == (0.0, 0.0) {
-                (layout_bounds.x, layout_bounds.y)
-            } else {
-                self.overlay_position
-            };
+            // Use consistent position calculation (same as draw/on_event)
+            let pos = self.calculate_overlay_position(layout_bounds);
             let size = Self::picker_size();
             Some(Bounds::new(pos.0, pos.1, size.width, size.height))
         } else {
