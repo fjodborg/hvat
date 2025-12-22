@@ -384,15 +384,12 @@ impl Renderer {
     /// Fill a rectangle
     pub fn fill_rect(&mut self, bounds: Bounds, color: Color) {
         // Apply CPU-side clipping if there's an active clip region
-        // Skip clipping when drawing overlays - they should render above everything
-        let clipped_bounds = if !self.drawing_overlay {
-            if let Some(clip) = self.clip_stack.last() {
-                match bounds.intersect(clip) {
-                    Some(b) if b.width > 0.0 && b.height > 0.0 => b,
-                    _ => return, // Completely clipped out
-                }
-            } else {
-                bounds
+        // Clipping is applied in both normal and overlay modes - the clip stack
+        // is explicitly managed, so if a clip is pushed, it should be respected
+        let clipped_bounds = if let Some(clip) = self.clip_stack.last() {
+            match bounds.intersect(clip) {
+                Some(b) if b.width > 0.0 && b.height > 0.0 => b,
+                _ => return, // Completely clipped out
             }
         } else {
             bounds
@@ -415,73 +412,71 @@ impl Renderer {
 
     /// Stroke a rectangle outline
     pub fn stroke_rect(&mut self, bounds: Bounds, color: Color, thickness: f32) {
-        // Skip clipping when drawing overlays - they should render above everything
-        if !self.drawing_overlay {
-            // Apply CPU-side clipping - draw each edge as a separate clipped rectangle
-            if let Some(clip) = self.clip_stack.last().cloned() {
-                // Skip if completely outside clip region
-                if bounds.intersect(&clip).is_none() {
-                    return;
-                }
-
-                let half_thick = thickness / 2.0;
-
-                // Top edge: horizontal line at top of bounds
-                let top_edge = Bounds::new(
-                    bounds.x - half_thick,
-                    bounds.y - half_thick,
-                    bounds.width + thickness,
-                    thickness,
-                );
-                if let Some(clipped) = top_edge.intersect(&clip) {
-                    if clipped.width > 0.0 && clipped.height > 0.0 {
-                        self.fill_rect_no_clip(clipped, color);
-                    }
-                }
-
-                // Bottom edge: horizontal line at bottom of bounds
-                let bottom_edge = Bounds::new(
-                    bounds.x - half_thick,
-                    bounds.y + bounds.height - half_thick,
-                    bounds.width + thickness,
-                    thickness,
-                );
-                if let Some(clipped) = bottom_edge.intersect(&clip) {
-                    if clipped.width > 0.0 && clipped.height > 0.0 {
-                        self.fill_rect_no_clip(clipped, color);
-                    }
-                }
-
-                // Left edge: vertical line at left of bounds (excluding corners to avoid overlap)
-                let left_edge = Bounds::new(
-                    bounds.x - half_thick,
-                    bounds.y + half_thick,
-                    thickness,
-                    bounds.height - thickness,
-                );
-                if let Some(clipped) = left_edge.intersect(&clip) {
-                    if clipped.width > 0.0 && clipped.height > 0.0 {
-                        self.fill_rect_no_clip(clipped, color);
-                    }
-                }
-
-                // Right edge: vertical line at right of bounds (excluding corners to avoid overlap)
-                let right_edge = Bounds::new(
-                    bounds.x + bounds.width - half_thick,
-                    bounds.y + half_thick,
-                    thickness,
-                    bounds.height - thickness,
-                );
-                if let Some(clipped) = right_edge.intersect(&clip) {
-                    if clipped.width > 0.0 && clipped.height > 0.0 {
-                        self.fill_rect_no_clip(clipped, color);
-                    }
-                }
+        // Apply CPU-side clipping - draw each edge as a separate clipped rectangle
+        // Clipping is applied in both normal and overlay modes
+        if let Some(clip) = self.clip_stack.last().cloned() {
+            // Skip if completely outside clip region
+            if bounds.intersect(&clip).is_none() {
                 return;
             }
+
+            let half_thick = thickness / 2.0;
+
+            // Top edge: horizontal line at top of bounds
+            let top_edge = Bounds::new(
+                bounds.x - half_thick,
+                bounds.y - half_thick,
+                bounds.width + thickness,
+                thickness,
+            );
+            if let Some(clipped) = top_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+
+            // Bottom edge: horizontal line at bottom of bounds
+            let bottom_edge = Bounds::new(
+                bounds.x - half_thick,
+                bounds.y + bounds.height - half_thick,
+                bounds.width + thickness,
+                thickness,
+            );
+            if let Some(clipped) = bottom_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+
+            // Left edge: vertical line at left of bounds (excluding corners to avoid overlap)
+            let left_edge = Bounds::new(
+                bounds.x - half_thick,
+                bounds.y + half_thick,
+                thickness,
+                bounds.height - thickness,
+            );
+            if let Some(clipped) = left_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+
+            // Right edge: vertical line at right of bounds (excluding corners to avoid overlap)
+            let right_edge = Bounds::new(
+                bounds.x + bounds.width - half_thick,
+                bounds.y + half_thick,
+                thickness,
+                bounds.height - thickness,
+            );
+            if let Some(clipped) = right_edge.intersect(&clip) {
+                if clipped.width > 0.0 && clipped.height > 0.0 {
+                    self.fill_rect_no_clip(clipped, color);
+                }
+            }
+            return;
         }
 
-        // No clip or drawing overlay - use the GPU stroke_rect directly
+        // No clip - use the GPU stroke_rect directly
         let (w, h) = self.window_size;
         let (vertices, indices) = self.get_current_buffers();
         ColorPipeline::append_stroke_rect(
@@ -517,15 +512,11 @@ impl Renderer {
 
     /// Draw a line (clipped to current clip region using Liang-Barsky algorithm)
     pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, color: Color, thickness: f32) {
-        // Skip clipping when drawing overlays
-        let (cx1, cy1, cx2, cy2) = if !self.drawing_overlay {
-            if let Some(clip) = self.clip_stack.last() {
-                match Self::clip_line(x1, y1, x2, y2, clip) {
-                    Some((cx1, cy1, cx2, cy2)) => (cx1, cy1, cx2, cy2),
-                    None => return, // Line completely outside clip region
-                }
-            } else {
-                (x1, y1, x2, y2)
+        // Apply clipping in both normal and overlay modes
+        let (cx1, cy1, cx2, cy2) = if let Some(clip) = self.clip_stack.last() {
+            match Self::clip_line(x1, y1, x2, y2, clip) {
+                Some((cx1, cy1, cx2, cy2)) => (cx1, cy1, cx2, cy2),
+                None => return, // Line completely outside clip region
             }
         } else {
             (x1, y1, x2, y2)
@@ -586,15 +577,11 @@ impl Renderer {
 
     /// Draw a filled circle
     pub fn fill_circle(&mut self, cx: f32, cy: f32, radius: f32, color: Color) {
-        // Skip clipping when drawing overlays
-        if !self.drawing_overlay {
-            // Skip if completely outside clip region
-            if let Some(clip) = self.clip_stack.last() {
-                let circle_bounds =
-                    Bounds::new(cx - radius, cy - radius, radius * 2.0, radius * 2.0);
-                if circle_bounds.intersect(clip).is_none() {
-                    return; // Completely clipped out
-                }
+        // Apply clipping in both normal and overlay modes
+        if let Some(clip) = self.clip_stack.last() {
+            let circle_bounds = Bounds::new(cx - radius, cy - radius, radius * 2.0, radius * 2.0);
+            if circle_bounds.intersect(clip).is_none() {
+                return; // Completely clipped out
             }
         }
 
@@ -724,12 +711,8 @@ impl Renderer {
         wrap_width: Option<f32>,
         align: TextAlign,
     ) {
-        // Skip clipping when drawing overlays
-        let clip = if self.drawing_overlay {
-            None
-        } else {
-            self.clip_stack.last().cloned()
-        };
+        // Apply clipping in both normal and overlay modes
+        let clip = self.clip_stack.last().cloned();
         let request = TextRequest {
             text: text.to_string(),
             x,

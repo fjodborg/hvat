@@ -347,6 +347,39 @@ impl<M> ImageViewer<M> {
         (clip_x, clip_y)
     }
 
+    /// Calculate the screen-space bounds of the image within the widget.
+    ///
+    /// This returns the rectangular area where the image is actually displayed,
+    /// taking into account the current pan and zoom. Used for clipping annotations
+    /// so they don't render outside the image area.
+    fn calculate_image_screen_bounds(&self, widget_bounds: &Bounds) -> Bounds {
+        if self.texture_width == 0 || self.texture_height == 0 {
+            return *widget_bounds;
+        }
+
+        // Get the four corners of the image in screen coordinates
+        let (x1, y1) = self.image_to_screen(0.0, 0.0, widget_bounds);
+        let (x2, y2) = self.image_to_screen(
+            self.texture_width as f32,
+            self.texture_height as f32,
+            widget_bounds,
+        );
+
+        // Create bounds from the corners (handle potential inversion from negative scale)
+        let min_x = x1.min(x2);
+        let max_x = x1.max(x2);
+        let min_y = y1.min(y2);
+        let max_y = y1.max(y2);
+
+        // Intersect with widget bounds to ensure we don't clip outside the widget
+        let image_bounds = Bounds::new(min_x, min_y, max_x - min_x, max_y - min_y);
+
+        // Return intersection with widget bounds
+        image_bounds
+            .intersect(widget_bounds)
+            .unwrap_or(*widget_bounds)
+    }
+
     /// Get the bounds for a control button
     fn control_button_bounds(&self, index: usize, widget_bounds: &Bounds) -> Bounds {
         let x = widget_bounds.x
@@ -479,8 +512,10 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Switch to overlay layer for controls (rendered after textures)
         renderer.begin_overlay();
 
-        // Clip all overlay drawing to widget bounds
-        renderer.push_clip(bounds);
+        // Clip annotation overlays to the actual image bounds on screen
+        // This prevents annotations from rendering outside the visible image area
+        let image_screen_bounds = self.calculate_image_screen_bounds(&bounds);
+        renderer.push_clip(image_screen_bounds);
 
         // Draw annotation overlays
         for overlay in &self.overlays {
