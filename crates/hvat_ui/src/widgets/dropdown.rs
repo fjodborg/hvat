@@ -464,8 +464,8 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
             self.config.text_color,
         );
 
-        // Draw arrow indicator
-        let arrow = if self.state.is_open { "▲" } else { "▼" };
+        // Draw arrow indicator (using ASCII for cross-platform compatibility)
+        let arrow = if self.state.is_open { "^" } else { "v" };
         let arrow_x = button_bounds.right() - DROPDOWN_ARROW_WIDTH;
         renderer.text(
             arrow,

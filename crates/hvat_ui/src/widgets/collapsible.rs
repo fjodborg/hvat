@@ -569,8 +569,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
         renderer.fill_rect(header_bounds, header_bg);
         renderer.stroke_rect(header_bounds, self.config.border_color, 1.0);
 
-        // Draw chevron icon
-        let icon = if self.state.is_expanded { "▼" } else { "▶" };
+        // Draw chevron icon (using ASCII for cross-platform compatibility)
+        let icon = if self.state.is_expanded { "-" } else { "+" };
         let icon_x = header_bounds.x + COLLAPSIBLE_HEADER_PADDING_X;
         let icon_y = header_bounds.y + (self.config.header_height - COLLAPSIBLE_ICON_SIZE) / 2.0;
         renderer.text(

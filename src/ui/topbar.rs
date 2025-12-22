@@ -24,31 +24,31 @@ impl HvatApp {
             r.button("Open Folder")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::OpenFolder);
-            r.button("◄ Prev")
+            r.button("< Prev")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::PrevImage);
-            r.button("Next ►")
+            r.button("Next >")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::NextImage);
-            r.text(" │ ");
+            r.text(" | ");
             r.text(format!("{} [{}]", image_name, progress));
-            r.text(" │ ");
+            r.text(" | ");
             r.text(format!("Zoom: {:.0}%", viewer_state.zoom * 100.0));
-            r.text(" │ ");
+            r.text(" | ");
             r.button("Undo")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::Undo);
             r.button("Redo")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::Redo);
-            r.text(" │ ");
+            r.text(" | ");
             r.button("Export")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ShowExportDialog);
             r.button("Import")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ImportAnnotations);
-            r.text(" │ ");
+            r.text(" | ");
             r.button("Settings")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ToggleSettings);

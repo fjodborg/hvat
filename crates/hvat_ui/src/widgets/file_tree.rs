@@ -356,11 +356,11 @@ impl<M: 'static> FileTree<M> {
                     name,
                     children,
                 } => {
-                    // Draw chevron
+                    // Draw chevron (using ASCII for cross-platform compatibility)
                     let chevron = if self.state.is_expanded(path) {
-                        "▼"
+                        "v"
                     } else {
-                        "▶"
+                        ">"
                     };
                     let chevron_y = y + (self.config.row_height - self.config.font_size) / 2.0;
                     renderer.text(

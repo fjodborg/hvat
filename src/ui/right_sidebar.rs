@@ -240,8 +240,9 @@ impl HvatApp {
 
                                 // Placeholder: show index as text in a small square button
                                 // TODO: Replace with actual image thumbnails when GPU texture loading is implemented
+                                // Using ASCII for cross-platform compatibility
                                 let label = if is_current {
-                                    format!("▸{}", idx + 1)
+                                    format!(">{}", idx + 1)
                                 } else {
                                     format!("{}", idx + 1)
                                 };
@@ -260,7 +261,7 @@ impl HvatApp {
 
         // Keyboard shortcuts info
         sidebar_ctx.text("");
-        sidebar_ctx.text("────────────────────");
+        sidebar_ctx.text("--------------------");
         sidebar_ctx
             .text("Keyboard shortcuts:")
             .size(FONT_SIZE_SECONDARY);

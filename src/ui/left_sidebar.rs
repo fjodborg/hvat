@@ -58,10 +58,11 @@ impl HvatApp {
                     let tool_copy = *tool;
                     let hotkey = keybindings_for_tools.key_for_tool(*tool);
                     let hotkey_str = key_to_string(hotkey);
+                    // Using parentheses instead of brackets for cross-platform compatibility
                     let label = if is_selected {
-                        format!("> {} < [{}]", tool.name(), hotkey_str)
+                        format!("> {} < ({})", tool.name(), hotkey_str)
                     } else {
-                        format!("{} [{}]", tool.name(), hotkey_str)
+                        format!("{} ({})", tool.name(), hotkey_str)
                     };
                     c.button(label)
                         .width(Length::Fill(1.0))
@@ -90,8 +91,9 @@ impl HvatApp {
 
                     c.row(|r| {
                         // Hotkey indicator (small, left of swatch)
+                        // Using plain number without brackets for cross-platform compatibility
                         if cat_index < 10 {
-                            r.text(format!("[{}]", hotkey_str)).size(FONT_SIZE_SMALL);
+                            r.text(hotkey_str).size(FONT_SIZE_SMALL);
                         }
 
                         // Color swatch (clickable to toggle color picker)
@@ -101,6 +103,9 @@ impl HvatApp {
                             .height(Length::Fixed(ROW_ITEM_HEIGHT))
                             .on_click(Message::ToggleCategoryColorPicker(cat_id));
                         r.add(Element::new(swatch));
+
+                        // Fixed width for Edit/OK button to prevent layout flicker
+                        const ACTION_BUTTON_WIDTH: f32 = 40.0;
 
                         if is_editing {
                             // Show text input for editing (use Fill to match button width)
@@ -112,23 +117,26 @@ impl HvatApp {
                                 .on_change(Message::CategoryNameChanged)
                                 .on_submit(|_| Message::FinishEditingCategory)
                                 .build();
-                            // Show checkmark to confirm (Enter also works)
-                            r.button("✓")
+                            // Show OK to confirm (Enter also works)
+                            r.button("OK")
+                                .width(Length::Fixed(ACTION_BUTTON_WIDTH))
                                 .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::FinishEditingCategory);
                         } else {
                             // Show category name as button with compact padding for consistent height
+                            // Using ASCII symbols for cross-platform compatibility
                             let label = if is_selected {
-                                format!("● {}", cat_name)
+                                format!("* {}", cat_name)
                             } else {
-                                format!("○ {}", cat_name)
+                                format!("  {}", cat_name)
                             };
                             r.button(label)
                                 .width(Length::Fill(1.0))
                                 .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::CategorySelected(cat_id));
-                            // Edit button (pen icon)
-                            r.button("✎")
+                            // Edit button
+                            r.button("Edit")
+                                .width(Length::Fixed(ACTION_BUTTON_WIDTH))
                                 .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::StartEditingCategory(cat_id));
                         }
@@ -171,17 +179,18 @@ impl HvatApp {
 
                     c.row(|r| {
                         // Tag name as selectable button (like categories)
+                        // Using ASCII symbols for cross-platform compatibility
                         let label = if is_selected {
-                            format!("● {}", tag_clone)
+                            format!("* {}", tag_clone)
                         } else {
-                            format!("○ {}", tag_clone)
+                            format!("  {}", tag_clone)
                         };
                         r.button(label)
                             .width(Length::Fill(1.0))
                             .padding(BUTTON_PADDING_COMPACT)
                             .on_click(Message::ToggleTag(tag_for_toggle));
                         // Remove button
-                        r.button("×")
+                        r.button("x")
                             .padding(BUTTON_PADDING_COMPACT)
                             .on_click(Message::RemoveTag(tag_for_remove));
                     });
@@ -196,7 +205,7 @@ impl HvatApp {
                         .on_change(Message::TagInputChanged)
                         .on_submit(|_| Message::AddTag)
                         .build();
-                    r.button("✓")
+                    r.button("+")
                         .padding(BUTTON_PADDING_COMPACT)
                         .on_click(Message::AddTag);
                 });

@@ -213,6 +213,10 @@ pub struct Renderer {
 /// Using Noto Sans (SIL Open Font License - commercial use allowed)
 const EMBEDDED_FONT: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
 
+/// Font family name for the embedded font
+/// Must match the family name in the TTF file
+const EMBEDDED_FONT_FAMILY: &str = "Noto Sans";
+
 impl Renderer {
     /// Create a new renderer
     pub fn new(gpu_ctx: &GpuContext) -> Self {
@@ -618,7 +622,7 @@ impl Renderer {
         buffer.set_text(
             &mut self.font_system,
             text,
-            &Attrs::new().family(Family::SansSerif),
+            &Attrs::new().family(Family::Name(EMBEDDED_FONT_FAMILY)),
             Shaping::Advanced,
         );
 
@@ -658,7 +662,7 @@ impl Renderer {
         buffer.set_text(
             &mut self.font_system,
             text,
-            &Attrs::new().family(Family::SansSerif),
+            &Attrs::new().family(Family::Name(EMBEDDED_FONT_FAMILY)),
             Shaping::Advanced,
         );
 
@@ -1120,7 +1124,7 @@ impl Renderer {
                 buffer.set_text(
                     &mut self.font_system,
                     &request.text,
-                    &Attrs::new().family(Family::SansSerif),
+                    &Attrs::new().family(Family::Name(EMBEDDED_FONT_FAMILY)),
                     Shaping::Advanced,
                 );
 

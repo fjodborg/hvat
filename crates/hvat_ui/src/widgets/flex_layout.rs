@@ -237,10 +237,13 @@ impl<M: 'static> FlexLayout<M> {
             }
         }
 
-        // Add spacing for non-zero main-axis children only
-        let non_zero_count = child_mains.iter().filter(|&&m| m > 0.0).count();
-        if non_zero_count > 1 {
-            total_fixed += self.spacing * (non_zero_count - 1) as f32;
+        // Add spacing for visible children (both fixed and fill children need spacing)
+        // Fixed children have non-zero main, fill children will get allocated space
+        let fixed_count = child_mains.iter().filter(|&&m| m > 0.0).count();
+        let fill_count = fill_indices.len();
+        let visible_count = fixed_count + fill_count;
+        if visible_count > 1 {
+            total_fixed += self.spacing * (visible_count - 1) as f32;
         }
 
         // Calculate fill space and distribute to fill children
