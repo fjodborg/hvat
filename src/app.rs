@@ -280,6 +280,10 @@ pub struct HvatApp {
     // Right sidebar states
     pub(crate) band_selection_collapsed: CollapsibleState,
     pub(crate) adjustments_collapsed: CollapsibleState,
+    pub(crate) file_list_collapsed: CollapsibleState,
+    pub(crate) file_list_scroll_state: ScrollState,
+    pub(crate) thumbnails_collapsed: CollapsibleState,
+    pub(crate) thumbnails_scroll_state: ScrollState,
     pub(crate) right_scroll_state: ScrollState,
 
     // Tool selection
@@ -382,7 +386,24 @@ impl HvatApp {
             texture_id: None,
             image_size: (0, 0),
 
-            project: None,
+            // DEBUG: Load test folder on startup
+            project: {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    use std::path::PathBuf;
+                    match crate::state::ProjectState::from_folder(PathBuf::from(
+                        "/home/fjod/Pictures",
+                    )) {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            log::warn!("Failed to load test folder: {}", e);
+                            None
+                        }
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                None
+            },
 
             hyperspectral: None,
             num_bands,
@@ -406,6 +427,10 @@ impl HvatApp {
 
             band_selection_collapsed: CollapsibleState::expanded(),
             adjustments_collapsed: CollapsibleState::expanded(),
+            file_list_collapsed: CollapsibleState::expanded(),
+            file_list_scroll_state: ScrollState::default(),
+            thumbnails_collapsed: CollapsibleState::collapsed(),
+            thumbnails_scroll_state: ScrollState::default(),
             right_scroll_state: ScrollState::default(),
 
             selected_tool: AnnotationTool::default(),
@@ -1565,6 +1590,7 @@ impl Application for HvatApp {
         let right_sidebar = self.build_right_sidebar();
 
         let main_row = Row::new(vec![left_sidebar, center_viewer, right_sidebar])
+            .spacing(0.0)
             .width(Length::Fill(1.0))
             .height(Length::Fill(1.0));
 
@@ -1881,6 +1907,40 @@ impl Application for HvatApp {
                 self.reset_adjustment_sliders();
                 self.needs_gpu_render = true;
                 log::info!("Adjustments reset");
+            }
+
+            // Right Sidebar - File List
+            Message::FileListToggled(state) => {
+                self.file_list_collapsed = state;
+            }
+            Message::FileListScrolled(state) => {
+                self.file_list_scroll_state = state;
+            }
+            Message::FileListSelect(index) => {
+                if let Some(ref mut project) = self.project {
+                    if index < project.images.len() {
+                        project.current_index = index;
+                        self.pending_image_load = true;
+                        log::info!("File list: selected image {}", index);
+                    }
+                }
+            }
+
+            // Right Sidebar - Thumbnails
+            Message::ThumbnailsToggled(state) => {
+                self.thumbnails_collapsed = state;
+            }
+            Message::ThumbnailsScrolled(state) => {
+                self.thumbnails_scroll_state = state;
+            }
+            Message::ThumbnailSelect(index) => {
+                if let Some(ref mut project) = self.project {
+                    if index < project.images.len() {
+                        project.current_index = index;
+                        self.pending_image_load = true;
+                        log::info!("Thumbnail: selected image {}", index);
+                    }
+                }
             }
 
             // Right Sidebar Scroll

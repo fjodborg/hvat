@@ -13,7 +13,6 @@ use crate::renderer::{Color, Renderer};
 use crate::state::{CollapsibleState, ScrollState};
 use crate::widget::Widget;
 use crate::widgets::scrollbar::{self, draw_simple_vertical_scrollbar, ScrollbarParams};
-// Note: Scrollable not used directly here - we handle scrolling manually
 use crate::Context;
 
 /// Configuration for collapsible widget appearance
@@ -77,6 +76,8 @@ pub struct Collapsible<M> {
     config: CollapsibleConfig,
     /// Callback when toggled
     on_toggle: Callback<CollapsibleState, M>,
+    /// Callback when scroll offset changes (for nested scroll consumption)
+    on_scroll: Callback<ScrollState, M>,
     /// Internal: cached header bounds
     header_bounds: Bounds,
     /// Internal: cached content size (full size before clamping)
@@ -101,6 +102,7 @@ impl<M> Default for Collapsible<M> {
             width: Length::Fill(1.0),
             config: CollapsibleConfig::default(),
             on_toggle: Callback::none(),
+            on_scroll: Callback::none(),
             header_bounds: Bounds::ZERO,
             content_size: Size::ZERO,
             visible_content_height: 0.0,
@@ -171,9 +173,43 @@ impl<M: 'static> Collapsible<M> {
         self
     }
 
-    /// Emit a state change if handler is set
+    /// Set callback for scroll changes
+    ///
+    /// This callback is invoked when the internal scroll position changes.
+    /// Setting this callback allows nested scrolling to work correctly by
+    /// indicating that the scroll event was consumed by this widget.
+    pub fn on_scroll<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(ScrollState) -> M + 'static,
+    {
+        self.on_scroll = Callback::new(callback);
+        self
+    }
+
+    /// Set the scroll state (copies the state)
+    pub fn scroll_state(mut self, state: &ScrollState) -> Self {
+        log::trace!(
+            "Collapsible '{}': scroll_state set to offset={:?}",
+            self.header_text,
+            state.offset
+        );
+        self.scroll_state = *state;
+        self
+    }
+
+    /// Emit a toggle state change if handler is set
     fn emit_change(&self) -> Option<M> {
         self.on_toggle.call(self.state)
+    }
+
+    /// Emit a scroll state change if handler is set
+    fn emit_scroll_change(&self) -> Option<M> {
+        log::trace!(
+            "Collapsible '{}': emitting scroll change offset={:?}",
+            self.header_text,
+            self.scroll_state.offset
+        );
+        self.on_scroll.call(self.scroll_state)
     }
 
     /// Check if content needs scrolling
@@ -408,7 +444,17 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                     renderer.pop_clip();
 
-                    // Draw scrollbar
+                    // Draw scrollbar - note: drawn AFTER pop_clip so it's not clipped
+                    let track_bounds = self.scrollbar_track_bounds(viewport_bounds);
+                    log::debug!(
+                        "Collapsible '{}' scrollbar: viewport={:?}, track={:?}, content_h={}, visible_h={}, offset={}",
+                        self.header_text,
+                        viewport_bounds,
+                        track_bounds,
+                        self.content_size.height,
+                        self.visible_content_height,
+                        self.scroll_state.offset.1
+                    );
                     self.draw_scrollbar(renderer, viewport_bounds);
                 } else {
                     // No scrolling needed, draw content directly
@@ -631,16 +677,22 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             (self.content_size.height - self.visible_content_height).max(0.0);
                         // Negative delta.1 means scroll down (content moves up), positive means scroll up
                         let scroll_amount = -delta.1 * SCROLL_SPEED;
+                        let old_offset = self.scroll_state.offset.1;
                         self.scroll_state.offset.1 =
                             (self.scroll_state.offset.1 + scroll_amount).clamp(0.0, max_scroll);
-                        log::debug!(
-                            "Collapsible scroll: delta={}, offset={}, max={}",
-                            delta.1,
-                            self.scroll_state.offset.1,
-                            max_scroll
-                        );
-                        // Return None to indicate we handled it but no message
-                        return None;
+
+                        // Only emit if we actually scrolled (prevents parent from scrolling too)
+                        if (self.scroll_state.offset.1 - old_offset).abs() > 0.001 {
+                            log::debug!(
+                                "Collapsible scroll: delta={}, offset={}, max={}",
+                                delta.1,
+                                self.scroll_state.offset.1,
+                                max_scroll
+                            );
+                            // Emit scroll change to indicate we consumed the event
+                            return self.emit_scroll_change();
+                        }
+                        // If we're at the boundary and can't scroll further, let parent handle it
                     }
                 }
             }

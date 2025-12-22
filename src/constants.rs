@@ -111,3 +111,19 @@ pub const DEFAULT_GPU_PRELOAD_COUNT: usize = 1;
 
 /// Maximum preload count (prevents excessive GPU memory usage)
 pub const MAX_GPU_PRELOAD_COUNT: usize = 10;
+
+// =============================================================================
+// Right Sidebar Sections
+// =============================================================================
+
+/// Maximum height for file list collapsible content (forces scrollbar)
+pub const FILE_LIST_MAX_HEIGHT: f32 = 200.0;
+
+/// Maximum height for thumbnails collapsible content (forces scrollbar)
+pub const THUMBNAILS_MAX_HEIGHT: f32 = 200.0;
+
+/// Thumbnail size (width and height) in pixels
+pub const THUMBNAIL_SIZE: f32 = 64.0;
+
+/// Spacing between thumbnails in the grid
+pub const THUMBNAIL_SPACING: f32 = 4.0;

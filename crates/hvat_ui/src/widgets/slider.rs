@@ -71,6 +71,8 @@ pub struct Slider<M> {
     show_value: bool,
     /// Whether to show editable input field
     show_input: bool,
+    /// Whether to capture scroll events to adjust value
+    capture_scroll: bool,
     /// Value format function (for custom display)
     format_value: Option<Box<dyn Fn(f32) -> String>>,
     /// Configuration
@@ -94,6 +96,7 @@ impl<M> Default for Slider<M> {
             hovered: false,
             show_value: false,
             show_input: false,
+            capture_scroll: false,
             format_value: None,
             config: SliderConfig::default(),
             on_change: Callback::none(),
@@ -145,6 +148,15 @@ impl<M> Slider<M> {
     /// Show an editable input field next to the slider
     pub fn show_input(mut self, show: bool) -> Self {
         self.show_input = show;
+        self
+    }
+
+    /// Set whether scroll events adjust the slider value
+    ///
+    /// When enabled, scrolling over the slider will increment/decrement the value.
+    /// Default is false to avoid hijacking scroll events from parent containers.
+    pub fn capture_scroll(mut self, capture: bool) -> Self {
+        self.capture_scroll = capture;
         self
     }
 
@@ -852,6 +864,11 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
             Event::MouseScroll {
                 delta, position, ..
             } => {
+                // Only handle scroll if capture_scroll is enabled
+                if !self.capture_scroll {
+                    return None;
+                }
+
                 // Handle scroll on input field
                 if let Some(ib) = &input_bounds {
                     if ib.contains(position.0, position.1) {

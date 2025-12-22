@@ -21,7 +21,7 @@ mod text;
 pub mod text_core;
 mod text_input;
 
-pub use button::Button;
+pub use button::{Button, ButtonStyle};
 pub use collapsible::{Collapsible, CollapsibleConfig};
 pub use color_picker::{ColorPicker, PickerAlignment};
 pub use color_swatch::ColorSwatch;

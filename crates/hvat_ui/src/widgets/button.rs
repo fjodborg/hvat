@@ -6,6 +6,16 @@ use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::widget::Widget;
 
+/// Button visual style
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ButtonStyle {
+    /// Standard button with background and border
+    #[default]
+    Normal,
+    /// Text-only button (transparent background, no border, underline on hover)
+    Text,
+}
+
 /// Button state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ButtonState {
@@ -28,6 +38,8 @@ pub struct Button<M> {
     text_align: Alignment,
     /// Font size for button label
     font_size: f32,
+    /// Visual style of the button
+    style: ButtonStyle,
 }
 
 impl<M> Button<M> {
@@ -43,7 +55,14 @@ impl<M> Button<M> {
             state: ButtonState::Normal,
             text_align: Alignment::Center,
             font_size: DEFAULT_FONT_SIZE,
+            style: ButtonStyle::default(),
         }
+    }
+
+    /// Set the button style
+    pub fn style(mut self, style: ButtonStyle) -> Self {
+        self.style = style;
+        self
     }
 
     /// Set the click handler
@@ -96,12 +115,33 @@ impl<M> Button<M> {
         Size::new(text_width, text_height)
     }
 
-    /// Get background color based on state
-    fn background_color(&self) -> Color {
-        match self.state {
-            ButtonState::Normal => Color::BUTTON_BG,
-            ButtonState::Hovered => Color::BUTTON_HOVER,
-            ButtonState::Pressed => Color::BUTTON_ACTIVE,
+    /// Get background color based on state and style
+    fn background_color(&self) -> Option<Color> {
+        match self.style {
+            ButtonStyle::Normal => Some(match self.state {
+                ButtonState::Normal => Color::BUTTON_BG,
+                ButtonState::Hovered => Color::BUTTON_HOVER,
+                ButtonState::Pressed => Color::BUTTON_ACTIVE,
+            }),
+            ButtonStyle::Text => {
+                // Text buttons have subtle hover/press feedback
+                match self.state {
+                    ButtonState::Normal => None,
+                    ButtonState::Hovered => Some(Color::rgba(1.0, 1.0, 1.0, 0.05)),
+                    ButtonState::Pressed => Some(Color::rgba(1.0, 1.0, 1.0, 0.1)),
+                }
+            }
+        }
+    }
+
+    /// Get text color based on state and style
+    fn text_color(&self) -> Color {
+        match self.style {
+            ButtonStyle::Normal => Color::TEXT_PRIMARY,
+            ButtonStyle::Text => match self.state {
+                ButtonState::Normal => Color::TEXT_SECONDARY,
+                ButtonState::Hovered | ButtonState::Pressed => Color::TEXT_PRIMARY,
+            },
         }
     }
 }
@@ -130,11 +170,15 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         // Apply margin to get the actual button bounds
         let button_bounds = bounds.shrink(self.margin);
 
-        // Draw background
-        renderer.fill_rect(button_bounds, self.background_color());
+        // Draw background (if any)
+        if let Some(bg_color) = self.background_color() {
+            renderer.fill_rect(button_bounds, bg_color);
+        }
 
-        // Draw border
-        renderer.stroke_rect(button_bounds, Color::BORDER, 1.0);
+        // Draw border (only for Normal style)
+        if self.style == ButtonStyle::Normal {
+            renderer.stroke_rect(button_bounds, Color::BORDER, 1.0);
+        }
 
         // Calculate text position based on alignment
         let content = self.content_size();
@@ -157,7 +201,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             text_x,
             text_y,
             self.font_size,
-            Color::TEXT_PRIMARY,
+            self.text_color(),
         );
     }
 

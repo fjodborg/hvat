@@ -307,10 +307,16 @@ impl<M: 'static> Scrollable<M> {
     /// Calculate content bounds for drawing (applies scroll offset)
     #[inline]
     fn calc_content_bounds_for_draw(&self, viewport_bounds: Bounds) -> Bounds {
+        // For drawing, use viewport width for vertical scrolling so children
+        // don't extend beyond the visible area (important for nested scrollbars)
+        let draw_width = match self.direction {
+            ScrollDirection::Vertical => viewport_bounds.width,
+            ScrollDirection::Horizontal | ScrollDirection::Both => self.content_size.width,
+        };
         Bounds::new(
             viewport_bounds.x - self.state.offset.0,
             viewport_bounds.y - self.state.offset.1,
-            self.content_size.width,
+            draw_width,
             self.content_size.height,
         )
     }

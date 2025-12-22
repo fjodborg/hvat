@@ -240,6 +240,12 @@ impl<'a, M: Clone + 'static> ButtonBuilder<'a, M> {
         self.button = self.button.margin(margin);
         self
     }
+
+    /// Set button style (Normal or Text)
+    pub fn style(mut self, style: crate::widgets::ButtonStyle) -> Self {
+        self.button = self.button.style(style);
+        self
+    }
 }
 
 impl<'a, M: 'static> ButtonBuilder<'a, M> {

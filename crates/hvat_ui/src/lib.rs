@@ -65,7 +65,7 @@ pub mod prelude {
     pub use crate::units::{FontSize, Spacing, ZoomLevel};
     pub use crate::widgets::{
         button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
-        slider, text, text_input, ScrollDirection, ScrollbarVisibility,
+        slider, text, text_input, ButtonStyle, ScrollDirection, ScrollbarVisibility,
     };
     pub use crate::{ClearColor, ImageAdjustments, Texture};
 }

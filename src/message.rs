@@ -125,6 +125,22 @@ pub enum Message {
     /// Reset all adjustments to defaults
     ResetAdjustments,
 
+    // Right Sidebar - File List
+    /// File list section toggled
+    FileListToggled(CollapsibleState),
+    /// File list scrolled (internal scroll within collapsible)
+    FileListScrolled(ScrollState),
+    /// File selected from list (by index)
+    FileListSelect(usize),
+
+    // Right Sidebar - Thumbnails
+    /// Thumbnails section toggled
+    ThumbnailsToggled(CollapsibleState),
+    /// Thumbnails scrolled (internal scroll within collapsible)
+    ThumbnailsScrolled(ScrollState),
+    /// Thumbnail clicked (by index)
+    ThumbnailSelect(usize),
+
     // Right Sidebar Scroll
     /// Right sidebar scrolled
     RightScrolled(ScrollState),
