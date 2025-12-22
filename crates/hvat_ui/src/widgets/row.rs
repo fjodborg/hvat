@@ -6,7 +6,7 @@ use crate::element::Element;
 use crate::event::Event;
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::Renderer;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 use super::flex_layout::{FlexDirection, FlexLayout};
 
@@ -75,7 +75,7 @@ impl<M: 'static> Widget<M> for Row<M> {
         self.inner.draw(renderer, bounds)
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         self.inner.on_event(event, bounds)
     }
 }

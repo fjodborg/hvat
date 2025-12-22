@@ -359,6 +359,8 @@ impl<A: Application> AppState<A> {
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
+        use crate::widget::EventResult;
+
         // Set overlay hint if the event position is within a registered overlay
         // This allows widgets to know if an event is meant for an overlay
         let event = if let Some((x, y)) = event.position() {
@@ -389,11 +391,26 @@ impl<A: Application> AppState<A> {
                 self.window_size.1 as f32,
             );
 
-            if let Some(message) = root.on_event(&event, bounds) {
-                self.app.update(message);
-                self.needs_rebuild = true;
-                self.redraw_requested = true;
-                return true;
+            let result = root.on_event(&event, bounds);
+
+            // Handle based on EventResult type
+            match result {
+                EventResult::None => {
+                    // Event had no effect
+                    return false;
+                }
+                EventResult::Redraw => {
+                    // Widget needs redraw but no message
+                    self.redraw_requested = true;
+                    return true;
+                }
+                EventResult::Message(message) => {
+                    // Widget produced a message (implies redraw)
+                    self.app.update(message);
+                    self.needs_rebuild = true;
+                    self.redraw_requested = true;
+                    return true;
+                }
             }
         }
         false
@@ -464,16 +481,12 @@ impl<A: Application> AppState<A> {
         // Keep requesting redraws if tick_with_resources indicated more work
         self.redraw_requested = needs_more_ticks;
 
-        // Only rebuild view if needed (dirty flag).
-        // IMPORTANT: Defer rebuilds while a mouse button is pressed to preserve widget state
-        // (e.g., button's Pressed state) between MousePress and MouseRelease events.
-        // This ensures clicks work correctly even when blur events trigger state changes.
-        // EXCEPTION: If the app explicitly requests immediate rebuild (e.g., for drawing previews),
-        // bypass the deferral to show real-time updates during drag operations.
-        let immediate_rebuild_requested = self.app.needs_immediate_rebuild();
-        if (self.needs_rebuild && (!self.mouse_button_pressed || immediate_rebuild_requested))
-            || self.root.is_none()
-        {
+        // Rebuild view if needed.
+        // NOTE: We previously deferred rebuilds while mouse button was pressed to preserve
+        // button Pressed state, but this caused layout issues (collapsibles would expand
+        // but layout wouldn't update until mouse release). The proper fix is to always
+        // rebuild when needed - button state is managed by the button widget itself.
+        if self.needs_rebuild || self.root.is_none() {
             self.rebuild_view();
             self.layout();
         }
@@ -914,6 +927,13 @@ fn handle_window_event<A: Application>(
                     position: state.cursor_position,
                 });
 
+                // Request redraw if GlobalMousePress was handled
+                if handled {
+                    if let Some(w) = window {
+                        w.request_redraw();
+                    }
+                }
+
                 // Only consume the click if:
                 // 1. An overlay was open before the event, AND
                 // 2. The event was handled (overlay closed)
@@ -949,7 +969,11 @@ fn handle_window_event<A: Application>(
                     overlay_hint: false, // Set by handle_event if needed
                 }
             };
-            state.handle_event(event);
+            if state.handle_event(event) {
+                if let Some(w) = window {
+                    w.request_redraw();
+                }
+            }
         }
 
         WindowEvent::MouseWheel { delta, .. } => {

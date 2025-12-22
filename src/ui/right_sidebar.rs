@@ -1,14 +1,11 @@
 //! Right sidebar UI component.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use hvat_ui::constants::BUTTON_PADDING_COMPACT;
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    BorderSides, Collapsible, Column, Context, Element, Panel, ScrollDirection, Scrollable,
-    ScrollbarVisibility,
+    BorderSides, Collapsible, Column, Context, Element, FileTree, Panel, ScrollDirection,
+    Scrollable, ScrollbarVisibility,
 };
 
 use crate::app::HvatApp;
@@ -18,58 +15,6 @@ use crate::constants::{
     SIDEBAR_CONTENT_WIDTH, SIDEBAR_WIDTH, THUMBNAIL_SIZE, THUMBNAIL_SPACING, THUMBNAILS_MAX_HEIGHT,
 };
 use crate::message::Message;
-
-/// Represents a file entry with its original index in the project
-struct FileEntry {
-    filename: String,
-    index: usize,
-}
-
-/// Groups files by their parent folder relative to the project root
-fn group_files_by_folder(
-    images: &[PathBuf],
-    project_folder: &Path,
-) -> BTreeMap<String, Vec<FileEntry>> {
-    let mut groups: BTreeMap<String, Vec<FileEntry>> = BTreeMap::new();
-
-    for (idx, path) in images.iter().enumerate() {
-        // Get relative path from project folder
-        let relative = if !project_folder.as_os_str().is_empty() {
-            path.strip_prefix(project_folder)
-                .ok()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| path.clone())
-        } else {
-            path.clone()
-        };
-
-        // Extract parent folder and filename
-        let (folder, filename) = if let Some(parent) = relative.parent() {
-            let folder_str = parent.to_str().unwrap_or("").to_string();
-            let filename = relative
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Unknown")
-                .to_string();
-            (folder_str, filename)
-        } else {
-            // No parent - file is at root
-            let filename = relative
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Unknown")
-                .to_string();
-            (String::new(), filename)
-        };
-
-        groups.entry(folder).or_default().push(FileEntry {
-            filename,
-            index: idx,
-        });
-    }
-
-    groups
-}
 
 impl HvatApp {
     /// Build the right sidebar with band selection and image adjustments.
@@ -199,70 +144,51 @@ impl HvatApp {
             });
         sidebar_ctx.add(Element::new(collapsible_adj));
 
-        // File List Collapsible
-        let file_list_state = self.file_list_collapsed.clone();
-        let project_images = self
+        // File Explorer Collapsible (VSCode-style tree view)
+        let file_explorer_state = self.file_explorer_collapsed.clone();
+        let file_explorer_scroll = self.file_explorer_scroll_state.clone();
+        let file_tree_state = self.file_explorer_state.clone();
+
+        // Build the file tree from project
+        let file_tree_nodes = self
             .project
             .as_ref()
-            .map(|p| p.images.clone())
+            .map(|p| p.build_file_tree())
             .unwrap_or_default();
-        let current_index = self.project.as_ref().map(|p| p.current_index).unwrap_or(0);
-        let project_folder = self
+        let current_path = self
             .project
             .as_ref()
-            .map(|p| p.folder.clone())
-            .unwrap_or_default();
+            .and_then(|p| p.current_relative_path());
+        let num_files = self.project.as_ref().map(|p| p.images.len()).unwrap_or(0);
 
-        // Group files by folder for hierarchical display
-        let file_groups = group_files_by_folder(&project_images, &project_folder);
-
-        let file_list_scroll = self.file_list_scroll_state.clone();
-        let collapsible_files = Collapsible::new("File List")
-            .state(&file_list_state)
-            .scroll_state(&file_list_scroll)
+        let collapsible_files = Collapsible::new("File Explorer")
+            .state(&file_explorer_state)
+            .scroll_state(&file_explorer_scroll)
             .scroll_direction(ScrollDirection::Both)
             .width(Length::Fill(1.0))
             .max_height(FILE_LIST_MAX_HEIGHT)
-            .on_toggle(Message::FileListToggled)
-            .on_scroll(Message::FileListScrolled)
+            .on_toggle(Message::FileExplorerToggled)
+            .on_scroll(Message::FileExplorerScrolled)
             .content(|c| {
-                if project_images.is_empty() {
+                if file_tree_nodes.is_empty() {
                     c.text("No files loaded").size(FONT_SIZE_SECONDARY);
                     c.text("Use 'Open Folder' to load images")
                         .size(FONT_SIZE_SMALL);
                 } else {
-                    c.text(format!("{} files loaded", project_images.len()))
+                    c.text(format!("{} files", num_files))
                         .size(FONT_SIZE_SECONDARY);
                     c.text("");
 
-                    // Display files grouped by folder
-                    for (folder, files) in &file_groups {
-                        // Show folder header (if not root)
-                        if !folder.is_empty() {
-                            c.text(format!("📁 {}/", folder)).size(FONT_SIZE_SECONDARY);
-                        }
+                    // Create the file tree widget
+                    let file_tree = FileTree::new()
+                        .nodes(file_tree_nodes)
+                        .state(&file_tree_state)
+                        .selected(current_path)
+                        .width(Length::Fill(1.0))
+                        .on_select(Message::FileExplorerSelect)
+                        .on_state_change(Message::FileExplorerStateChanged);
 
-                        // Show files in this folder
-                        for entry in files {
-                            let is_current = entry.index == current_index;
-
-                            // Indent files under folders
-                            let prefix = if folder.is_empty() { "" } else { "  " };
-
-                            // Format the label with selection indicator
-                            let label = if is_current {
-                                format!("{}▸ {}", prefix, entry.filename)
-                            } else {
-                                format!("{}  {}", prefix, entry.filename)
-                            };
-
-                            c.button(label)
-                                .width(Length::Fill(1.0))
-                                .padding(BUTTON_PADDING_COMPACT)
-                                .style(ButtonStyle::Text)
-                                .on_click(Message::FileListSelect(entry.index));
-                        }
-                    }
+                    c.add(Element::new(file_tree));
                 }
             });
         sidebar_ctx.add(Element::new(collapsible_files));
@@ -270,6 +196,13 @@ impl HvatApp {
         // Thumbnails Collapsible (placeholder - actual thumbnails need texture loading)
         let thumbnails_state = self.thumbnails_collapsed.clone();
         let thumbnails_scroll = self.thumbnails_scroll_state.clone();
+        let project_images = self
+            .project
+            .as_ref()
+            .map(|p| p.images.clone())
+            .unwrap_or_default();
+        let current_index = self.project.as_ref().map(|p| p.current_index).unwrap_or(0);
+
         let collapsible_thumbs = Collapsible::new("Thumbnails")
             .state(&thumbnails_state)
             .scroll_state(&thumbnails_scroll)

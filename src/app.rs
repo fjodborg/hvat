@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use hvat_gpu::{BandSelectionUniform, ImageAdjustments};
 use hvat_ui::prelude::*;
-use hvat_ui::{Application, Column, Element, Event, KeyCode, Resources, Row};
+use hvat_ui::{Application, Column, Element, Event, FileTreeState, KeyCode, Resources, Row};
 
 use crate::constants::{
     DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_GPU_PRELOAD_COUNT, DEFAULT_HUE,
@@ -288,8 +288,9 @@ pub struct HvatApp {
     // Right sidebar states
     pub(crate) band_selection_collapsed: CollapsibleState,
     pub(crate) adjustments_collapsed: CollapsibleState,
-    pub(crate) file_list_collapsed: CollapsibleState,
-    pub(crate) file_list_scroll_state: ScrollState,
+    pub(crate) file_explorer_collapsed: CollapsibleState,
+    pub(crate) file_explorer_scroll_state: ScrollState,
+    pub(crate) file_explorer_state: FileTreeState,
     pub(crate) thumbnails_collapsed: CollapsibleState,
     pub(crate) thumbnails_scroll_state: ScrollState,
     pub(crate) right_scroll_state: ScrollState,
@@ -439,8 +440,9 @@ impl HvatApp {
 
             band_selection_collapsed: CollapsibleState::expanded(),
             adjustments_collapsed: CollapsibleState::expanded(),
-            file_list_collapsed: CollapsibleState::expanded(),
-            file_list_scroll_state: ScrollState::default(),
+            file_explorer_collapsed: CollapsibleState::expanded(),
+            file_explorer_scroll_state: ScrollState::default(),
+            file_explorer_state: FileTreeState::new(),
             thumbnails_collapsed: CollapsibleState::collapsed(),
             thumbnails_scroll_state: ScrollState::default(),
             right_scroll_state: ScrollState::default(),
@@ -2334,19 +2336,41 @@ impl Application for HvatApp {
                 log::info!("Adjustments reset");
             }
 
-            // Right Sidebar - File List
-            Message::FileListToggled(state) => {
-                self.file_list_collapsed = state;
+            // Right Sidebar - File Explorer
+            Message::FileExplorerToggled(state) => {
+                self.file_explorer_collapsed = state;
             }
-            Message::FileListScrolled(state) => {
-                self.file_list_scroll_state = state;
+            Message::FileExplorerScrolled(state) => {
+                self.file_explorer_scroll_state = state;
             }
-            Message::FileListSelect(index) => {
+            Message::FileExplorerFolderToggle(folder_path) => {
+                log::debug!("File explorer: toggling folder '{}'", folder_path);
+                self.file_explorer_state.toggle(&folder_path);
+            }
+            Message::FileExplorerStateChanged(state) => {
+                self.file_explorer_state = state;
+            }
+            Message::FileExplorerSelect(file_path) => {
+                // Find the index of the selected file by matching the path
                 if let Some(ref mut project) = self.project {
-                    if index < project.images.len() {
-                        project.current_index = index;
-                        self.pending_image_load = true;
-                        log::info!("File list: selected image {}", index);
+                    // Try to find the file by its relative path
+                    for (index, image_path) in project.images.iter().enumerate() {
+                        let relative = if !project.folder.as_os_str().is_empty() {
+                            image_path
+                                .strip_prefix(&project.folder)
+                                .ok()
+                                .and_then(|p| p.to_str())
+                                .map(String::from)
+                        } else {
+                            image_path.to_str().map(String::from)
+                        };
+
+                        if relative.as_ref() == Some(&file_path) {
+                            project.current_index = index;
+                            self.pending_image_load = true;
+                            log::info!("File explorer: selected '{}' (index {})", file_path, index);
+                            break;
+                        }
                     }
                 }
             }

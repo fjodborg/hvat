@@ -2,6 +2,7 @@
 
 use crate::constants::{format_number, UNDO_STACK_LIMIT, ZOOM_FACTOR, ZOOM_MAX, ZOOM_MIN};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// Generic undo stack for any value type
@@ -566,6 +567,54 @@ impl CollapsibleState {
 
     pub fn toggle(&mut self) {
         self.is_expanded = !self.is_expanded;
+    }
+}
+
+/// State for file tree widgets - tracks which folders are expanded
+#[derive(Debug, Clone, Default)]
+pub struct FileTreeState {
+    /// Set of folder paths that are currently expanded
+    pub expanded: HashSet<String>,
+}
+
+impl FileTreeState {
+    /// Create a new file tree state with no folders expanded
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check if a folder is expanded
+    pub fn is_expanded(&self, path: &str) -> bool {
+        self.expanded.contains(path)
+    }
+
+    /// Toggle folder expansion state
+    pub fn toggle(&mut self, path: &str) {
+        if self.expanded.contains(path) {
+            self.expanded.remove(path);
+        } else {
+            self.expanded.insert(path.to_string());
+        }
+    }
+
+    /// Expand a folder
+    pub fn expand(&mut self, path: &str) {
+        self.expanded.insert(path.to_string());
+    }
+
+    /// Collapse a folder
+    pub fn collapse(&mut self, path: &str) {
+        self.expanded.remove(path);
+    }
+
+    /// Expand all provided folder paths
+    pub fn expand_all(&mut self, paths: impl IntoIterator<Item = String>) {
+        self.expanded.extend(paths);
+    }
+
+    /// Collapse all folders
+    pub fn collapse_all(&mut self) {
+        self.expanded.clear();
     }
 }
 

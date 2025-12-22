@@ -6,7 +6,7 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::TextInputState;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
 
@@ -279,7 +279,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
         }
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         let content = self.content_bounds(bounds);
 
         match event {
@@ -322,19 +322,19 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         self.on_undo_point.emit();
                     }
 
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
 
                 // Note: Blur on outside click is handled by GlobalMousePress, not here.
                 // If we blur and return here, it consumes the event and prevents
                 // other widgets (like buttons) from receiving the click.
 
-                None
+                EventResult::None
             }
 
             Event::TextInput { text } if self.state.is_focused => {
                 self.insert_text(text);
-                self.emit_change()
+                self.emit_change().into()
             }
 
             Event::KeyPress { key, modifiers, .. } if self.state.is_focused => {
@@ -342,13 +342,13 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     KeyCode::Backspace => {
                         if self.handle_backspace() {
                             log::debug!("TextInput: backspace, value = '{}'", self.value);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Delete => {
                         if self.handle_delete() {
                             log::debug!("TextInput: delete, value = '{}'", self.value);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Left => {
@@ -404,7 +404,7 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         );
                         if let Some(msg) = self.on_submit.call(self.value.clone()) {
                             log::debug!("TextInput: submit callback returned message");
-                            return Some(msg);
+                            return EventResult::Message(msg);
                         } else {
                             log::debug!("TextInput: submit callback returned None (no handler?)");
                         }
@@ -413,12 +413,12 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                         self.state.is_focused = false;
                         self.state.selection = None;
                         log::debug!("TextInput: escape, blurred");
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                     _ => {}
                 }
 
-                None
+                EventResult::None
             }
 
             Event::GlobalMousePress { position, .. } => {
@@ -430,9 +430,9 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     bounds,
                 ) {
                     log::debug!("TextInput: GlobalMousePress outside, blurred");
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
-                None
+                EventResult::None
             }
 
             Event::FocusLost => {
@@ -442,12 +442,12 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     &mut self.state.selection,
                 ) {
                     log::debug!("TextInput: FocusLost, blurred");
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
-                None
+                EventResult::None
             }
 
-            _ => None,
+            _ => EventResult::None,
         }
     }
 }

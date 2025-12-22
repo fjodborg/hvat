@@ -7,7 +7,7 @@ use crate::renderer::{Color, Renderer, TextureId};
 use crate::state::{
     FitMode, ImageViewerState, InteractionMode, PanDragData, PanDragExt, PointerState,
 };
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use hvat_gpu::{ImageAdjustments, TransformUniform};
 use std::marker::PhantomData;
 
@@ -836,7 +836,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         renderer.end_overlay();
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         // Sync state with current bounds - this resolves any pending FitToView mode
         // and ensures zoom operations use the correct base value.
         self.state.sync_with_bounds(
@@ -854,7 +854,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 ..
             } => {
                 if !bounds.contains(position.0, position.1) {
-                    return None;
+                    return EventResult::None;
                 }
 
                 // Check control buttons first
@@ -862,19 +862,19 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     match btn {
                         ControlButton::ZoomIn => {
                             self.state.zoom_in();
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                         ControlButton::ZoomOut => {
                             self.state.zoom_out();
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                         ControlButton::OneToOne => {
                             self.state.set_one_to_one();
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                         ControlButton::FitToView => {
                             self.state.set_fit_to_view();
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                 }
@@ -889,16 +889,19 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         self.texture_height,
                     );
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                    return self.on_pointer.call(ImagePointerEvent {
-                        image_x,
-                        image_y,
-                        screen_x: position.0,
-                        screen_y: position.1,
-                        kind: PointerEventKind::DragStart,
-                        viewer_state: self.state.clone(),
-                    });
+                    return self
+                        .on_pointer
+                        .call(ImagePointerEvent {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            kind: PointerEventKind::DragStart,
+                            viewer_state: self.state.clone(),
+                        })
+                        .into();
                 }
-                None
+                EventResult::None
             }
 
             // Handle left mouse release for annotation mode
@@ -916,16 +919,19 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         self.texture_height,
                     );
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                    return self.on_pointer.call(ImagePointerEvent {
-                        image_x,
-                        image_y,
-                        screen_x: position.0,
-                        screen_y: position.1,
-                        kind: PointerEventKind::DragEnd,
-                        viewer_state: self.state.clone(),
-                    });
+                    return self
+                        .on_pointer
+                        .call(ImagePointerEvent {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            kind: PointerEventKind::DragEnd,
+                            viewer_state: self.state.clone(),
+                        })
+                        .into();
                 }
-                None
+                EventResult::None
             }
 
             // Start panning with middle mouse button
@@ -935,7 +941,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 ..
             } => {
                 if !bounds.contains(position.0, position.1) {
-                    return None;
+                    return EventResult::None;
                 }
 
                 if self.pannable {
@@ -943,9 +949,9 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         last_pos: *position,
                     });
                     // Emit change to persist dragging state
-                    return self.emit_change_with_bounds(&bounds);
+                    return self.emit_change_with_bounds(&bounds).into();
                 }
-                None
+                EventResult::None
             }
 
             Event::MouseRelease {
@@ -955,9 +961,9 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 if self.state.drag.is_dragging() {
                     self.state.drag.stop_drag();
                     // Emit change to persist state
-                    return self.emit_change_with_bounds(&bounds);
+                    return self.emit_change_with_bounds(&bounds).into();
                 }
-                None
+                EventResult::None
             }
 
             Event::MouseMove { position, .. } => {
@@ -973,31 +979,34 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         self.state.pan_by(clip_delta_x, clip_delta_y);
                         self.state.drag.update_pos(*position);
 
-                        return self.emit_change_with_bounds(&bounds);
+                        return self.emit_change_with_bounds(&bounds).into();
                     }
                 }
 
                 // Handle annotation drag move (left mouse)
                 if self.state.pointer_state == PointerState::AnnotationDrag {
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
-                    return self.on_pointer.call(ImagePointerEvent {
-                        image_x,
-                        image_y,
-                        screen_x: position.0,
-                        screen_y: position.1,
-                        kind: PointerEventKind::DragMove,
-                        viewer_state: self.state.clone(),
-                    });
+                    return self
+                        .on_pointer
+                        .call(ImagePointerEvent {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            kind: PointerEventKind::DragMove,
+                            viewer_state: self.state.clone(),
+                        })
+                        .into();
                 }
 
-                None
+                EventResult::None
             }
 
             Event::MouseScroll {
                 delta, position, ..
             } => {
                 if !bounds.contains(position.0, position.1) || !self.zoomable {
-                    return None;
+                    return EventResult::None;
                 }
 
                 // Skip if on control buttons
@@ -1005,7 +1014,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     .control_button_at(position.0, position.1, &bounds)
                     .is_some()
                 {
-                    return None;
+                    return EventResult::None;
                 }
 
                 let (clip_x, clip_y) = self.screen_to_clip(position.0, position.1, &bounds);
@@ -1017,7 +1026,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 };
 
                 self.state.zoom_at(clip_x, clip_y, zoom_factor);
-                self.emit_change_with_bounds(&bounds)
+                self.emit_change_with_bounds(&bounds).into()
             }
 
             Event::KeyPress {
@@ -1027,56 +1036,56 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
             } => {
                 // Don't handle keyboard shortcuts when a text input is focused
                 if *text_input_focused {
-                    return None;
+                    return EventResult::None;
                 }
                 match key {
                     KeyCode::Plus | KeyCode::Equal => {
                         if self.zoomable {
                             self.state.zoom_in();
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                     KeyCode::Minus => {
                         if self.zoomable {
                             self.state.zoom_out();
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                     KeyCode::Key0 => {
                         self.state.set_one_to_one();
-                        return self.emit_change_with_bounds(&bounds);
+                        return self.emit_change_with_bounds(&bounds).into();
                     }
                     KeyCode::F => {
                         self.state.set_fit_to_view();
-                        return self.emit_change_with_bounds(&bounds);
+                        return self.emit_change_with_bounds(&bounds).into();
                     }
                     KeyCode::Up => {
                         if self.pannable {
                             self.state.pan_by(0.0, PAN_SPEED);
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                     KeyCode::Down => {
                         if self.pannable {
                             self.state.pan_by(0.0, -PAN_SPEED);
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                     KeyCode::Left => {
                         if self.pannable {
                             self.state.pan_by(PAN_SPEED, 0.0);
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                     KeyCode::Right => {
                         if self.pannable {
                             self.state.pan_by(-PAN_SPEED, 0.0);
-                            return self.emit_change_with_bounds(&bounds);
+                            return self.emit_change_with_bounds(&bounds).into();
                         }
                     }
                     _ => {}
                 }
-                None
+                EventResult::None
             }
 
             Event::CursorLeft => {
@@ -1093,12 +1102,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     log::debug!("ImageViewer: stopped annotation dragging (cursor left window)");
                 }
                 if changed {
-                    return self.emit_change_with_bounds(&bounds);
+                    return self.emit_change_with_bounds(&bounds).into();
                 }
-                None
+                EventResult::None
             }
 
-            _ => None,
+            _ => EventResult::None,
         }
     }
 }

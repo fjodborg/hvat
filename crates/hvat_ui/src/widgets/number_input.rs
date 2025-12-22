@@ -9,7 +9,7 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::NumberInputState;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
 
@@ -471,7 +471,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
         }
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         let content = self.content_bounds(bounds);
 
         match event {
@@ -491,7 +491,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     }
                 }
 
-                None
+                EventResult::None
             }
 
             Event::MousePress {
@@ -510,9 +510,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = None;
                         if self.increment() {
                             log::debug!("NumberInput: increment, value = {}", self.state.text);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
-                        return None;
+                        return EventResult::None;
                     }
                 }
 
@@ -523,9 +523,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = None;
                         if self.decrement() {
                             log::debug!("NumberInput: decrement, value = {}", self.state.text);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
-                        return None;
+                        return EventResult::None;
                     }
                 }
 
@@ -563,18 +563,18 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.on_undo_point.emit();
                     }
 
-                    return self.emit_change();
+                    return self.emit_change().into();
                 } else if self.state.is_focused {
                     // Clicked outside - blur and validate
                     self.state.is_focused = false;
                     self.state.selection = None;
                     if let Some(value) = self.validate_value() {
                         log::debug!("NumberInput: blurred, validated value = {}", value);
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                 }
 
-                None
+                EventResult::None
             }
 
             Event::TextInput { text } if self.state.is_focused => {
@@ -587,9 +587,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 }
                 if changed {
                     log::debug!("NumberInput: text input, value = '{}'", self.state.text);
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
-                None
+                EventResult::None
             }
 
             Event::KeyPress { key, modifiers, .. } if self.state.is_focused => {
@@ -598,14 +598,14 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                     KeyCode::Z if modifiers.ctrl && !modifiers.shift => {
                         if self.state.undo() {
                             log::debug!("NumberInput: undo, value = '{}'", self.state.text);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     // Redo: Ctrl+Y or Ctrl+Shift+Z
                     KeyCode::Y if modifiers.ctrl => {
                         if self.state.redo() {
                             log::debug!("NumberInput: redo, value = '{}'", self.state.text);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Z if modifiers.ctrl && modifiers.shift => {
@@ -614,21 +614,21 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                                 "NumberInput: redo (Ctrl+Shift+Z), value = '{}'",
                                 self.state.text
                             );
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Backspace => {
                         // handle_backspace manages undo internally
                         if self.handle_backspace() {
                             log::debug!("NumberInput: backspace, value = '{}'", self.state.text);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Delete => {
                         // handle_delete manages undo internally
                         if self.handle_delete() {
                             log::debug!("NumberInput: delete, value = '{}'", self.state.text);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Left => {
@@ -681,7 +681,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                                 "NumberInput: up arrow increment, value = {}",
                                 self.state.text
                             );
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Down => {
@@ -690,7 +690,7 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                                 "NumberInput: down arrow decrement, value = {}",
                                 self.state.text
                             );
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     KeyCode::Enter | KeyCode::Escape => {
@@ -698,13 +698,13 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                         self.state.selection = None;
                         if let Some(value) = self.validate_value() {
                             log::debug!("NumberInput: enter/escape, validated value = {}", value);
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                     _ => {}
                 }
 
-                None
+                EventResult::None
             }
 
             Event::MouseScroll {
@@ -721,9 +721,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                             self.decrement();
                         });
                     }
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
-                None
+                EventResult::None
             }
 
             Event::GlobalMousePress { position, .. } => {
@@ -736,9 +736,9 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 ) {
                     log::debug!("NumberInput: GlobalMousePress outside, blurred");
                     self.validate_value();
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
-                None
+                EventResult::None
             }
 
             Event::FocusLost => {
@@ -749,12 +749,12 @@ impl<M: Clone + 'static> Widget<M> for NumberInput<M> {
                 ) {
                     log::debug!("NumberInput: FocusLost, blurred");
                     self.validate_value();
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
-                None
+                EventResult::None
             }
 
-            _ => None,
+            _ => EventResult::None,
         }
     }
 }

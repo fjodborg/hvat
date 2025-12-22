@@ -11,7 +11,7 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::SliderState;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
 
@@ -395,8 +395,11 @@ impl<M> Slider<M> {
     }
 
     /// Emit a state change if handler is set
-    fn emit_change(&self) -> Option<M> {
-        self.on_change.call(self.state.clone())
+    fn emit_change(&self) -> EventResult<M> {
+        match self.on_change.call(self.state.clone()) {
+            Some(msg) => EventResult::Message(msg),
+            None => EventResult::Redraw,
+        }
     }
 }
 
@@ -510,7 +513,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
         }
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         let slider_bounds = self.slider_bounds(bounds);
         let track = self.track_bounds(slider_bounds);
         let thumb = self.thumb_bounds(slider_bounds);
@@ -525,6 +528,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 let thumb_center_y = thumb.y + SLIDER_THUMB_RADIUS;
                 let dist_sq = (x - thumb_center_x).powi(2) + (y - thumb_center_y).powi(2);
                 let hit_radius = SLIDER_THUMB_RADIUS * THUMB_HIT_AREA_MULTIPLIER;
+                let was_hovered = self.hovered;
                 self.hovered = dist_sq <= hit_radius.powi(2);
 
                 // Handle drag
@@ -538,7 +542,12 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                 }
 
-                None
+                // Return Redraw if hover state changed
+                if self.hovered != was_hovered {
+                    EventResult::Redraw
+                } else {
+                    EventResult::None
+                }
             }
 
             Event::MousePress {
@@ -627,7 +636,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     return self.emit_change();
                 }
 
-                None
+                EventResult::None
             }
 
             Event::MouseRelease {
@@ -639,7 +648,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     log::debug!("Slider: stopped dragging");
                     return self.emit_change();
                 }
-                None
+                EventResult::None
             }
 
             Event::TextInput { text } if self.state.input_focused => {
@@ -660,7 +669,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         }
                     }
                 }
-                None
+                EventResult::None
             }
 
             Event::KeyPress { key, modifiers, .. } => {
@@ -740,7 +749,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 }
                                 return self.emit_change();
                             }
-                            return None;
+                            return EventResult::None;
                         }
                         KeyCode::Z if modifiers.ctrl => {
                             // Ctrl+Z = Undo
@@ -752,7 +761,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 }
                                 return self.emit_change();
                             }
-                            return None;
+                            return EventResult::None;
                         }
                         KeyCode::Y if modifiers.ctrl => {
                             // Ctrl+Y = Redo (Windows style)
@@ -764,7 +773,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                                 }
                                 return self.emit_change();
                             }
-                            return None;
+                            return EventResult::None;
                         }
                         KeyCode::Enter | KeyCode::Escape => {
                             self.state.input_focused = false;
@@ -806,12 +815,12 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         }
                         _ => {}
                     }
-                    return None;
+                    return EventResult::None;
                 }
 
                 // Handle slider keys (when hovered)
                 if !self.hovered {
-                    return None;
+                    return EventResult::None;
                 }
 
                 let step = self
@@ -852,7 +861,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                 }
 
-                None
+                EventResult::None
             }
 
             Event::MouseScroll {
@@ -860,7 +869,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
             } => {
                 // Only handle scroll if capture_scroll is enabled
                 if !self.capture_scroll {
-                    return None;
+                    return EventResult::None;
                 }
 
                 // Handle scroll on input field
@@ -876,13 +885,13 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             self.sync_input_from_value();
                             return self.emit_change();
                         }
-                        return None;
+                        return EventResult::None;
                     }
                 }
 
                 // Handle scroll on slider
                 if !slider_bounds.contains(position.0, position.1) {
-                    return None;
+                    return EventResult::None;
                 }
 
                 let step = self
@@ -898,7 +907,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     return self.emit_change();
                 }
 
-                None
+                EventResult::None
             }
 
             Event::FocusLost => {
@@ -910,7 +919,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     log::debug!("Slider input: blurred due to window focus loss");
                     return self.emit_change();
                 }
-                None
+                EventResult::None
             }
 
             Event::GlobalMousePress { position, .. } => {
@@ -928,7 +937,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                         }
                     }
                 }
-                None
+                EventResult::None
             }
 
             Event::CursorLeft => {
@@ -938,10 +947,10 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     log::debug!("Slider: stopped dragging (cursor left window)");
                     return self.emit_change();
                 }
-                None
+                EventResult::None
             }
 
-            _ => None,
+            _ => EventResult::None,
         }
     }
 

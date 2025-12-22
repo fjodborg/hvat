@@ -6,7 +6,7 @@ use crate::element::Element;
 use crate::event::Event;
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 /// Specifies which sides should have a border
 #[derive(Debug, Clone, Copy, Default)]
@@ -218,7 +218,7 @@ impl<M: 'static> Widget<M> for Panel<M> {
         }
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         self.content.on_event(event, bounds)
     }
 }

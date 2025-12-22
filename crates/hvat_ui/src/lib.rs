@@ -32,16 +32,16 @@ pub use renderer::{Color, Renderer, TextureId};
 pub use state::*;
 pub use theme::Theme;
 pub use units::{FontSize, Spacing, ZoomLevel};
-pub use widget::Widget;
+pub use widget::{EventResult, Widget};
 
 // Re-export widgets
 pub use widgets::{
     button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
     slider, text, text_input, AnnotationOverlay, BaseInputConfig, BorderSides, Collapsible,
-    CollapsibleConfig, ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig,
-    ImagePointerEvent, NumberInput, NumberInputConfig, OverlayShape, Panel, PickerAlignment,
-    PointerEventKind, Row, ScrollDirection, Scrollable, ScrollbarConfig, ScrollbarVisibility,
-    Slider, SliderConfig, Text, TextInput, TextInputConfig,
+    CollapsibleConfig, ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig, FileTree,
+    FileTreeConfig, FileTreeNode, ImagePointerEvent, NumberInput, NumberInputConfig, OverlayShape,
+    Panel, PickerAlignment, PointerEventKind, Row, ScrollDirection, Scrollable, ScrollbarConfig,
+    ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
 };
 
 // Re-export hvat_gpu types that users need
@@ -63,6 +63,7 @@ pub mod prelude {
     pub use crate::state::*;
     pub use crate::theme::Theme;
     pub use crate::units::{FontSize, Spacing, ZoomLevel};
+    pub use crate::widget::EventResult;
     pub use crate::widgets::{
         button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
         slider, text, text_input, ButtonStyle, ScrollDirection, ScrollbarVisibility,

@@ -3,7 +3,7 @@
 use crate::event::Event;
 use crate::layout::{Bounds, Size};
 use crate::renderer::Renderer;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 /// A type-erased widget that can hold any widget type
 pub struct Element<M> {
@@ -38,7 +38,7 @@ impl<M> Element<M> {
     }
 
     /// Handle an event
-    pub fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    pub fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         self.widget.on_event(event, bounds)
     }
 

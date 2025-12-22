@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use hvat_ui::FileTreeState;
 use hvat_ui::ImagePointerEvent;
 use hvat_ui::prelude::*;
 
@@ -126,13 +127,17 @@ pub enum Message {
     /// Reset all adjustments to defaults
     ResetAdjustments,
 
-    // Right Sidebar - File List
-    /// File list section toggled
-    FileListToggled(CollapsibleState),
-    /// File list scrolled (internal scroll within collapsible)
-    FileListScrolled(ScrollState),
-    /// File selected from list (by index)
-    FileListSelect(usize),
+    // Right Sidebar - File Explorer (replaces File List)
+    /// File explorer section toggled
+    FileExplorerToggled(CollapsibleState),
+    /// File explorer scrolled (internal scroll within collapsible)
+    FileExplorerScrolled(ScrollState),
+    /// Folder expand/collapse toggled (folder path)
+    FileExplorerFolderToggle(String),
+    /// File tree expansion state changed
+    FileExplorerStateChanged(FileTreeState),
+    /// File selected from explorer (by path string)
+    FileExplorerSelect(String),
 
     // Right Sidebar - Thumbnails
     /// Thumbnails section toggled

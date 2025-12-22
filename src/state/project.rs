@@ -1,6 +1,9 @@
 //! Project state management for loaded folders and images.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+use hvat_ui::FileTreeNode;
 
 /// Supported image extensions
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"];
@@ -244,5 +247,164 @@ impl ProjectState {
     /// Get progress string like "3/15".
     pub fn progress(&self) -> String {
         format!("{}/{}", self.current_index + 1, self.images.len())
+    }
+
+    /// Build a file tree from the loaded images.
+    ///
+    /// Creates a hierarchical tree structure from the flat list of image paths,
+    /// organized by folder. Files at the root level are included as root nodes.
+    ///
+    /// Returns a list of root-level nodes (can be folders or files).
+    pub fn build_file_tree(&self) -> Vec<FileTreeNode> {
+        // Group images by their relative folder path
+        let mut folder_files: BTreeMap<String, Vec<(String, usize)>> = BTreeMap::new();
+
+        for (idx, path) in self.images.iter().enumerate() {
+            // Get relative path from project folder
+            let relative = if !self.folder.as_os_str().is_empty() {
+                path.strip_prefix(&self.folder)
+                    .ok()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| path.clone())
+            } else {
+                path.clone()
+            };
+
+            // Extract parent folder and filename
+            let (folder_path, filename) = if let Some(parent) = relative.parent() {
+                let folder_str = parent.to_str().unwrap_or("").to_string();
+                let filename = relative
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                (folder_str, filename)
+            } else {
+                let filename = relative
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                (String::new(), filename)
+            };
+
+            folder_files
+                .entry(folder_path)
+                .or_default()
+                .push((filename, idx));
+        }
+
+        // Build the tree structure
+        // First, collect all unique folder paths and create a hierarchy
+        let mut root_nodes: Vec<FileTreeNode> = Vec::new();
+        let mut folder_nodes: BTreeMap<String, FileTreeNode> = BTreeMap::new();
+
+        // Process folders in order (BTreeMap sorts keys)
+        for (folder_path, files) in &folder_files {
+            if folder_path.is_empty() {
+                // Root-level files
+                for (filename, idx) in files {
+                    let file_path = filename.clone();
+                    root_nodes.push(FileTreeNode::File {
+                        path: file_path,
+                        name: filename.clone(),
+                        index: Some(*idx),
+                    });
+                }
+            } else {
+                // Files in a subfolder - we need to create folder hierarchy
+                // Split path into components and build nested folders
+                let components: Vec<&str> = folder_path.split(['/', '\\']).collect();
+
+                // Build path incrementally to create nested folders
+                let mut current_path = String::new();
+                for (i, component) in components.iter().enumerate() {
+                    if i > 0 {
+                        current_path.push('/');
+                    }
+                    current_path.push_str(component);
+
+                    // Create folder node if it doesn't exist
+                    if !folder_nodes.contains_key(&current_path) {
+                        folder_nodes.insert(
+                            current_path.clone(),
+                            FileTreeNode::Folder {
+                                path: current_path.clone(),
+                                name: component.to_string(),
+                                children: Vec::new(),
+                            },
+                        );
+                    }
+                }
+
+                // Add files to the deepest folder
+                if let Some(FileTreeNode::Folder { children, .. }) =
+                    folder_nodes.get_mut(folder_path)
+                {
+                    for (filename, idx) in files {
+                        let file_path = format!("{}/{}", folder_path, filename);
+                        children.push(FileTreeNode::File {
+                            path: file_path,
+                            name: filename.clone(),
+                            index: Some(*idx),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Now build the tree by nesting folders appropriately
+        // Folders with no parent go into root_nodes
+        // Folders with parents get added to their parent's children
+
+        // Sort folder paths by depth (shallow first) for proper nesting
+        let mut folder_paths: Vec<String> = folder_nodes.keys().cloned().collect();
+        folder_paths.sort_by_key(|p| p.matches('/').count());
+
+        // Process deepest folders first (reverse order) to build up the tree
+        for folder_path in folder_paths.iter().rev() {
+            if let Some(folder_node) = folder_nodes.remove(folder_path) {
+                // Find parent path
+                if let Some(last_sep) = folder_path.rfind('/') {
+                    let parent_path = &folder_path[..last_sep];
+                    if let Some(FileTreeNode::Folder { children, .. }) =
+                        folder_nodes.get_mut(parent_path)
+                    {
+                        children.push(folder_node);
+                    }
+                } else {
+                    // Top-level folder, add to root
+                    root_nodes.push(folder_node);
+                }
+            }
+        }
+
+        // Sort root nodes: folders first, then files, both alphabetically
+        root_nodes.sort_by(|a, b| match (a, b) {
+            (
+                FileTreeNode::Folder { name: a_name, .. },
+                FileTreeNode::Folder { name: b_name, .. },
+            ) => a_name.cmp(b_name),
+            (FileTreeNode::File { name: a_name, .. }, FileTreeNode::File { name: b_name, .. }) => {
+                a_name.cmp(b_name)
+            }
+            (FileTreeNode::Folder { .. }, FileTreeNode::File { .. }) => std::cmp::Ordering::Less,
+            (FileTreeNode::File { .. }, FileTreeNode::Folder { .. }) => std::cmp::Ordering::Greater,
+        });
+
+        root_nodes
+    }
+
+    /// Get the relative path of the current image (for tree selection).
+    pub fn current_relative_path(&self) -> Option<String> {
+        let path = self.current_image()?;
+
+        if !self.folder.as_os_str().is_empty() {
+            if let Ok(relative) = path.strip_prefix(&self.folder) {
+                return relative.to_str().map(String::from);
+            }
+        }
+
+        path.to_str().map(String::from)
     }
 }

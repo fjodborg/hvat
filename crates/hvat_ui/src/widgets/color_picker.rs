@@ -10,7 +10,7 @@ use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{ColorPickerDragging, ColorPickerState};
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use crate::widgets::overlay::OverlayCloseHelper;
 
 /// Predefined color palette for quick selection
@@ -437,9 +437,9 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
         renderer.end_overlay();
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         if !self.is_open {
-            return None;
+            return EventResult::None;
         }
 
         // Use consistent position calculation (applies alignment and offsets)
@@ -476,9 +476,9 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                         "ColorPicker: dragging slider, color={:?}",
                         self.current_color
                     );
-                    return self.on_change.call(self.current_color);
+                    return self.on_change.call(self.current_color).into();
                 }
-                None
+                EventResult::None
             }
 
             Event::MousePress {
@@ -496,11 +496,11 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                     self.update_slider_value(pos, x);
                     // Emit state change AND color change
                     if let Some(msg) = self.on_state_change.call(self.state) {
-                        return Some(msg);
+                        return EventResult::Message(msg);
                     }
-                    return self.on_change.call(self.current_color);
+                    return self.on_change.call(self.current_color).into();
                 }
-                None
+                EventResult::None
             }
 
             Event::MouseRelease {
@@ -516,28 +516,28 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                     self.state.stop_drag();
                     // Emit state change AND final color change
                     if let Some(msg) = self.on_state_change.call(self.state) {
-                        return Some(msg);
+                        return EventResult::Message(msg);
                     }
-                    return self.on_change.call(self.current_color);
+                    return self.on_change.call(self.current_color).into();
                 }
 
                 // Check palette click - this DOES close the picker
                 if let Some(index) = hit_test_palette(x, y) {
                     let color = COLOR_PALETTE[index];
                     log::debug!("ColorPicker: selected palette color {:?}", color);
-                    return self.on_select.call(color);
+                    return self.on_select.call(color).into();
                 }
 
-                None
+                EventResult::None
             }
 
             // Use OverlayCloseHelper for consistent close behavior
             _ if OverlayCloseHelper::should_close(&event, overlay_bounds) => {
                 log::debug!("ColorPicker: closing via OverlayCloseHelper");
-                self.on_close.clone()
+                self.on_close.clone().into()
             }
 
-            _ => None,
+            _ => EventResult::None,
         }
     }
 

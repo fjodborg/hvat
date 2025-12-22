@@ -4,7 +4,7 @@ use crate::constants::{line_height, DEFAULT_FONT_SIZE};
 use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 /// A color swatch widget that displays a color and optionally allows clicking to open a picker
 pub struct ColorSwatch<M> {
@@ -88,11 +88,11 @@ impl<M: Clone + 'static> Widget<M> for ColorSwatch<M> {
         renderer.stroke_rect(bounds, border_color, 1.0);
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         match event {
             Event::MouseMove { position, .. } => {
                 self.hovered = bounds.contains(position.0, position.1);
-                None
+                EventResult::None
             }
             Event::MouseRelease {
                 button: MouseButton::Left,
@@ -100,12 +100,12 @@ impl<M: Clone + 'static> Widget<M> for ColorSwatch<M> {
                 ..
             } => {
                 if bounds.contains(position.0, position.1) {
-                    self.on_click.clone()
+                    self.on_click.clone().into()
                 } else {
-                    None
+                    EventResult::None
                 }
             }
-            _ => None,
+            _ => EventResult::None,
         }
     }
 }

@@ -3,6 +3,7 @@
 use crate::element::Element;
 use crate::event::Event;
 use crate::layout::Bounds;
+use crate::widget::EventResult;
 
 /// Dispatch an event to child elements with overlay-aware priority.
 ///
@@ -18,23 +19,27 @@ use crate::layout::Bounds;
 /// * `container_bounds` - Absolute bounds of the container
 ///
 /// # Returns
-/// * `Some(M)` if a child consumed the event and returned a message
-/// * `None` if no child consumed the event
+/// * `EventResult::Message(M)` if a child consumed the event and returned a message
+/// * `EventResult::Redraw` if a child needs redraw but no message
+/// * `EventResult::None` if no child consumed the event
 pub fn dispatch_event_to_children<M: 'static>(
     children: &mut [Element<M>],
     child_bounds: &[Bounds],
     event: &Event,
     container_bounds: Bounds,
-) -> Option<M> {
+) -> EventResult<M> {
     // GlobalMousePress is special: it must be sent to ALL children (for blur handling)
     // and should not stop propagation on first handler
     if matches!(event, Event::GlobalMousePress { .. }) {
-        let mut result: Option<M> = None;
+        let mut result: EventResult<M> = EventResult::None;
         for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
             let absolute_bounds = translate_bounds(*bounds, container_bounds);
-            if let Some(msg) = child.on_event(event, absolute_bounds) {
-                // Keep the last message (or first, doesn't matter much for blur events)
-                result = Some(msg);
+            let child_result = child.on_event(event, absolute_bounds);
+            // Keep any result that needs redraw (Message takes priority over Redraw)
+            match (&result, &child_result) {
+                (_, EventResult::Message(_)) => result = child_result,
+                (EventResult::None, EventResult::Redraw) => result = child_result,
+                _ => {}
             }
         }
         return result;
@@ -49,23 +54,27 @@ pub fn dispatch_event_to_children<M: 'static>(
             for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
                 if child.has_active_overlay() {
                     let absolute_bounds = translate_bounds(*bounds, container_bounds);
-                    if let Some(msg) = child.on_event(event, absolute_bounds) {
+                    let result = child.on_event(event, absolute_bounds);
+                    if result.needs_redraw() {
                         // Overlay handled it (e.g., dropdown closed) - consume event
-                        return Some(msg);
+                        return result;
                     }
                 }
             }
-            // Overlay didn't produce a message, fall through to normal handling
+            // Overlay didn't produce a result, fall through to normal handling
         }
     }
 
     // FocusLost and CursorLeft should also be sent to all children
     if matches!(event, Event::FocusLost | Event::CursorLeft) {
-        let mut result: Option<M> = None;
+        let mut result: EventResult<M> = EventResult::None;
         for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
             let absolute_bounds = translate_bounds(*bounds, container_bounds);
-            if let Some(msg) = child.on_event(event, absolute_bounds) {
-                result = Some(msg);
+            let child_result = child.on_event(event, absolute_bounds);
+            match (&result, &child_result) {
+                (_, EventResult::Message(_)) => result = child_result,
+                (EventResult::None, EventResult::Redraw) => result = child_result,
+                _ => {}
             }
         }
         return result;
@@ -79,8 +88,9 @@ pub fn dispatch_event_to_children<M: 'static>(
         for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
             if child.has_active_overlay() {
                 let absolute_bounds = translate_bounds(*bounds, container_bounds);
-                if let Some(msg) = child.on_event(event, absolute_bounds) {
-                    return Some(msg);
+                let result = child.on_event(event, absolute_bounds);
+                if result.needs_redraw() {
+                    return result;
                 }
             }
         }
@@ -90,11 +100,12 @@ pub fn dispatch_event_to_children<M: 'static>(
                 continue; // Already tried
             }
             let absolute_bounds = translate_bounds(*bounds, container_bounds);
-            if let Some(msg) = child.on_event(event, absolute_bounds) {
-                return Some(msg);
+            let result = child.on_event(event, absolute_bounds);
+            if result.needs_redraw() {
+                return result;
             }
         }
-        return None;
+        return EventResult::None;
     }
 
     // Check if any child has an active overlay or active drag
@@ -113,7 +124,7 @@ pub fn dispatch_event_to_children<M: 'static>(
                 // Even if outside bounds, check if any child has an active overlay or drag
                 // Overlays (like dropdown popups) and drags need to receive events outside their layout bounds
                 if !has_overlay && !has_drag {
-                    return None;
+                    return EventResult::None;
                 }
             }
         }
@@ -125,12 +136,13 @@ pub fn dispatch_event_to_children<M: 'static>(
         for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
             if child.has_active_drag() {
                 let absolute_bounds = translate_bounds(*bounds, container_bounds);
-                if let Some(msg) = child.on_event(event, absolute_bounds) {
-                    return Some(msg);
+                let result = child.on_event(event, absolute_bounds);
+                if result.needs_redraw() {
+                    return result;
                 }
-                // Even if no message, consume MouseMove during drag to prevent other handlers
+                // Even if no redraw needed, consume MouseMove during drag to prevent other handlers
                 if matches!(event, Event::MouseMove { .. }) {
-                    return None;
+                    return EventResult::None;
                 }
             }
         }
@@ -150,24 +162,27 @@ pub fn dispatch_event_to_children<M: 'static>(
 
                 if check_bounds.contains(pos.0, pos.1) {
                     // Event is within overlay's capture area - dispatch and consume
-                    if let Some(msg) = child.on_event(event, absolute_bounds) {
-                        return Some(msg);
+                    let result = child.on_event(event, absolute_bounds);
+                    if result.needs_redraw() {
+                        return result;
                     }
-                    // Even if no message returned, consume the event to prevent passthrough
-                    return None;
+                    // Even if no redraw needed, consume the event to prevent passthrough
+                    return EventResult::None;
                 }
 
                 // For scroll events outside the overlay, still dispatch to the child
                 // so it can close itself (dropdowns should close on scroll outside)
                 if matches!(event, Event::MouseScroll { .. }) {
-                    if let Some(msg) = child.on_event(event, absolute_bounds) {
-                        return Some(msg);
+                    let result = child.on_event(event, absolute_bounds);
+                    if result.needs_redraw() {
+                        return result;
                     }
                 }
             } else {
                 // Non-positional event (keyboard, etc.) - dispatch normally
-                if let Some(msg) = child.on_event(event, absolute_bounds) {
-                    return Some(msg);
+                let result = child.on_event(event, absolute_bounds);
+                if result.needs_redraw() {
+                    return result;
                 }
             }
         }
@@ -180,12 +195,13 @@ pub fn dispatch_event_to_children<M: 'static>(
         }
 
         let absolute_bounds = translate_bounds(*bounds, container_bounds);
-        if let Some(msg) = child.on_event(event, absolute_bounds) {
-            return Some(msg);
+        let result = child.on_event(event, absolute_bounds);
+        if result.needs_redraw() {
+            return result;
         }
     }
 
-    None
+    EventResult::None
 }
 
 /// Translate relative child bounds to absolute bounds within the container.

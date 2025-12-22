@@ -7,7 +7,7 @@ use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{ScrollDragExt, ScrollState};
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use crate::widgets::scrollbar::{self, ScrollbarParams};
 
 /// Scroll direction for scrollable containers
@@ -271,18 +271,29 @@ impl<M: 'static> Scrollable<M> {
 
     /// Emit a state change if handler is set
     fn emit_change(&self) -> Option<M> {
-        self.on_scroll.call(self.state)
+        self.on_scroll.call(self.state).into()
     }
 
     /// Calculate viewport bounds from current layout bounds
     /// This is the visible content area excluding padding and scrollbars
     #[inline]
     fn calc_viewport_bounds(&self, bounds: Bounds) -> Bounds {
+        // Recalculate viewport size based on current bounds and scrollbar visibility
+        // This ensures we account for scrollbars correctly even if layout bounds differ
+        let scrollbar_width = self.scrollbar_config.width;
+        let show_v = self.show_vertical_scrollbar();
+        let show_h = self.show_horizontal_scrollbar();
+
+        let width =
+            bounds.width - self.padding.horizontal() - if show_v { scrollbar_width } else { 0.0 };
+        let height =
+            bounds.height - self.padding.vertical() - if show_h { scrollbar_width } else { 0.0 };
+
         Bounds::new(
             bounds.x + self.padding.left,
             bounds.y + self.padding.top,
-            self.viewport_size.width,
-            self.viewport_size.height,
+            width,
+            height,
         )
     }
 
@@ -604,7 +615,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
         }
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         // Calculate viewport bounds
         let viewport_bounds = self.calc_viewport_bounds(bounds);
 
@@ -627,7 +638,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             .start_drag_with(crate::state::ScrollDragData {
                                 thumb_offset: position.1 - thumb.y,
                             });
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
 
                     // Click on track (not thumb) - jump to position
@@ -643,7 +654,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             self.viewport_size.height,
                         );
                         self.clamp_scroll();
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                 }
 
@@ -655,7 +666,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             .start_drag_with(crate::state::ScrollDragData {
                                 thumb_offset: position.0 - thumb.x,
                             });
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
 
                     // Click on track (not thumb) - jump to position
@@ -671,7 +682,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             self.viewport_size.width,
                         );
                         self.clamp_scroll();
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                 }
             }
@@ -682,7 +693,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
             } => {
                 if self.state.drag.is_dragging() {
                     self.state.drag.stop_drag();
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
             }
 
@@ -691,7 +702,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 if self.state.drag.is_dragging() {
                     self.state.drag.stop_drag();
                     log::debug!("Scrollable: stopped dragging (cursor left window)");
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
             }
 
@@ -725,7 +736,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                                 self.viewport_size.height,
                             );
                             self.clamp_scroll();
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
 
@@ -742,7 +753,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                                 self.viewport_size.width,
                             );
                             self.clamp_scroll();
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     }
                 }
@@ -767,11 +778,12 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                         modifiers: *modifiers,
                         overlay_hint: *overlay_hint,
                     };
-                    if let Some(msg) = self.content.on_event(&adjusted_event, content_bounds) {
-                        return Some(msg);
+                    let result = self.content.on_event(&adjusted_event, content_bounds);
+                    if result.needs_redraw() {
+                        return result;
                     }
                     // Overlay handled it (even without message)
-                    return None;
+                    return EventResult::None;
                 }
 
                 // Only handle scroll within bounds for normal scrolling behavior
@@ -790,9 +802,10 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                             modifiers: *modifiers,
                             overlay_hint: *overlay_hint,
                         };
-                        if let Some(msg) = self.content.on_event(&adjusted_event, content_bounds) {
+                        let result = self.content.on_event(&adjusted_event, content_bounds);
+                        if result.needs_redraw() {
                             // Child consumed the scroll event
-                            return Some(msg);
+                            return result;
                         }
                     }
 
@@ -808,7 +821,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                         self.state.offset.1 += scroll_y;
                         self.clamp_scroll();
 
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                 }
             }
@@ -917,6 +930,6 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
             }
         }
 
-        None
+        EventResult::None
     }
 }

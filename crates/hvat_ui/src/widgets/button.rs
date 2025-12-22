@@ -4,7 +4,7 @@ use crate::constants::{char_width, line_height, BUTTON_PADDING, DEFAULT_FONT_SIZ
 use crate::event::{Event, MouseButton};
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 /// Button visual style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -205,19 +205,27 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         );
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         // Apply margin to get the clickable button area
         let button_bounds = bounds.shrink(self.margin);
 
         match event {
             Event::MouseMove { position, .. } => {
                 let inside = button_bounds.contains(position.0, position.1);
+                let old_state = self.state;
+
                 if inside && self.state != ButtonState::Pressed {
                     self.state = ButtonState::Hovered;
                 } else if !inside && self.state == ButtonState::Hovered {
                     self.state = ButtonState::Normal;
                 }
-                None
+
+                // Return Redraw if state changed
+                if self.state != old_state {
+                    EventResult::Redraw
+                } else {
+                    EventResult::None
+                }
             }
 
             Event::MousePress {
@@ -227,8 +235,10 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             } => {
                 if button_bounds.contains(position.0, position.1) {
                     self.state = ButtonState::Pressed;
+                    EventResult::Redraw
+                } else {
+                    EventResult::None
                 }
-                None
             }
 
             Event::MouseRelease {
@@ -248,13 +258,19 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                 // Fire click on release when button was pressed and mouse is still inside
                 // This is standard button behavior that allows users to cancel by moving off
                 if was_pressed && inside {
-                    self.on_click.clone()
+                    match self.on_click.clone() {
+                        Some(msg) => EventResult::Message(msg),
+                        None => EventResult::Redraw,
+                    }
+                } else if was_pressed {
+                    // State changed from Pressed to something else
+                    EventResult::Redraw
                 } else {
-                    None
+                    EventResult::None
                 }
             }
 
-            _ => None,
+            _ => EventResult::None,
         }
     }
 }

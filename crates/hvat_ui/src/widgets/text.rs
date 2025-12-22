@@ -4,7 +4,7 @@ use crate::constants::{char_width, line_height, DEFAULT_FONT_SIZE};
 use crate::event::Event;
 use crate::layout::{Alignment, Bounds, Length, Size};
 use crate::renderer::{Color, Renderer, TextAlign};
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 /// A text display widget
 pub struct Text {
@@ -177,7 +177,7 @@ impl<M> Widget<M> for Text {
         renderer.text(&self.content, text_x, bounds.y, self.size, self.color);
     }
 
-    fn on_event(&mut self, _event: &Event, _bounds: Bounds) -> Option<M> {
-        None // Text doesn't handle events
+    fn on_event(&mut self, _event: &Event, _bounds: Bounds) -> EventResult<M> {
+        EventResult::None // Text doesn't handle events
     }
 }

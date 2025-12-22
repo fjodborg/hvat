@@ -8,6 +8,7 @@ mod column;
 pub mod config;
 mod container_helpers;
 mod dropdown;
+mod file_tree;
 mod flex_layout;
 mod image_viewer;
 mod number_input;
@@ -28,6 +29,7 @@ pub use color_swatch::ColorSwatch;
 pub use column::Column;
 pub use config::BaseInputConfig;
 pub use dropdown::{Dropdown, DropdownConfig};
+pub use file_tree::{FileTree, FileTreeConfig, FileTreeNode};
 pub use image_viewer::{
     AnnotationOverlay, ImagePointerEvent, ImageViewer, OverlayShape, PointerEventKind,
 };

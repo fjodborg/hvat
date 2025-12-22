@@ -9,7 +9,7 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::DropdownState;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
 
 const SEARCH_BOX_BG_COLOR: Color = Color::rgba(0.12, 0.12, 0.15, 1.0);
@@ -481,7 +481,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
         }
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         let button_bounds = Bounds::new(
             bounds.x,
             bounds.y,
@@ -516,7 +516,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                             self.should_open_upward(screen_y, button_bounds.height);
                         self.state.open();
                     }
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
 
                 // Click on option in popup
@@ -528,20 +528,20 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                             log::debug!("Click on popup option {}", idx);
                             self.state.close();
                             if let Some(msg) = self.on_select.call(idx) {
-                                return Some(msg);
+                                return EventResult::Message(msg);
                             }
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                     } else {
                         log::debug!("Click on search box - ignoring");
-                        return None;
+                        return EventResult::None;
                     }
                 }
 
                 // Click outside - close
                 if self.state.is_open {
                     self.state.close();
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
             }
 
@@ -587,14 +587,14 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                             visible_count
                         );
 
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
 
                     // Scroll outside dropdown - close it
                     if !button_bounds.contains(position.0, position.1) {
                         log::debug!("Scroll outside dropdown - closing");
                         self.state.close();
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                 }
             }
@@ -604,16 +604,16 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     match key {
                         KeyCode::Escape => {
                             self.state.close();
-                            return self.emit_change();
+                            return self.emit_change().into();
                         }
                         KeyCode::Enter => {
                             if let Some(highlighted) = self.state.highlighted {
                                 if let Some(idx) = self.get_original_index(highlighted) {
                                     self.state.close();
                                     if let Some(msg) = self.on_select.call(idx) {
-                                        return Some(msg);
+                                        return EventResult::Message(msg);
                                     }
-                                    return self.emit_change();
+                                    return self.emit_change().into();
                                 }
                             }
                         }
@@ -625,7 +625,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                                 // Ensure highlighted item is visible
                                 self.state
                                     .ensure_highlighted_visible(self.config.max_visible_options);
-                                return self.emit_change();
+                                return self.emit_change().into();
                             }
                         }
                         KeyCode::Down => {
@@ -637,7 +637,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                                 // Ensure highlighted item is visible
                                 self.state
                                     .ensure_highlighted_visible(self.config.max_visible_options);
-                                return self.emit_change();
+                                return self.emit_change().into();
                             }
                         }
                         KeyCode::Backspace if self.searchable => {
@@ -655,7 +655,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                                     "Dropdown search backspace: '{}'",
                                     self.state.search_text
                                 );
-                                return self.emit_change();
+                                return self.emit_change().into();
                             }
                         }
                         _ => {}
@@ -673,7 +673,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     Some(0)
                 };
                 log::debug!("Dropdown search text: '{}'", self.state.search_text);
-                return self.emit_change();
+                return self.emit_change().into();
             }
 
             Event::GlobalMousePress { position, .. } => {
@@ -684,7 +684,7 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                     if !in_button && !in_popup {
                         log::debug!("GlobalMousePress outside dropdown - closing");
                         self.state.close();
-                        return self.emit_change();
+                        return self.emit_change().into();
                     }
                 }
             }
@@ -694,14 +694,14 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
                 if self.state.is_open {
                     log::debug!("FocusLost - closing dropdown");
                     self.state.close();
-                    return self.emit_change();
+                    return self.emit_change().into();
                 }
             }
 
             _ => {}
         }
 
-        None
+        EventResult::None
     }
 }
 

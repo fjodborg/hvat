@@ -8,7 +8,7 @@ use crate::element::Element;
 use crate::event::Event;
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::Renderer;
-use crate::widget::Widget;
+use crate::widget::{EventResult, Widget};
 
 use super::container_helpers;
 
@@ -149,7 +149,7 @@ impl<M: 'static> Widget<M> for FlexLayout<M> {
         container_helpers::draw_children(&self.children, &self.child_bounds, renderer, bounds);
     }
 
-    fn on_event(&mut self, event: &Event, bounds: Bounds) -> Option<M> {
+    fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
         container_helpers::dispatch_event_to_children(
             &mut self.children,
             &self.child_bounds,
