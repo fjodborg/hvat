@@ -12,6 +12,7 @@ use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{CollapsibleState, ScrollState};
 use crate::widget::Widget;
+use crate::widgets::scrollable::ScrollDirection;
 use crate::widgets::scrollbar::{self, draw_simple_vertical_scrollbar, ScrollbarParams};
 use crate::Context;
 
@@ -61,6 +62,7 @@ impl Default for CollapsibleConfig {
 /// - Chevron icon that rotates based on state
 /// - Custom header content support
 /// - Optional scrollable content with max_height
+/// - Supports vertical, horizontal, or both scroll directions
 pub struct Collapsible<M> {
     /// Internal state (cloned from external)
     state: CollapsibleState,
@@ -70,6 +72,8 @@ pub struct Collapsible<M> {
     content: Option<Element<M>>,
     /// Scroll state for scrollable content
     scroll_state: ScrollState,
+    /// Scroll direction (vertical, horizontal, or both)
+    scroll_direction: ScrollDirection,
     /// Width constraint
     width: Length,
     /// Configuration
@@ -86,8 +90,10 @@ pub struct Collapsible<M> {
     visible_content_height: f32,
     /// Internal: is hovering over header
     hover_header: bool,
-    /// Internal: is dragging the scrollbar
-    scrollbar_dragging: bool,
+    /// Internal: is dragging the vertical scrollbar
+    scrollbar_v_dragging: bool,
+    /// Internal: is dragging the horizontal scrollbar
+    scrollbar_h_dragging: bool,
     /// Internal: offset within thumb where drag started
     scrollbar_drag_offset: f32,
 }
@@ -99,6 +105,7 @@ impl<M> Default for Collapsible<M> {
             header_text: "Section".to_string(),
             content: None,
             scroll_state: ScrollState::default(),
+            scroll_direction: ScrollDirection::Vertical,
             width: Length::Fill(1.0),
             config: CollapsibleConfig::default(),
             on_toggle: Callback::none(),
@@ -107,7 +114,8 @@ impl<M> Default for Collapsible<M> {
             content_size: Size::ZERO,
             visible_content_height: 0.0,
             hover_header: false,
-            scrollbar_dragging: false,
+            scrollbar_v_dragging: false,
+            scrollbar_h_dragging: false,
             scrollbar_drag_offset: 0.0,
         }
     }
@@ -197,6 +205,12 @@ impl<M: 'static> Collapsible<M> {
         self
     }
 
+    /// Set the scroll direction (vertical, horizontal, or both)
+    pub fn scroll_direction(mut self, direction: ScrollDirection) -> Self {
+        self.scroll_direction = direction;
+        self
+    }
+
     /// Emit a toggle state change if handler is set
     fn emit_change(&self) -> Option<M> {
         self.on_toggle.call(self.state)
@@ -212,13 +226,44 @@ impl<M: 'static> Collapsible<M> {
         self.on_scroll.call(self.scroll_state)
     }
 
-    /// Check if content needs scrolling
-    fn needs_scrolling(&self) -> bool {
+    /// Check if content needs vertical scrolling
+    fn needs_vertical_scrolling(&self) -> bool {
+        if !matches!(
+            self.scroll_direction,
+            ScrollDirection::Vertical | ScrollDirection::Both
+        ) {
+            return false;
+        }
         if let Some(max_height) = self.config.max_content_height {
             self.content_size.height > max_height
         } else {
             false
         }
+    }
+
+    /// Check if content needs horizontal scrolling
+    fn needs_horizontal_scrolling(&self) -> bool {
+        if !matches!(
+            self.scroll_direction,
+            ScrollDirection::Horizontal | ScrollDirection::Both
+        ) {
+            return false;
+        }
+        // For horizontal scrolling, we need to check if content is wider than available width
+        // The available width is the widget width minus padding and vertical scrollbar (if shown)
+        let available_width = self.header_bounds.width
+            - self.config.content_padding * 2.0
+            - if self.needs_vertical_scrolling() {
+                SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING
+            } else {
+                0.0
+            };
+        self.content_size.width > available_width
+    }
+
+    /// Check if content needs any scrolling
+    fn needs_scrolling(&self) -> bool {
+        self.needs_vertical_scrolling() || self.needs_horizontal_scrolling()
     }
 
     /// Get the actual visible height (clamped by max_height if set)
@@ -263,7 +308,7 @@ impl<M: 'static> Collapsible<M> {
         let header_bounds = self.calc_header_bounds(layout_bounds);
         let padding = self.config.content_padding;
         Bounds::new(
-            layout_bounds.x + padding,
+            layout_bounds.x + padding - self.scroll_state.offset.0,
             header_bounds.bottom() + padding - self.scroll_state.offset.1,
             self.content_size.width,
             self.content_size.height,
@@ -283,10 +328,17 @@ impl<M: 'static> Collapsible<M> {
         )
     }
 
-    /// Get scrollbar track bounds relative to viewport
-    fn scrollbar_track_bounds(&self, viewport_bounds: Bounds) -> Bounds {
+    /// Get vertical scrollbar track bounds relative to viewport
+    fn v_scrollbar_track_bounds(&self, viewport_bounds: Bounds) -> Bounds {
         let scrollbar_x = viewport_bounds.right() - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING;
-        let scrollbar_height = viewport_bounds.height - SCROLLBAR_PADDING * 2.0;
+        // Reduce height if horizontal scrollbar is also shown
+        let scrollbar_height = viewport_bounds.height
+            - SCROLLBAR_PADDING * 2.0
+            - if self.needs_horizontal_scrolling() {
+                SCROLLBAR_WIDTH_COMPACT
+            } else {
+                0.0
+            };
         Bounds::new(
             scrollbar_x,
             viewport_bounds.y + SCROLLBAR_PADDING,
@@ -295,13 +347,52 @@ impl<M: 'static> Collapsible<M> {
         )
     }
 
-    /// Build ScrollbarParams for the collapsible's scrollbar
-    fn scrollbar_params(&self, viewport_bounds: Bounds) -> ScrollbarParams {
-        let track_bounds = self.scrollbar_track_bounds(viewport_bounds);
+    /// Get horizontal scrollbar track bounds relative to viewport
+    fn h_scrollbar_track_bounds(&self, viewport_bounds: Bounds) -> Bounds {
+        let scrollbar_y = viewport_bounds.bottom() - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING;
+        // Reduce width if vertical scrollbar is also shown
+        let scrollbar_width = viewport_bounds.width
+            - SCROLLBAR_PADDING * 2.0
+            - if self.needs_vertical_scrolling() {
+                SCROLLBAR_WIDTH_COMPACT
+            } else {
+                0.0
+            };
+        Bounds::new(
+            viewport_bounds.x + SCROLLBAR_PADDING,
+            scrollbar_y,
+            scrollbar_width,
+            SCROLLBAR_WIDTH_COMPACT,
+        )
+    }
+
+    /// Build ScrollbarParams for the vertical scrollbar
+    fn v_scrollbar_params(&self, viewport_bounds: Bounds) -> ScrollbarParams {
+        let track_bounds = self.v_scrollbar_track_bounds(viewport_bounds);
         ScrollbarParams::new(
             self.content_size.height,
             self.visible_content_height,
             self.scroll_state.offset.1,
+            track_bounds,
+        )
+        .with_bar_size(SCROLLBAR_WIDTH_COMPACT)
+        .with_min_thumb(SCROLLBAR_MIN_THUMB)
+    }
+
+    /// Build ScrollbarParams for the horizontal scrollbar
+    fn h_scrollbar_params(&self, viewport_bounds: Bounds) -> ScrollbarParams {
+        let track_bounds = self.h_scrollbar_track_bounds(viewport_bounds);
+        let visible_width = viewport_bounds.width
+            - self.config.content_padding * 2.0
+            - if self.needs_vertical_scrolling() {
+                SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING
+            } else {
+                0.0
+            };
+        ScrollbarParams::new(
+            self.content_size.width,
+            visible_width,
+            self.scroll_state.offset.0,
             track_bounds,
         )
         .with_bar_size(SCROLLBAR_WIDTH_COMPACT)
@@ -318,7 +409,9 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
     fn has_active_drag(&self) -> bool {
         // Forward to content - needed for widgets like ColorPicker that have internal drag state
-        self.scrollbar_dragging || self.content.as_ref().map_or(false, |c| c.has_active_drag())
+        self.scrollbar_v_dragging
+            || self.scrollbar_h_dragging
+            || self.content.as_ref().map_or(false, |c| c.has_active_drag())
     }
 
     fn capture_bounds(&self, layout_bounds: Bounds) -> Option<Bounds> {
@@ -444,18 +537,44 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                     renderer.pop_clip();
 
-                    // Draw scrollbar - note: drawn AFTER pop_clip so it's not clipped
-                    let track_bounds = self.scrollbar_track_bounds(viewport_bounds);
-                    log::debug!(
-                        "Collapsible '{}' scrollbar: viewport={:?}, track={:?}, content_h={}, visible_h={}, offset={}",
-                        self.header_text,
-                        viewport_bounds,
-                        track_bounds,
-                        self.content_size.height,
-                        self.visible_content_height,
-                        self.scroll_state.offset.1
-                    );
-                    self.draw_scrollbar(renderer, viewport_bounds);
+                    // Draw scrollbars - note: drawn AFTER pop_clip so they're not clipped
+                    if self.needs_vertical_scrolling() {
+                        let track_bounds = self.v_scrollbar_track_bounds(viewport_bounds);
+                        log::debug!(
+                            "Collapsible '{}' v_scrollbar: viewport={:?}, track={:?}, content_h={}, visible_h={}, offset={}",
+                            self.header_text,
+                            viewport_bounds,
+                            track_bounds,
+                            self.content_size.height,
+                            self.visible_content_height,
+                            self.scroll_state.offset.1
+                        );
+                        self.draw_v_scrollbar(renderer, viewport_bounds);
+                    }
+
+                    if self.needs_horizontal_scrolling() {
+                        let track_bounds = self.h_scrollbar_track_bounds(viewport_bounds);
+                        log::debug!(
+                            "Collapsible '{}' h_scrollbar: viewport={:?}, track={:?}, content_w={}, offset={}",
+                            self.header_text,
+                            viewport_bounds,
+                            track_bounds,
+                            self.content_size.width,
+                            self.scroll_state.offset.0
+                        );
+                        self.draw_h_scrollbar(renderer, viewport_bounds);
+                    }
+
+                    // Draw corner if both scrollbars visible
+                    if self.needs_vertical_scrolling() && self.needs_horizontal_scrolling() {
+                        let corner_bounds = Bounds::new(
+                            viewport_bounds.right() - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING,
+                            viewport_bounds.bottom() - SCROLLBAR_WIDTH_COMPACT - SCROLLBAR_PADDING,
+                            SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING,
+                            SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING,
+                        );
+                        renderer.fill_rect(corner_bounds, Color::rgba(0.15, 0.15, 0.18, 0.5));
+                    }
                 } else {
                     // No scrolling needed, draw content directly
                     let content_bounds = self.calc_content_bounds_for_events(bounds);
@@ -490,43 +609,97 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
                 // Check for scrollbar interaction first
                 if self.state.is_expanded && self.needs_scrolling() {
-                    let params = self.scrollbar_params(viewport_bounds);
+                    // Check vertical scrollbar
+                    if self.needs_vertical_scrolling() {
+                        let params = self.v_scrollbar_params(viewport_bounds);
 
-                    // Check if click is on the scrollbar track area (wider hit area for usability)
-                    let scrollbar_hit_area = Bounds::new(
-                        params.track_bounds.x - SCROLLBAR_PADDING,
-                        params.track_bounds.y,
-                        params.track_bounds.width + SCROLLBAR_PADDING * 2.0,
-                        params.track_bounds.height,
-                    );
+                        // Check if click is on the scrollbar track area (wider hit area for usability)
+                        let scrollbar_hit_area = Bounds::new(
+                            params.track_bounds.x - SCROLLBAR_PADDING,
+                            params.track_bounds.y,
+                            params.track_bounds.width + SCROLLBAR_PADDING * 2.0,
+                            params.track_bounds.height,
+                        );
 
-                    if scrollbar_hit_area.contains(position.0, position.1) {
-                        if let Some(thumb) = scrollbar::calculate_vertical_thumb(&params) {
-                            if thumb.bounds.contains(position.0, position.1) {
-                                // Clicked on thumb - start dragging
-                                self.scrollbar_dragging = true;
-                                self.scrollbar_drag_offset = position.1 - thumb.bounds.y;
-                                log::debug!(
-                                    "Collapsible scrollbar drag started, offset={}",
-                                    self.scrollbar_drag_offset
-                                );
-                            } else {
-                                // Clicked on track - jump to position (center thumb on click)
-                                let thumb_y = position.1 - thumb.bounds.height / 2.0;
-                                self.scroll_state.offset.1 = scrollbar::thumb_y_to_scroll_offset(
-                                    thumb_y,
-                                    params.track_bounds,
-                                    thumb.bounds.height,
-                                    self.content_size.height,
-                                    self.visible_content_height,
-                                );
-                                log::debug!(
-                                    "Collapsible scrollbar track clicked, new offset={}",
-                                    self.scroll_state.offset.1
-                                );
+                        if scrollbar_hit_area.contains(position.0, position.1) {
+                            if let Some(thumb) = scrollbar::calculate_vertical_thumb(&params) {
+                                if thumb.bounds.contains(position.0, position.1) {
+                                    // Clicked on thumb - start dragging
+                                    self.scrollbar_v_dragging = true;
+                                    self.scrollbar_drag_offset = position.1 - thumb.bounds.y;
+                                    log::debug!(
+                                        "Collapsible v_scrollbar drag started, offset={}",
+                                        self.scrollbar_drag_offset
+                                    );
+                                } else {
+                                    // Clicked on track - jump to position (center thumb on click)
+                                    let thumb_y = position.1 - thumb.bounds.height / 2.0;
+                                    self.scroll_state.offset.1 =
+                                        scrollbar::thumb_y_to_scroll_offset(
+                                            thumb_y,
+                                            params.track_bounds,
+                                            thumb.bounds.height,
+                                            self.content_size.height,
+                                            self.visible_content_height,
+                                        );
+                                    log::debug!(
+                                        "Collapsible v_scrollbar track clicked, new offset={}",
+                                        self.scroll_state.offset.1
+                                    );
+                                }
                             }
+                            return None;
                         }
-                        return None;
+                    }
+
+                    // Check horizontal scrollbar
+                    if self.needs_horizontal_scrolling() {
+                        let params = self.h_scrollbar_params(viewport_bounds);
+                        let visible_width = viewport_bounds.width
+                            - self.config.content_padding * 2.0
+                            - if self.needs_vertical_scrolling() {
+                                SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING
+                            } else {
+                                0.0
+                            };
+
+                        // Check if click is on the scrollbar track area (wider hit area for usability)
+                        let scrollbar_hit_area = Bounds::new(
+                            params.track_bounds.x,
+                            params.track_bounds.y - SCROLLBAR_PADDING,
+                            params.track_bounds.width,
+                            params.track_bounds.height + SCROLLBAR_PADDING * 2.0,
+                        );
+
+                        if scrollbar_hit_area.contains(position.0, position.1) {
+                            if let Some(thumb) = scrollbar::calculate_horizontal_thumb(&params) {
+                                if thumb.bounds.contains(position.0, position.1) {
+                                    // Clicked on thumb - start dragging
+                                    self.scrollbar_h_dragging = true;
+                                    self.scrollbar_drag_offset = position.0 - thumb.bounds.x;
+                                    log::debug!(
+                                        "Collapsible h_scrollbar drag started, offset={}",
+                                        self.scrollbar_drag_offset
+                                    );
+                                } else {
+                                    // Clicked on track - jump to position (center thumb on click)
+                                    let thumb_x = position.0 - thumb.bounds.width / 2.0;
+                                    self.scroll_state.offset.0 =
+                                        scrollbar::thumb_x_to_scroll_offset(
+                                            thumb_x,
+                                            params.track_bounds,
+                                            thumb.bounds.width,
+                                            self.content_size.width,
+                                            visible_width,
+                                        );
+                                    log::debug!(
+                                        "Collapsible h_scrollbar track clicked, new offset={}",
+                                        self.scroll_state.offset.0
+                                    );
+                                }
+                            }
+                            return None;
+                        }
                     }
                 }
 
@@ -539,12 +712,13 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                     if in_viewport || *overlay_hint {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
-                        let scroll_offset = self.scroll_state.offset.1;
+                        let scroll_offset_x = self.scroll_state.offset.0;
+                        let scroll_offset_y = self.scroll_state.offset.1;
 
                         if let Some(content) = &mut self.content {
                             // Adjust position for scroll offset
                             let adjusted_pos = if needs_scroll {
-                                (position.0, position.1 + scroll_offset)
+                                (position.0 + scroll_offset_x, position.1 + scroll_offset_y)
                             } else {
                                 *position
                             };
@@ -573,9 +747,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 // The overlay hint tells us if the cursor is over an overlay (e.g., dropdown popup)
                 self.hover_header = header_bounds.contains(position.0, position.1) && !overlay_hint;
 
-                // Handle scrollbar dragging
-                if self.scrollbar_dragging && self.state.is_expanded && self.needs_scrolling() {
-                    let params = self.scrollbar_params(viewport_bounds);
+                // Handle vertical scrollbar dragging
+                if self.scrollbar_v_dragging
+                    && self.state.is_expanded
+                    && self.needs_vertical_scrolling()
+                {
+                    let params = self.v_scrollbar_params(viewport_bounds);
                     if let Some(thumb) = scrollbar::calculate_vertical_thumb(&params) {
                         let thumb_y = position.1 - self.scrollbar_drag_offset;
                         self.scroll_state.offset.1 = scrollbar::thumb_y_to_scroll_offset(
@@ -586,8 +763,38 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             self.visible_content_height,
                         );
                         log::debug!(
-                            "Collapsible scrollbar dragging, offset={}",
+                            "Collapsible v_scrollbar dragging, offset={}",
                             self.scroll_state.offset.1
+                        );
+                    }
+                    return None;
+                }
+
+                // Handle horizontal scrollbar dragging
+                if self.scrollbar_h_dragging
+                    && self.state.is_expanded
+                    && self.needs_horizontal_scrolling()
+                {
+                    let params = self.h_scrollbar_params(viewport_bounds);
+                    let visible_width = viewport_bounds.width
+                        - self.config.content_padding * 2.0
+                        - if self.needs_vertical_scrolling() {
+                            SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING
+                        } else {
+                            0.0
+                        };
+                    if let Some(thumb) = scrollbar::calculate_horizontal_thumb(&params) {
+                        let thumb_x = position.0 - self.scrollbar_drag_offset;
+                        self.scroll_state.offset.0 = scrollbar::thumb_x_to_scroll_offset(
+                            thumb_x,
+                            params.track_bounds,
+                            thumb.bounds.width,
+                            self.content_size.width,
+                            visible_width,
+                        );
+                        log::debug!(
+                            "Collapsible h_scrollbar dragging, offset={}",
+                            self.scroll_state.offset.0
                         );
                     }
                     return None;
@@ -604,11 +811,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                     if in_viewport || *overlay_hint || content_has_drag {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
-                        let scroll_offset = self.scroll_state.offset.1;
+                        let scroll_offset_x = self.scroll_state.offset.0;
+                        let scroll_offset_y = self.scroll_state.offset.1;
 
                         if let Some(content) = &mut self.content {
                             let adjusted_pos = if needs_scroll {
-                                (position.0, position.1 + scroll_offset)
+                                (position.0 + scroll_offset_x, position.1 + scroll_offset_y)
                             } else {
                                 *position
                             };
@@ -640,12 +848,13 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                     if *overlay_hint || in_viewport {
                         // Extract values before mutable borrow
                         let needs_scroll = self.needs_scrolling();
-                        let scroll_offset = self.scroll_state.offset.1;
+                        let scroll_offset_x = self.scroll_state.offset.0;
+                        let scroll_offset_y = self.scroll_state.offset.1;
                         let content_bounds_val = content_bounds; // Use already calculated value
 
                         if let Some(content) = &mut self.content {
                             let adjusted_pos = if needs_scroll {
-                                (position.0, position.1 + scroll_offset)
+                                (position.0 + scroll_offset_x, position.1 + scroll_offset_y)
                             } else {
                                 *position
                             };
@@ -673,22 +882,59 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                         && self.needs_scrolling()
                         && viewport_bounds.contains(position.0, position.1)
                     {
-                        let max_scroll =
-                            (self.content_size.height - self.visible_content_height).max(0.0);
-                        // Negative delta.1 means scroll down (content moves up), positive means scroll up
-                        let scroll_amount = -delta.1 * SCROLL_SPEED;
-                        let old_offset = self.scroll_state.offset.1;
-                        self.scroll_state.offset.1 =
-                            (self.scroll_state.offset.1 + scroll_amount).clamp(0.0, max_scroll);
+                        let mut scrolled = false;
 
-                        // Only emit if we actually scrolled (prevents parent from scrolling too)
-                        if (self.scroll_state.offset.1 - old_offset).abs() > 0.001 {
-                            log::debug!(
-                                "Collapsible scroll: delta={}, offset={}, max={}",
-                                delta.1,
-                                self.scroll_state.offset.1,
-                                max_scroll
-                            );
+                        // Handle vertical scrolling
+                        if self.needs_vertical_scrolling() && delta.1.abs() > 0.001 {
+                            let max_scroll_y =
+                                (self.content_size.height - self.visible_content_height).max(0.0);
+                            // Negative delta.1 means scroll down (content moves up), positive means scroll up
+                            let scroll_amount = -delta.1 * SCROLL_SPEED;
+                            let old_offset = self.scroll_state.offset.1;
+                            self.scroll_state.offset.1 = (self.scroll_state.offset.1
+                                + scroll_amount)
+                                .clamp(0.0, max_scroll_y);
+
+                            if (self.scroll_state.offset.1 - old_offset).abs() > 0.001 {
+                                log::debug!(
+                                    "Collapsible v_scroll: delta={}, offset={}, max={}",
+                                    delta.1,
+                                    self.scroll_state.offset.1,
+                                    max_scroll_y
+                                );
+                                scrolled = true;
+                            }
+                        }
+
+                        // Handle horizontal scrolling (Shift+scroll or horizontal scroll wheel)
+                        if self.needs_horizontal_scrolling() && delta.0.abs() > 0.001 {
+                            let visible_width = viewport_bounds.width
+                                - self.config.content_padding * 2.0
+                                - if self.needs_vertical_scrolling() {
+                                    SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING
+                                } else {
+                                    0.0
+                                };
+                            let max_scroll_x = (self.content_size.width - visible_width).max(0.0);
+                            // Negative delta.0 means scroll right (content moves left), positive means scroll left
+                            let scroll_amount = -delta.0 * SCROLL_SPEED;
+                            let old_offset = self.scroll_state.offset.0;
+                            self.scroll_state.offset.0 = (self.scroll_state.offset.0
+                                + scroll_amount)
+                                .clamp(0.0, max_scroll_x);
+
+                            if (self.scroll_state.offset.0 - old_offset).abs() > 0.001 {
+                                log::debug!(
+                                    "Collapsible h_scroll: delta={}, offset={}, max={}",
+                                    delta.0,
+                                    self.scroll_state.offset.0,
+                                    max_scroll_x
+                                );
+                                scrolled = true;
+                            }
+                        }
+
+                        if scrolled {
                             // Emit scroll change to indicate we consumed the event
                             return self.emit_scroll_change();
                         }
@@ -699,9 +945,13 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
             Event::CursorLeft => {
                 // Cursor left window - release any drag state
-                if self.scrollbar_dragging {
-                    self.scrollbar_dragging = false;
-                    log::debug!("Collapsible scrollbar drag ended (cursor left window)");
+                if self.scrollbar_v_dragging {
+                    self.scrollbar_v_dragging = false;
+                    log::debug!("Collapsible v_scrollbar drag ended (cursor left window)");
+                }
+                if self.scrollbar_h_dragging {
+                    self.scrollbar_h_dragging = false;
+                    log::debug!("Collapsible h_scrollbar drag ended (cursor left window)");
                 }
                 // Forward to content to release its drag states
                 let content_bounds = self.calc_content_bounds_for_events(bounds);
@@ -718,9 +968,14 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 ..
             } => {
                 // Stop scrollbar dragging
-                if self.scrollbar_dragging {
-                    self.scrollbar_dragging = false;
-                    log::debug!("Collapsible scrollbar drag ended");
+                if self.scrollbar_v_dragging {
+                    self.scrollbar_v_dragging = false;
+                    log::debug!("Collapsible v_scrollbar drag ended");
+                    return None;
+                }
+                if self.scrollbar_h_dragging {
+                    self.scrollbar_h_dragging = false;
+                    log::debug!("Collapsible h_scrollbar drag ended");
                     return None;
                 }
 
@@ -730,12 +985,13 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 if self.state.is_expanded && (in_viewport || *overlay_hint || content_has_drag) {
                     // Extract values before mutable borrow
                     let needs_scroll = self.needs_scrolling();
-                    let scroll_offset = self.scroll_state.offset.1;
+                    let scroll_offset_x = self.scroll_state.offset.0;
+                    let scroll_offset_y = self.scroll_state.offset.1;
                     let content_bounds = self.calc_content_bounds_for_events(bounds);
 
                     if let Some(content) = &mut self.content {
                         let adjusted_pos = if needs_scroll {
-                            (position.0, position.1 + scroll_offset)
+                            (position.0 + scroll_offset_x, position.1 + scroll_offset_y)
                         } else {
                             *position
                         };
@@ -798,9 +1054,9 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 }
 
 impl<M: 'static> Collapsible<M> {
-    /// Draw the scrollbar for scrollable content
-    fn draw_scrollbar(&self, renderer: &mut Renderer, viewport_bounds: Bounds) {
-        let track_bounds = self.scrollbar_track_bounds(viewport_bounds);
+    /// Draw the vertical scrollbar for scrollable content
+    fn draw_v_scrollbar(&self, renderer: &mut Renderer, viewport_bounds: Bounds) {
+        let track_bounds = self.v_scrollbar_track_bounds(viewport_bounds);
 
         draw_simple_vertical_scrollbar(
             renderer,
@@ -808,6 +1064,27 @@ impl<M: 'static> Collapsible<M> {
             self.content_size.height,
             self.visible_content_height,
             self.scroll_state.offset.1,
+            SCROLLBAR_WIDTH_COMPACT,
+        );
+    }
+
+    /// Draw the horizontal scrollbar for scrollable content
+    fn draw_h_scrollbar(&self, renderer: &mut Renderer, viewport_bounds: Bounds) {
+        let track_bounds = self.h_scrollbar_track_bounds(viewport_bounds);
+        let visible_width = viewport_bounds.width
+            - self.config.content_padding * 2.0
+            - if self.needs_vertical_scrolling() {
+                SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING
+            } else {
+                0.0
+            };
+
+        scrollbar::draw_simple_horizontal_scrollbar(
+            renderer,
+            track_bounds,
+            self.content_size.width,
+            visible_width,
+            self.scroll_state.offset.0,
             SCROLLBAR_WIDTH_COMPACT,
         );
     }

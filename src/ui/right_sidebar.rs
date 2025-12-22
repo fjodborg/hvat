@@ -220,6 +220,7 @@ impl HvatApp {
         let collapsible_files = Collapsible::new("File List")
             .state(&file_list_state)
             .scroll_state(&file_list_scroll)
+            .scroll_direction(ScrollDirection::Both)
             .width(Length::Fill(1.0))
             .max_height(FILE_LIST_MAX_HEIGHT)
             .on_toggle(Message::FileListToggled)

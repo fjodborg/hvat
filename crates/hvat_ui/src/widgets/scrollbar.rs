@@ -372,6 +372,36 @@ pub fn draw_simple_vertical_scrollbar(
     }
 }
 
+/// Draw a simple horizontal scrollbar with default colors (no hover/drag states)
+///
+/// This is a convenience function for widgets that don't need interactive scrollbar states
+/// (like dropdown and collapsible which handle scrolling via other means).
+pub fn draw_simple_horizontal_scrollbar(
+    renderer: &mut Renderer,
+    track_bounds: Bounds,
+    content_size: f32,
+    viewport_size: f32,
+    scroll_offset: f32,
+    bar_height: f32,
+) {
+    // Draw track
+    renderer.fill_rect(track_bounds, Color::SCROLLBAR_TRACK);
+
+    // Calculate and draw thumb if scrolling is needed
+    let max_scroll = (content_size - viewport_size).max(0.0);
+    if max_scroll > 0.0 && content_size > 0.0 {
+        let visible_ratio = (viewport_size / content_size).min(1.0);
+        let thumb_width = (track_bounds.width * visible_ratio).max(SCROLLBAR_MIN_THUMB);
+
+        let scroll_ratio = (scroll_offset / max_scroll).clamp(0.0, 1.0);
+        let available_travel = track_bounds.width - thumb_width;
+        let thumb_x = track_bounds.x + scroll_ratio * available_travel;
+
+        let thumb_bounds = Bounds::new(thumb_x, track_bounds.y, thumb_width, bar_height);
+        renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
+    }
+}
+
 // =============================================================================
 // Hit Testing
 // =============================================================================
