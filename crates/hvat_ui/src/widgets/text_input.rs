@@ -323,13 +323,11 @@ impl<M: Clone + 'static> Widget<M> for TextInput<M> {
                     }
 
                     return self.emit_change();
-                } else if self.state.is_focused {
-                    // Clicked outside - blur
-                    self.state.is_focused = false;
-                    self.state.selection = None;
-                    log::debug!("TextInput: blurred");
-                    return self.emit_change();
                 }
+
+                // Note: Blur on outside click is handled by GlobalMousePress, not here.
+                // If we blur and return here, it consumes the event and prevents
+                // other widgets (like buttons) from receiving the click.
 
                 None
             }

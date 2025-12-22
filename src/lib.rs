@@ -6,6 +6,7 @@ mod app;
 mod constants;
 mod data;
 pub mod format;
+mod keybindings;
 pub mod licenses;
 mod message;
 mod model;

@@ -26,6 +26,7 @@ use crate::constants::{
 };
 use crate::data::HyperspectralData;
 use crate::format::{AutoSaveManager, ExportOptions, FormatRegistry, ProjectData};
+use crate::keybindings::{KeyBindings, KeybindTarget};
 use crate::message::Message;
 use crate::model::{
     Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, EditState,
@@ -352,6 +353,10 @@ pub struct HvatApp {
     /// Default import folder path
     pub(crate) import_folder: String,
     pub(crate) import_folder_state: TextInputState,
+    /// Customizable keybindings
+    pub(crate) keybindings: KeyBindings,
+    /// Whether we're currently capturing a key for rebinding
+    pub(crate) capturing_keybind: Option<KeybindTarget>,
 
     // Format system
     /// Format registry with all supported formats
@@ -481,6 +486,8 @@ impl HvatApp {
             export_folder_state: TextInputState::default(),
             import_folder: String::new(),
             import_folder_state: TextInputState::default(),
+            keybindings: KeyBindings::default(),
+            capturing_keybind: None,
 
             format_registry: FormatRegistry::new(),
             auto_save: AutoSaveManager::new(),
@@ -597,10 +604,48 @@ impl HvatApp {
         self.categories.iter_mut().find(|c| c.id == id)
     }
 
-    /// Handle keyboard events for undo/redo and annotation shortcuts.
-    fn handle_key_event(event: &Event) -> Option<Message> {
+    /// Check if any text input field is currently focused.
+    fn any_text_input_focused(&self) -> bool {
+        // Text input fields
+        self.category_name_input_state.is_focused
+            || self.tag_input_state.is_focused
+            || self.export_folder_state.is_focused
+            || self.import_folder_state.is_focused
+            // Slider text inputs
+            || self.gpu_preload_slider.input_focused
+            || self.red_band_slider.input_focused
+            || self.green_band_slider.input_focused
+            || self.blue_band_slider.input_focused
+            || self.brightness_slider.input_focused
+            || self.contrast_slider.input_focused
+            || self.gamma_slider.input_focused
+            || self.hue_slider.input_focused
+    }
+
+    /// Handle keyboard events for undo/redo, annotation shortcuts, and custom keybindings.
+    fn handle_key_event(&self, event: &Event) -> Option<Message> {
         if let Event::KeyPress { key, modifiers, .. } = event {
-            // Ctrl+key shortcuts
+            // If we're capturing a keybind, route to key capture handler
+            if self.capturing_keybind.is_some() {
+                // Escape cancels capture, any other key sets the binding
+                if *key == KeyCode::Escape {
+                    return Some(Message::CancelCapturingKeybind);
+                }
+                return Some(Message::KeyCaptured(*key));
+            }
+
+            // If a text input is focused, don't process hotkeys (let the text input handle them)
+            // Exception: Escape should still work to cancel/unfocus
+            if self.any_text_input_focused() {
+                // Only allow Escape through to cancel annotation/unfocus
+                if *key == KeyCode::Escape {
+                    return Some(Message::CancelAnnotation);
+                }
+                // All other keys go to the text input
+                return None;
+            }
+
+            // Ctrl+key shortcuts (hardcoded, not customizable)
             if modifiers.ctrl {
                 match key {
                     KeyCode::Z if modifiers.shift => return Some(Message::Redo),
@@ -610,12 +655,35 @@ impl HvatApp {
                 }
             }
 
-            // Non-modifier shortcuts for annotations
+            // Non-modifier shortcuts for annotations (hardcoded)
             match key {
                 KeyCode::Escape => return Some(Message::CancelAnnotation),
                 KeyCode::Delete | KeyCode::Backspace => return Some(Message::DeleteAnnotation),
                 KeyCode::Enter => return Some(Message::FinishPolygon),
                 _ => {}
+            }
+
+            // Only process custom keybindings when no modifiers are pressed
+            if !modifiers.ctrl && !modifiers.alt && !modifiers.super_key {
+                // Check for tool hotkeys
+                if let Some(tool) = self.keybindings.tool_for_key(*key) {
+                    return Some(Message::ToolSelected(tool));
+                }
+
+                // Check for category hotkeys
+                if let Some(index) = self.keybindings.category_index_for_key(*key) {
+                    // Map index to category ID
+                    if let Some(category) = self.categories.get(index) {
+                        // If an annotation is selected, change its category instead
+                        let image_data = self.image_data_store.get(&self.current_image_path());
+                        let has_selected = image_data.annotations.iter().any(|a| a.selected);
+                        if has_selected {
+                            return Some(Message::ChangeSelectedAnnotationCategory(category.id));
+                        } else {
+                            return Some(Message::CategorySelected(category.id));
+                        }
+                    }
+                }
             }
         }
         None
@@ -1232,6 +1300,10 @@ impl HvatApp {
 
         match kind {
             PointerEventKind::DragStart => {
+                // Deselect all annotations when starting to draw
+                for ann in &mut image_data.annotations {
+                    ann.selected = false;
+                }
                 // Start new bounding box
                 image_data.drawing_state = DrawingState::BoundingBox {
                     start_x: x,
@@ -1329,6 +1401,10 @@ impl HvatApp {
 
         match &mut image_data.drawing_state {
             DrawingState::Idle => {
+                // Deselect all annotations when starting to draw
+                for ann in &mut image_data.annotations {
+                    ann.selected = false;
+                }
                 image_data.drawing_state = DrawingState::Polygon {
                     vertices: vec![(x, y)],
                 };
@@ -1344,7 +1420,10 @@ impl HvatApp {
                 );
             }
             _ => {
-                // Wrong drawing state, reset
+                // Wrong drawing state, reset - also deselect
+                for ann in &mut image_data.annotations {
+                    ann.selected = false;
+                }
                 image_data.drawing_state = DrawingState::Polygon {
                     vertices: vec![(x, y)],
                 };
@@ -1401,6 +1480,11 @@ impl HvatApp {
 
         let path = self.current_image_path();
         let image_data = self.image_data_store.get_or_create(&path);
+
+        // Deselect all annotations when creating a point
+        for ann in &mut image_data.annotations {
+            ann.selected = false;
+        }
 
         let shape = AnnotationShape::Point { x, y };
         let annotation =
@@ -1714,6 +1798,12 @@ impl Application for HvatApp {
                 self.tools_collapsed = state;
             }
             Message::ToolSelected(tool) => {
+                // Deselect all annotations when switching tools
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                for ann in &mut image_data.annotations {
+                    ann.selected = false;
+                }
                 self.selected_tool = tool;
                 log::info!("Tool selected: {:?}", tool);
             }
@@ -1723,8 +1813,33 @@ impl Application for HvatApp {
                 self.categories_collapsed = state;
             }
             Message::CategorySelected(id) => {
-                self.selected_category = id;
-                log::info!("Category selected: {}", id);
+                // Check if there are selected annotations - if so, change their category
+                // but do NOT change the default category
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                let has_selected = image_data.annotations.iter().any(|a| a.selected);
+                if has_selected {
+                    // Push undo point before changing category
+                    self.push_annotation_undo_point();
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    let mut changed_count = 0;
+                    for annotation in &mut image_data.annotations {
+                        if annotation.selected {
+                            annotation.category_id = id;
+                            changed_count += 1;
+                        }
+                    }
+                    self.auto_save.mark_dirty();
+                    log::info!(
+                        "Changed category of {} annotation(s) to {} (default unchanged)",
+                        changed_count,
+                        id
+                    );
+                } else {
+                    // No annotation selected - change the default category for new annotations
+                    self.selected_category = id;
+                    log::info!("Default category changed to: {}", id);
+                }
             }
             Message::AddCategory => {
                 let new_id = self.categories.iter().map(|c| c.id).max().unwrap_or(0) + 1;
@@ -2001,6 +2116,31 @@ impl Application for HvatApp {
             Message::FinishPolygon => {
                 self.finalize_polygon();
             }
+            Message::ChangeSelectedAnnotationCategory(category_id) => {
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                // Check if there are any selected annotations
+                let has_selected = image_data.annotations.iter().any(|a| a.selected);
+                if has_selected {
+                    // Push undo point before changing category
+                    self.push_annotation_undo_point();
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    let mut changed_count = 0;
+                    for annotation in &mut image_data.annotations {
+                        if annotation.selected {
+                            annotation.category_id = category_id;
+                            changed_count += 1;
+                        }
+                    }
+                    self.auto_save.mark_dirty();
+                    // Note: We do NOT change selected_category here - that's the default for new annotations
+                    log::info!(
+                        "Changed category of {} annotation(s) to {} (default unchanged)",
+                        changed_count,
+                        category_id
+                    );
+                }
+            }
 
             // Settings - GPU Preloading
             Message::GpuPreloadCountChanged(state) => {
@@ -2204,6 +2344,35 @@ impl Application for HvatApp {
                 self.drag_hover_active = false;
                 log::debug!("Drag hover ended");
             }
+
+            // Keybinding configuration
+            Message::StartCapturingKeybind(target) => {
+                self.capturing_keybind = Some(target);
+                log::info!("Started capturing keybind for {:?}", target);
+            }
+            Message::CancelCapturingKeybind => {
+                self.capturing_keybind = None;
+                log::info!("Cancelled keybind capture");
+            }
+            Message::KeyCaptured(key) => {
+                if let Some(target) = self.capturing_keybind.take() {
+                    match target {
+                        KeybindTarget::Tool(tool) => {
+                            self.keybindings.set_tool_key(tool, key);
+                            log::info!("Set {:?} tool hotkey to {:?}", tool, key);
+                        }
+                        KeybindTarget::Category(index) => {
+                            self.keybindings.set_category_key(index, Some(key));
+                            log::info!("Set category {} hotkey to {:?}", index + 1, key);
+                        }
+                    }
+                }
+            }
+            Message::ResetKeybindings => {
+                self.keybindings = KeyBindings::default();
+                self.capturing_keybind = None;
+                log::info!("Reset keybindings to defaults");
+            }
         }
     }
 
@@ -2334,10 +2503,22 @@ impl Application for HvatApp {
         }
 
         // Handle keyboard events
-        Self::handle_key_event(event)
+        self.handle_key_event(event)
     }
 
     fn on_resize(&mut self, _width: f32, height: f32) {
         self.window_height = height;
+    }
+
+    fn is_text_input_focused(&self) -> bool {
+        self.any_text_input_focused()
+    }
+
+    fn needs_immediate_rebuild(&self) -> bool {
+        // Request immediate rebuild during drawing or editing operations
+        // so we can show real-time previews and handle position updates
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get(&path);
+        image_data.drawing_state.is_drawing() || image_data.edit_state.is_editing()
     }
 }

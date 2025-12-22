@@ -598,15 +598,9 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                 }
 
-                // Blur input if clicking elsewhere
-                if self.state.input_focused {
-                    self.state.input_focused = false;
-                    self.state.input_selection = None;
-                    self.apply_input_value();
-                    log::debug!("Slider input: blurred by clicking elsewhere");
-                    // Always emit to trigger redraw (clears visual focus)
-                    return self.emit_change();
-                }
+                // Note: Input blur is handled by GlobalMousePress, not here.
+                // If we blur and return here, it consumes the event and prevents
+                // other widgets (like buttons) from receiving the click.
 
                 // Check if clicking on thumb (with expanded hit area)
                 let thumb_center_x = thumb.x + SLIDER_THUMB_RADIUS;

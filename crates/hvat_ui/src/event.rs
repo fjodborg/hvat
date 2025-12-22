@@ -283,6 +283,9 @@ pub enum Event {
     KeyPress {
         key: KeyCode,
         modifiers: KeyModifiers,
+        /// Whether a text input is currently focused.
+        /// When true, widgets should not handle keyboard shortcuts to allow text entry.
+        text_input_focused: bool,
     },
 
     /// Key released

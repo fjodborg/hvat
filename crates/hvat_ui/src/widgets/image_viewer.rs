@@ -525,7 +525,11 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 overlay.color[2],
                 overlay.color[3],
             );
-            let selected_color = Color::rgba(1.0, 1.0, 0.0, 1.0); // Yellow for selected
+            // Selection indicator colors: outer black, inner white, category color in middle
+            let selection_outer_color = Color::rgba(0.0, 0.0, 0.0, 1.0); // Black
+            let selection_inner_color = Color::rgba(1.0, 1.0, 1.0, 1.0); // White
+                                                                         // For handles when selected
+            let handle_color = Color::rgba(1.0, 1.0, 0.0, 1.0); // Yellow for handles
 
             match &overlay.shape {
                 OverlayShape::BoundingBox {
@@ -550,13 +554,23 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                     let fill_color = Color::rgba(color.r, color.g, color.b, 0.2);
                     renderer.fill_rect(box_bounds, fill_color);
 
-                    // Draw border
-                    let border_color = if overlay.selected {
-                        selected_color
+                    // Draw border with selection effect if selected
+                    if overlay.selected {
+                        // Triple-stroke effect: outer black, inner white, category color in middle
+                        renderer.stroke_rect(
+                            box_bounds,
+                            selection_outer_color,
+                            overlay.line_width + 4.0,
+                        );
+                        renderer.stroke_rect(
+                            box_bounds,
+                            selection_inner_color,
+                            overlay.line_width + 2.0,
+                        );
+                        renderer.stroke_rect(box_bounds, color, overlay.line_width);
                     } else {
-                        color
-                    };
-                    renderer.stroke_rect(box_bounds, border_color, overlay.line_width);
+                        renderer.stroke_rect(box_bounds, color, overlay.line_width);
+                    }
 
                     // Draw handles if selected
                     if overlay.selected {
@@ -579,7 +593,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                                 handle_size,
                             );
                             renderer.fill_rect(handle_bounds, Color::WHITE);
-                            renderer.stroke_rect(handle_bounds, selected_color, 1.0);
+                            renderer.stroke_rect(handle_bounds, handle_color, 1.0);
                         }
 
                         // Edge midpoint handles (for resize in one direction)
@@ -598,7 +612,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             );
                             // Edge handles slightly different color to distinguish
                             renderer.fill_rect(handle_bounds, Color::rgba(0.9, 0.9, 0.9, 1.0));
-                            renderer.stroke_rect(handle_bounds, selected_color, 1.0);
+                            renderer.stroke_rect(handle_bounds, handle_color, 1.0);
                         }
 
                         // Center handle (for move) - draw a small crosshair or distinct marker
@@ -611,59 +625,131 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         );
                         // Draw center as a circle-like marker (filled with semi-transparent)
                         renderer.fill_rect(center_bounds, Color::rgba(1.0, 1.0, 0.5, 0.6));
-                        renderer.stroke_rect(center_bounds, selected_color, 1.0);
+                        renderer.stroke_rect(center_bounds, handle_color, 1.0);
                     }
                 }
                 OverlayShape::Point { x, y } => {
                     let (screen_x, screen_y) = self.image_to_screen(*x, *y, &bounds);
                     let radius = 6.0;
 
-                    // Draw a circle approximation (diamond shape)
-                    let point_color = if overlay.selected {
-                        selected_color
-                    } else {
-                        color
-                    };
                     let point_bounds = Bounds::new(
                         screen_x - radius,
                         screen_y - radius,
                         radius * 2.0,
                         radius * 2.0,
                     );
-                    renderer.fill_rect(point_bounds, point_color);
-                    renderer.stroke_rect(point_bounds, Color::WHITE, 1.0);
+
+                    // Draw point with selection effect if selected
+                    if overlay.selected {
+                        // Triple-stroke effect: outer black, inner white, category color
+                        let outer_bounds = Bounds::new(
+                            screen_x - radius - 2.0,
+                            screen_y - radius - 2.0,
+                            (radius + 2.0) * 2.0,
+                            (radius + 2.0) * 2.0,
+                        );
+                        let inner_bounds = Bounds::new(
+                            screen_x - radius - 1.0,
+                            screen_y - radius - 1.0,
+                            (radius + 1.0) * 2.0,
+                            (radius + 1.0) * 2.0,
+                        );
+                        renderer.fill_rect(outer_bounds, selection_outer_color);
+                        renderer.fill_rect(inner_bounds, selection_inner_color);
+                        renderer.fill_rect(point_bounds, color);
+                    } else {
+                        renderer.fill_rect(point_bounds, color);
+                        renderer.stroke_rect(point_bounds, Color::WHITE, 1.0);
+                    }
                 }
                 OverlayShape::Polygon { vertices, closed } => {
                     if vertices.is_empty() {
                         continue;
                     }
 
-                    let line_color = if overlay.selected {
-                        selected_color
-                    } else {
-                        color
-                    };
                     let screen_verts: Vec<(f32, f32)> = vertices
                         .iter()
                         .map(|(x, y)| self.image_to_screen(*x, *y, &bounds))
                         .collect();
 
-                    // Draw edges (need at least 2 vertices)
-                    for i in 0..screen_verts.len().saturating_sub(1) {
-                        let (x1, y1) = screen_verts[i];
-                        let (x2, y2) = screen_verts[i + 1];
-                        renderer.line(x1, y1, x2, y2, line_color, overlay.line_width);
-                    }
-                    // Close the polygon if needed
-                    if *closed && screen_verts.len() >= 2 {
-                        let (x1, y1) = screen_verts[screen_verts.len() - 1];
-                        let (x2, y2) = screen_verts[0];
-                        renderer.line(x1, y1, x2, y2, line_color, overlay.line_width);
+                    // Draw edges with selection effect if selected
+                    if overlay.selected {
+                        // Triple-stroke effect: outer black, inner white, category color in middle
+                        // Draw edges (need at least 2 vertices)
+                        for i in 0..screen_verts.len().saturating_sub(1) {
+                            let (x1, y1) = screen_verts[i];
+                            let (x2, y2) = screen_verts[i + 1];
+                            renderer.line(
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                                selection_outer_color,
+                                overlay.line_width + 4.0,
+                            );
+                        }
+                        for i in 0..screen_verts.len().saturating_sub(1) {
+                            let (x1, y1) = screen_verts[i];
+                            let (x2, y2) = screen_verts[i + 1];
+                            renderer.line(
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                                selection_inner_color,
+                                overlay.line_width + 2.0,
+                            );
+                        }
+                        for i in 0..screen_verts.len().saturating_sub(1) {
+                            let (x1, y1) = screen_verts[i];
+                            let (x2, y2) = screen_verts[i + 1];
+                            renderer.line(x1, y1, x2, y2, color, overlay.line_width);
+                        }
+                        // Close the polygon if needed
+                        if *closed && screen_verts.len() >= 2 {
+                            let (x1, y1) = screen_verts[screen_verts.len() - 1];
+                            let (x2, y2) = screen_verts[0];
+                            renderer.line(
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                                selection_outer_color,
+                                overlay.line_width + 4.0,
+                            );
+                            renderer.line(
+                                x1,
+                                y1,
+                                x2,
+                                y2,
+                                selection_inner_color,
+                                overlay.line_width + 2.0,
+                            );
+                            renderer.line(x1, y1, x2, y2, color, overlay.line_width);
+                        }
+                    } else {
+                        // Draw edges normally
+                        for i in 0..screen_verts.len().saturating_sub(1) {
+                            let (x1, y1) = screen_verts[i];
+                            let (x2, y2) = screen_verts[i + 1];
+                            renderer.line(x1, y1, x2, y2, color, overlay.line_width);
+                        }
+                        // Close the polygon if needed
+                        if *closed && screen_verts.len() >= 2 {
+                            let (x1, y1) = screen_verts[screen_verts.len() - 1];
+                            let (x2, y2) = screen_verts[0];
+                            renderer.line(x1, y1, x2, y2, color, overlay.line_width);
+                        }
                     }
 
                     // Draw vertex handles if selected OR if polygon is not closed (preview mode)
                     if overlay.selected || !*closed {
                         let handle_size = 6.0;
+                        let handle_stroke_color = if overlay.selected {
+                            handle_color
+                        } else {
+                            color
+                        };
                         for (i, (sx, sy)) in screen_verts.iter().enumerate() {
                             let handle_bounds = Bounds::new(
                                 sx - handle_size / 2.0,
@@ -678,7 +764,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                                 Color::WHITE
                             };
                             renderer.fill_rect(handle_bounds, handle_fill);
-                            renderer.stroke_rect(handle_bounds, line_color, 1.0);
+                            renderer.stroke_rect(handle_bounds, handle_stroke_color, 1.0);
                         }
 
                         // Draw center handle for selected closed polygons (for move)
@@ -697,7 +783,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                                 center_size,
                             );
                             renderer.fill_rect(center_bounds, Color::rgba(1.0, 1.0, 0.5, 0.6));
-                            renderer.stroke_rect(center_bounds, selected_color, 1.0);
+                            renderer.stroke_rect(center_bounds, handle_color, 1.0);
                         }
                     }
                 }
@@ -934,7 +1020,15 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 self.emit_change_with_bounds(&bounds)
             }
 
-            Event::KeyPress { key, .. } => {
+            Event::KeyPress {
+                key,
+                text_input_focused,
+                ..
+            } => {
+                // Don't handle keyboard shortcuts when a text input is focused
+                if *text_input_focused {
+                    return None;
+                }
                 match key {
                     KeyCode::Plus | KeyCode::Equal => {
                         if self.zoomable {

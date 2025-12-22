@@ -10,8 +10,10 @@ use hvat_ui::{
 
 use crate::app::HvatApp;
 use crate::constants::MAX_GPU_PRELOAD_COUNT;
+use crate::keybindings::{KeybindTarget, key_to_string};
 use crate::licenses::{DEPENDENCIES, DependencyInfo};
 use crate::message::Message;
+use crate::model::AnnotationTool;
 
 /// Application version
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -19,8 +21,8 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Application name
 const APP_NAME: &str = "HVAT - Hyperspectral Vision Annotation Tool";
 
-/// Keyboard shortcuts for the keybindings section
-const KEYBINDINGS: &[(&str, &str)] = &[
+/// Fixed keyboard shortcuts (not customizable)
+const FIXED_KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+Z", "Undo"),
     ("Ctrl+Shift+Z / Ctrl+Y", "Redo"),
     ("Escape", "Cancel annotation"),
@@ -136,11 +138,93 @@ impl HvatApp {
                 c.text("");
 
                 // Keybindings subsection
+                let keybindings = self.keybindings.clone();
+                let categories = self.categories.clone();
+                let capturing_keybind = self.capturing_keybind;
+
                 let keybindings_collapsible = Collapsible::new("Keyboard Shortcuts")
                     .state(&keybindings_section_collapsed)
                     .on_toggle(Message::KeybindingsSectionToggled)
-                    .content(|kc| {
-                        for (key, action) in KEYBINDINGS {
+                    .content(move |kc| {
+                        // Customizable Tool Hotkeys section
+                        kc.text("Annotation Tools").size(FONT_SIZE_SECONDARY);
+                        kc.text("Click a key to change the hotkey")
+                            .size(FONT_SIZE_SMALL);
+                        kc.text("");
+
+                        for tool in AnnotationTool::all() {
+                            let tool_copy = *tool;
+                            let current_key = keybindings.key_for_tool(*tool);
+                            let is_capturing =
+                                capturing_keybind == Some(KeybindTarget::Tool(*tool));
+
+                            let key_label = if is_capturing {
+                                "Press key...".to_string()
+                            } else {
+                                key_to_string(current_key).to_string()
+                            };
+
+                            kc.row(|r| {
+                                r.add(Element::new(
+                                    Text::new(tool.name()).width(Length::Fixed(120.0)),
+                                ));
+                                r.button(key_label)
+                                    .width(Length::Fixed(80.0))
+                                    .padding(BUTTON_PADDING_COMPACT)
+                                    .on_click(Message::StartCapturingKeybind(KeybindTarget::Tool(
+                                        tool_copy,
+                                    )));
+                            });
+                        }
+
+                        kc.text("");
+
+                        // Customizable Category Hotkeys section
+                        kc.text("Category Selection").size(FONT_SIZE_SECONDARY);
+                        kc.text("Keys 1-9, 0 select categories 1-10")
+                            .size(FONT_SIZE_SMALL);
+                        kc.text("");
+
+                        for (index, cat) in categories.iter().take(10).enumerate() {
+                            let current_key = keybindings.key_for_category_index(index);
+                            let is_capturing =
+                                capturing_keybind == Some(KeybindTarget::Category(index));
+
+                            let key_label = if is_capturing {
+                                "Press key...".to_string()
+                            } else {
+                                current_key
+                                    .map(|k| key_to_string(k))
+                                    .unwrap_or("-")
+                                    .to_string()
+                            };
+
+                            kc.row(|r| {
+                                r.add(Element::new(
+                                    Text::new(format!("{}. {}", index + 1, cat.name))
+                                        .width(Length::Fixed(120.0)),
+                                ));
+                                r.button(key_label)
+                                    .width(Length::Fixed(80.0))
+                                    .padding(BUTTON_PADDING_COMPACT)
+                                    .on_click(Message::StartCapturingKeybind(
+                                        KeybindTarget::Category(index),
+                                    ));
+                            });
+                        }
+
+                        kc.text("");
+                        kc.button("Reset to Defaults")
+                            .padding(BUTTON_PADDING_COMPACT)
+                            .on_click(Message::ResetKeybindings);
+
+                        kc.text("");
+                        kc.text("");
+
+                        // Fixed shortcuts
+                        kc.text("Fixed Shortcuts").size(FONT_SIZE_SECONDARY);
+                        kc.text("");
+                        for (key, action) in FIXED_KEYBINDINGS {
                             kc.row(|r| {
                                 r.add(Element::new(Text::new(*key).width(Length::Fixed(180.0))));
                                 r.text(*action);

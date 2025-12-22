@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use hvat_ui::ImagePointerEvent;
 use hvat_ui::prelude::*;
 
+use crate::keybindings::KeybindTarget;
 use crate::model::AnnotationTool;
 use crate::state::{LoadedImage, ProjectState};
 
@@ -154,6 +155,8 @@ pub enum Message {
     DeleteAnnotation,
     /// Finish polygon annotation (close the shape)
     FinishPolygon,
+    /// Change the category of the selected annotation
+    ChangeSelectedAnnotationCategory(u32),
 
     // Settings - GPU Preloading
     /// GPU preload count slider changed
@@ -192,4 +195,14 @@ pub enum Message {
     FileHoverStarted,
     /// File drag hover ended
     FileHoverEnded,
+
+    // Keybinding Configuration
+    /// Start capturing a key for rebinding
+    StartCapturingKeybind(KeybindTarget),
+    /// Cancel key capture
+    CancelCapturingKeybind,
+    /// A key was captured for rebinding
+    KeyCaptured(KeyCode),
+    /// Reset keybindings to defaults
+    ResetKeybindings,
 }

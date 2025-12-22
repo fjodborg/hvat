@@ -209,6 +209,24 @@ pub trait Application: Sized {
     /// Called when the window is resized.
     /// Override this to respond to window size changes.
     fn on_resize(&mut self, _width: f32, _height: f32) {}
+
+    /// Returns true if any text input field is currently focused.
+    /// Used to suppress keyboard shortcuts when typing in text fields.
+    /// Override this to track your application's text input focus state.
+    fn is_text_input_focused(&self) -> bool {
+        false
+    }
+
+    /// Returns true if the view needs to be rebuilt immediately, even during a mouse drag.
+    /// Override this when your application needs to show real-time updates during drag
+    /// operations (e.g., drawing annotation previews, dragging objects).
+    ///
+    /// Note: When this returns true, the rebuild happens immediately which can reset
+    /// widget state. This is intentional for drawing operations but would break button
+    /// click handling if used incorrectly.
+    fn needs_immediate_rebuild(&self) -> bool {
+        false
+    }
 }
 
 /// Internal application state
@@ -232,6 +250,10 @@ struct AppState<A: Application> {
     /// Whether the current click was consumed by GlobalMousePress (e.g., closing an overlay).
     /// When true, the subsequent MousePress/MouseRelease from the same physical click are skipped.
     click_consumed: bool,
+    /// Whether a mouse button is currently pressed.
+    /// While true, view rebuilds are deferred to preserve widget state (e.g., button's Pressed state)
+    /// between MousePress and MouseRelease events.
+    mouse_button_pressed: bool,
     /// Accumulated dropped file paths (native only).
     /// Files are accumulated here and then sent as a batch when the drop ends.
     #[cfg(not(target_arch = "wasm32"))]
@@ -291,6 +313,7 @@ impl<A: Application> AppState<A> {
             frame_duration,
             redraw_requested: true, // Initial redraw needed
             click_consumed: false,
+            mouse_button_pressed: false,
             #[cfg(not(target_arch = "wasm32"))]
             pending_dropped_files: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -441,8 +464,16 @@ impl<A: Application> AppState<A> {
         // Keep requesting redraws if tick_with_resources indicated more work
         self.redraw_requested = needs_more_ticks;
 
-        // Only rebuild view if needed (dirty flag)
-        if self.needs_rebuild || self.root.is_none() {
+        // Only rebuild view if needed (dirty flag).
+        // IMPORTANT: Defer rebuilds while a mouse button is pressed to preserve widget state
+        // (e.g., button's Pressed state) between MousePress and MouseRelease events.
+        // This ensures clicks work correctly even when blur events trigger state changes.
+        // EXCEPTION: If the app explicitly requests immediate rebuild (e.g., for drawing previews),
+        // bypass the deferral to show real-time updates during drag operations.
+        let immediate_rebuild_requested = self.app.needs_immediate_rebuild();
+        if (self.needs_rebuild && (!self.mouse_button_pressed || immediate_rebuild_requested))
+            || self.root.is_none()
+        {
             self.rebuild_view();
             self.layout();
         }
@@ -855,6 +886,14 @@ fn handle_window_event<A: Application>(
         } => {
             let button = MouseButton::from_winit(button);
 
+            // Track mouse button state to defer rebuilds between press and release.
+            // This preserves widget state (e.g., button's Pressed state) during a click.
+            if btn_state == ElementState::Pressed {
+                state.mouse_button_pressed = true;
+            } else {
+                state.mouse_button_pressed = false;
+            }
+
             // On press, first send a global event to allow focused widgets to blur
             if btn_state == ElementState::Pressed {
                 // Reset consumption flag at the start of a new click
@@ -869,21 +908,11 @@ fn handle_window_event<A: Application>(
                     .map(|r| r.has_active_overlay())
                     .unwrap_or(false);
 
-                // Send GlobalMousePress but DON'T rebuild the view yet IF no overlay is open.
-                // This is critical: if we rebuild on text input blur, buttons lose their state
-                // between MousePress and MouseRelease, breaking click detection.
-                // However, if an overlay IS open, we need to rebuild so it closes visually.
-                let saved_needs_rebuild = state.needs_rebuild;
+                // Send GlobalMousePress - rebuilds are deferred by mouse_button_pressed flag
                 let handled = state.handle_event(Event::GlobalMousePress {
                     button,
                     position: state.cursor_position,
                 });
-                // Only skip rebuild if there was no overlay open.
-                // - With overlay: rebuild needed so overlay disappears
-                // - Without overlay (just text blur): skip rebuild so button keeps Pressed state
-                if !had_overlay {
-                    state.needs_rebuild = saved_needs_rebuild;
-                }
 
                 // Only consume the click if:
                 // 1. An overlay was open before the event, AND
@@ -965,10 +994,13 @@ fn handle_window_event<A: Application>(
                 }
 
                 let key = KeyCode::from_winit(keycode);
+                // Check application's text input focus state
+                let text_input_focused = state.app.is_text_input_focused();
                 let ui_event = if event.state == ElementState::Pressed {
                     Event::KeyPress {
                         key,
                         modifiers: state.modifiers,
+                        text_input_focused,
                     }
                 } else {
                     Event::KeyRelease {

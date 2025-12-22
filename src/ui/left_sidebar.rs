@@ -9,6 +9,7 @@ use hvat_ui::{
 
 use crate::app::HvatApp;
 use crate::constants::SIDEBAR_WIDTH;
+use crate::keybindings::{key_to_string, optional_key_to_string};
 use crate::message::Message;
 use crate::model::AnnotationTool;
 
@@ -37,26 +38,30 @@ impl HvatApp {
         let selected_tags = current_image_data.selected_tags;
         let tag_input_text = self.tag_input_text.clone();
         let tag_input_state = self.tag_input_state.clone();
+        let keybindings = self.keybindings.clone();
 
         let mut sidebar_ctx = Context::new();
 
         // Tools Collapsible
         let tools_s = tools_state.clone();
+        let keybindings_for_tools = keybindings.clone();
         let collapsible_tools = Collapsible::new("Annotation Tools")
             .state(&tools_s)
             .width(Length::Fill(1.0))
             .on_toggle(Message::ToolsToggled)
-            .content(|c| {
+            .content(move |c| {
                 c.text(format!("Current: {}", selected_tool.name()))
                     .size(FONT_SIZE_SECONDARY);
                 c.text("");
                 for tool in AnnotationTool::all() {
                     let is_selected = *tool == selected_tool;
                     let tool_copy = *tool;
+                    let hotkey = keybindings_for_tools.key_for_tool(*tool);
+                    let hotkey_str = key_to_string(hotkey);
                     let label = if is_selected {
-                        format!("> {} <", tool.name())
+                        format!("> {} < [{}]", tool.name(), hotkey_str)
                     } else {
-                        tool.name().to_string()
+                        format!("{} [{}]", tool.name(), hotkey_str)
                     };
                     c.button(label)
                         .width(Length::Fill(1.0))
@@ -67,19 +72,28 @@ impl HvatApp {
 
         // Categories Collapsible
         let cats_s = categories_state.clone();
+        let keybindings_for_cats = keybindings.clone();
         let collapsible_cats = Collapsible::new("Categories")
             .state(&cats_s)
             .width(Length::Fill(1.0))
             .on_toggle(Message::CategoriesToggled)
-            .content(|c| {
-                for cat in &categories {
+            .content(move |c| {
+                for (cat_index, cat) in categories.iter().enumerate() {
                     let is_selected = cat.id == selected_category;
                     let is_editing = editing_category == Some(cat.id);
                     let cat_id = cat.id;
                     let cat_color = cat.color;
                     let cat_name = cat.name.clone();
+                    // Get hotkey for this category index (only first 10 categories have hotkeys)
+                    let hotkey = keybindings_for_cats.key_for_category_index(cat_index);
+                    let hotkey_str = optional_key_to_string(hotkey);
 
                     c.row(|r| {
+                        // Hotkey indicator (small, left of swatch)
+                        if cat_index < 10 {
+                            r.text(format!("[{}]", hotkey_str)).size(FONT_SIZE_SMALL);
+                        }
+
                         // Color swatch (clickable to toggle color picker)
                         // Use consistent height with other row items
                         let swatch = ColorSwatch::new(cat_color)
@@ -121,7 +135,7 @@ impl HvatApp {
                     });
 
                     // Show color picker if open for this category (opens below the swatch)
-                    if color_picker_category == Some(cat_id) {
+                    if color_picker_category == Some(cat.id) {
                         // Position picker below the color swatch, aligned with its left edge
                         let picker = ColorPicker::new()
                             .selected(cat_color)
