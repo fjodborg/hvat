@@ -58,6 +58,13 @@ fn pending_picker_state() -> &'static std::sync::Mutex<Option<AsyncPickerResult>
     PENDING_PICKER_RESULT.get_or_init(|| std::sync::Mutex::new(None))
 }
 
+// Global shared state for receiving async config import results (WASM only)
+static PENDING_CONFIG_RESULT: OnceLock<std::sync::Mutex<Option<String>>> = OnceLock::new();
+
+fn pending_config_state() -> &'static std::sync::Mutex<Option<String>> {
+    PENDING_CONFIG_RESULT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
 // ============================================================================
 // WASM Folder Picker using File System Access API
 // ============================================================================
@@ -776,6 +783,309 @@ impl HvatApp {
             self.gamma_slider.value,
             self.hue_slider.value,
         );
+    }
+
+    // =========================================================================
+    // Configuration Export/Import
+    // =========================================================================
+
+    /// Build the current configuration from app state.
+    fn build_config(&self) -> crate::config::AppConfig {
+        use crate::config::{AppConfig, CategoryConfig, KeyBindingsConfig, UserPreferences};
+
+        AppConfig {
+            version: crate::config::CONFIG_VERSION,
+            app_name: "HVAT".to_string(),
+            preferences: UserPreferences {
+                dark_theme: self.dark_theme,
+                export_folder: self.export_folder.clone(),
+                import_folder: self.import_folder.clone(),
+                gpu_preload_count: self.gpu_preload_count,
+            },
+            keybindings: KeyBindingsConfig::from(&self.keybindings),
+            categories: self.categories.iter().map(CategoryConfig::from).collect(),
+        }
+    }
+
+    /// Export configuration to a JSON file.
+    fn export_config(&self) {
+        let config = self.build_config();
+        let json = match config.to_json() {
+            Ok(json) => json,
+            Err(e) => {
+                log::error!("Failed to serialize config: {}", e);
+                return;
+            }
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name(crate::config::AppConfig::default_filename())
+                .add_filter("JSON", &["json"])
+                .save_file()
+            {
+                if let Err(e) = std::fs::write(&path, &json) {
+                    log::error!("Failed to write config file: {}", e);
+                } else {
+                    log::info!("Configuration exported to {:?}", path);
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Download file via browser
+            self.download_file_wasm(
+                crate::config::AppConfig::default_filename(),
+                "application/json",
+                json.as_bytes(),
+            );
+        }
+    }
+
+    /// Download a file in WASM by creating a temporary anchor element.
+    #[cfg(target_arch = "wasm32")]
+    fn download_file_wasm(&self, filename: &str, mime_type: &str, data: &[u8]) {
+        use wasm_bindgen::JsCast;
+
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                log::error!("No window object for download");
+                return;
+            }
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => {
+                log::error!("No document for download");
+                return;
+            }
+        };
+
+        // Create blob from data
+        let array = js_sys::Uint8Array::from(data);
+        let blob_parts = js_sys::Array::new();
+        blob_parts.push(&array.buffer());
+
+        let blob_options = web_sys::BlobPropertyBag::new();
+        blob_options.set_type(mime_type);
+
+        let blob =
+            match web_sys::Blob::new_with_u8_array_sequence_and_options(&blob_parts, &blob_options)
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    log::error!("Failed to create blob: {:?}", e);
+                    return;
+                }
+            };
+
+        // Create object URL
+        let url = match web_sys::Url::create_object_url_with_blob(&blob) {
+            Ok(u) => u,
+            Err(e) => {
+                log::error!("Failed to create object URL: {:?}", e);
+                return;
+            }
+        };
+
+        // Create and trigger download link
+        let anchor: web_sys::HtmlAnchorElement = match document.create_element("a") {
+            Ok(el) => match el.dyn_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    log::error!("Failed to cast to anchor");
+                    return;
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to create anchor: {:?}", e);
+                return;
+            }
+        };
+
+        anchor.set_href(&url);
+        anchor.set_download(filename);
+        anchor.click();
+
+        // Revoke the URL after a short delay
+        let _ = web_sys::Url::revoke_object_url(&url);
+        log::info!("Configuration download initiated: {}", filename);
+    }
+
+    /// Import configuration from a JSON file.
+    fn import_config(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .pick_file()
+            {
+                match std::fs::read_to_string(&path) {
+                    Ok(json) => {
+                        self.apply_config_from_json(&json);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read config file: {}", e);
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.show_file_picker_wasm();
+        }
+    }
+
+    /// Show file picker for importing config in WASM.
+    #[cfg(target_arch = "wasm32")]
+    fn show_file_picker_wasm(&self) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::prelude::*;
+
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                log::error!("No window object");
+                return;
+            }
+        };
+        let document = match window.document() {
+            Some(d) => d,
+            None => {
+                log::error!("No document object");
+                return;
+            }
+        };
+
+        // Create hidden input element
+        let input: web_sys::HtmlInputElement = match document.create_element("input") {
+            Ok(el) => match el.dyn_into() {
+                Ok(i) => i,
+                Err(_) => {
+                    log::error!("Failed to cast to input");
+                    return;
+                }
+            },
+            Err(e) => {
+                log::error!("Failed to create input: {:?}", e);
+                return;
+            }
+        };
+
+        input.set_type("file");
+        input.set_accept(".json,application/json");
+        input.style().set_property("display", "none").ok();
+
+        // Append to body
+        if let Some(body) = document.body() {
+            let _ = body.append_child(&input);
+        }
+
+        // Use the global pending config state
+        let input_clone = input.clone();
+        let change_closure = Closure::once(Box::new(move |_event: web_sys::Event| {
+            let files = match input_clone.files() {
+                Some(f) => f,
+                None => return,
+            };
+
+            if files.length() == 0 {
+                return;
+            }
+
+            let file = match files.get(0) {
+                Some(f) => f,
+                None => return,
+            };
+
+            // Read file contents
+            wasm_bindgen_futures::spawn_local(async move {
+                match hvat_ui::read_file_async(&file).await {
+                    Ok(data) => {
+                        match String::from_utf8(data) {
+                            Ok(json) => {
+                                // Store in pending config state
+                                if let Ok(mut pending) = pending_config_state().lock() {
+                                    *pending = Some(json);
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Config file is not valid UTF-8: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read config file: {}", e);
+                    }
+                }
+            });
+
+            // Clean up
+            if let Some(parent) = input_clone.parent_element() {
+                let _ = parent.remove_child(&input_clone);
+            }
+        }));
+
+        input.set_onchange(Some(change_closure.as_ref().unchecked_ref()));
+        change_closure.forget();
+
+        input.click();
+    }
+
+    /// Apply configuration from JSON string.
+    fn apply_config_from_json(&mut self, json: &str) {
+        use crate::config::AppConfig;
+
+        match AppConfig::from_json(json) {
+            Ok(config) => {
+                log::info!("Loaded configuration version {}", config.version);
+
+                // Apply preferences
+                self.dark_theme = config.preferences.dark_theme;
+                self.export_folder = config.preferences.export_folder;
+                self.import_folder = config.preferences.import_folder;
+                self.gpu_preload_count = config
+                    .preferences
+                    .gpu_preload_count
+                    .min(MAX_GPU_PRELOAD_COUNT);
+                self.gpu_preload_slider = SliderState::new(self.gpu_preload_count as f32);
+                self.gpu_cache.set_preload_count(self.gpu_preload_count);
+
+                // Apply keybindings
+                self.keybindings = config.keybindings.to_keybindings();
+
+                // Apply categories
+                self.categories = config.categories.into_iter().map(|c| c.into()).collect();
+
+                // Ensure we have at least one category and a valid selection
+                if self.categories.is_empty() {
+                    self.categories
+                        .push(Category::new(1, "Default", [100, 100, 100]));
+                }
+                if !self
+                    .categories
+                    .iter()
+                    .any(|c| c.id == self.selected_category)
+                {
+                    self.selected_category = self.categories[0].id;
+                }
+
+                log::info!(
+                    "Configuration applied: {} categories, gpu_preload={}",
+                    self.categories.len(),
+                    self.gpu_preload_count
+                );
+            }
+            Err(e) => {
+                log::error!("Failed to parse configuration: {}", e);
+            }
+        }
     }
 
     /// Handle native file drop (files and/or folders).
@@ -2373,6 +2683,26 @@ impl Application for HvatApp {
                 self.capturing_keybind = None;
                 log::info!("Reset keybindings to defaults");
             }
+
+            // Configuration Export/Import
+            Message::ExportConfig => {
+                log::info!("Exporting configuration...");
+                self.export_config();
+            }
+            Message::ImportConfig => {
+                log::info!("Importing configuration...");
+                self.import_config();
+            }
+            Message::ConfigLoaded(json) => {
+                log::info!("Configuration data loaded, parsing...");
+                self.apply_config_from_json(&json);
+            }
+            Message::ConfigImportCompleted => {
+                log::info!("Configuration import completed successfully");
+            }
+            Message::ConfigImportFailed(error) => {
+                log::error!("Configuration import failed: {}", error);
+            }
         }
     }
 
@@ -2424,6 +2754,15 @@ impl Application for HvatApp {
                         log::warn!("Unexpected picker result type for current platform");
                     }
                 }
+            }
+        }
+
+        // Check for async config import result (WASM)
+        if let Ok(mut pending) = pending_config_state().lock() {
+            if let Some(json) = pending.take() {
+                log::info!("Processing config from async import");
+                self.apply_config_from_json(&json);
+                needs_rebuild = true;
             }
         }
 

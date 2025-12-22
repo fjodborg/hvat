@@ -137,6 +137,23 @@ impl HvatApp {
 
                 c.text("");
 
+                // Configuration Import/Export subsection
+                c.text("Configuration");
+                c.text("");
+
+                c.row(|r| {
+                    r.button("Export Settings")
+                        .padding(BUTTON_PADDING_COMPACT)
+                        .on_click(Message::ExportConfig);
+                    r.button("Import Settings")
+                        .padding(BUTTON_PADDING_COMPACT)
+                        .on_click(Message::ImportConfig);
+                });
+                c.text("Export or import all settings including keybindings and categories")
+                    .size(FONT_SIZE_SMALL);
+
+                c.text("");
+
                 // Keybindings subsection
                 let keybindings = self.keybindings.clone();
                 let categories = self.categories.clone();

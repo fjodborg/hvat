@@ -205,4 +205,16 @@ pub enum Message {
     KeyCaptured(KeyCode),
     /// Reset keybindings to defaults
     ResetKeybindings,
+
+    // Configuration Import/Export
+    /// Export configuration to JSON file
+    ExportConfig,
+    /// Import configuration from JSON file
+    ImportConfig,
+    /// Configuration data loaded (from WASM file picker or native)
+    ConfigLoaded(String),
+    /// Configuration import completed successfully
+    ConfigImportCompleted,
+    /// Configuration import failed with error message
+    ConfigImportFailed(String),
 }

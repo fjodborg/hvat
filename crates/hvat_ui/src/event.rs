@@ -2,8 +2,10 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 /// Keyboard key codes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyCode {
     // Letters
     A,

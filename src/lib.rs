@@ -3,6 +3,7 @@
 //! A GPU-accelerated desktop and web application for hyperspectral image annotation.
 
 mod app;
+pub mod config;
 mod constants;
 mod data;
 pub mod format;
