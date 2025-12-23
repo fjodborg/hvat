@@ -179,8 +179,11 @@ impl ProjectState {
         })
     }
 
-    /// Create project from loaded image data (WASM only).
-    #[cfg(target_arch = "wasm32")]
+    /// Create project from loaded image data.
+    ///
+    /// Used for:
+    /// - WASM: Images loaded from browser file picker or drag-drop
+    /// - Native: Images extracted from ZIP archives
     pub fn from_loaded_images(loaded_images: Vec<LoadedImage>) -> Result<Self, String> {
         if loaded_images.is_empty() {
             return Err("No images loaded".to_string());

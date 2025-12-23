@@ -36,6 +36,10 @@ use crate::state::{
     AppSnapshot, GpuRenderState, GpuTextureCache, ImageDataStore, LoadedImage, ProjectState,
     SharedGpuPipeline,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::state::{extract_images_from_zip_bytes, is_zip_file};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::state::{extract_images_from_zip_file, is_zip_path};
 use crate::test_image::generate_test_hyperspectral;
 
 // ============================================================================
@@ -72,7 +76,9 @@ fn pending_config_state() -> &'static std::sync::Mutex<Option<String>> {
 
 #[cfg(target_arch = "wasm32")]
 mod wasm_folder_picker {
-    use crate::state::{LoadedImage, is_image_filename};
+    use crate::state::{
+        LoadedImage, extract_images_from_zip_bytes, is_image_filename, is_zip_file,
+    };
     use hvat_ui::read_file_async;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -159,28 +165,37 @@ mod wasm_folder_picker {
                 return;
             }
 
-            // Collect all files
-            let mut web_files: Vec<web_sys::File> = Vec::new();
+            // Collect all files (images and ZIP files)
+            let mut image_files: Vec<web_sys::File> = Vec::new();
+            let mut zip_files: Vec<web_sys::File> = Vec::new();
+
             for i in 0..file_count {
                 if let Some(file) = files.get(i) {
                     let name = file.name();
-                    if is_image_filename(&name) {
-                        web_files.push(file);
+                    if is_zip_file(&name) {
+                        log::info!("Found ZIP file: {}", name);
+                        zip_files.push(file);
+                    } else if is_image_filename(&name) {
+                        image_files.push(file);
                     } else {
                         log::debug!("Skipping non-image file: {}", name);
                     }
                 }
             }
 
-            log::info!("Found {} image files", web_files.len());
+            log::info!(
+                "Found {} image files and {} ZIP files",
+                image_files.len(),
+                zip_files.len()
+            );
 
             // Clean up input element
             if let Some(parent) = input_clone.parent_element() {
                 parent.remove_child(&input_clone).ok();
             }
 
-            if web_files.is_empty() {
-                log::warn!("No image files found in selected folder");
+            if image_files.is_empty() && zip_files.is_empty() {
+                log::warn!("No image or ZIP files found in selected folder");
                 return;
             }
 
@@ -192,7 +207,34 @@ mod wasm_folder_picker {
 
                 let mut loaded_images: Vec<LoadedImage> = Vec::new();
 
-                for file in web_files {
+                // Process ZIP files first - extract images from them
+                for file in zip_files {
+                    let name = file.name();
+                    match read_file_async(&file).await {
+                        Ok(data) => {
+                            log::info!("Read ZIP file: {} ({} bytes)", name, data.len());
+                            match extract_images_from_zip_bytes(&data, &name) {
+                                Ok(mut extracted) => {
+                                    log::info!(
+                                        "Extracted {} images from ZIP '{}'",
+                                        extracted.len(),
+                                        name
+                                    );
+                                    loaded_images.append(&mut extracted);
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to extract ZIP '{}': {}", name, e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to read ZIP file {}: {}", name, e);
+                        }
+                    }
+                }
+
+                // Process regular image files
+                for file in image_files {
                     let name = file.name();
                     // Try to get the relative path (webkitRelativePath) via JS reflection
                     // since web-sys may not expose it directly
@@ -219,7 +261,10 @@ mod wasm_folder_picker {
 
                 // Sort by name for consistent ordering
                 loaded_images.sort_by(|a, b| a.name.cmp(&b.name));
-                log::info!("Successfully read {} image files", loaded_images.len());
+                log::info!(
+                    "Successfully loaded {} image files total",
+                    loaded_images.len()
+                );
 
                 // Call the completion callback
                 if let Some(callback) = cb.borrow_mut().take() {
@@ -1209,7 +1254,7 @@ impl HvatApp {
     }
 
     /// Handle native file drop (files and/or folders).
-    /// Supports dropping folders (scanned recursively) and/or multiple image files.
+    /// Supports dropping folders (scanned recursively), multiple image files, and ZIP archives.
     #[cfg(not(target_arch = "wasm32"))]
     fn handle_native_file_drop(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
@@ -1219,14 +1264,53 @@ impl HvatApp {
         log::info!("Native file drop: {} paths", paths.len());
         for path in &paths {
             log::debug!(
-                "  - {:?} (is_dir={}, is_file={})",
+                "  - {:?} (is_dir={}, is_file={}, is_zip={})",
                 path,
                 path.is_dir(),
-                path.is_file()
+                path.is_file(),
+                is_zip_path(path)
             );
         }
 
-        // Use the new from_paths method which handles both files and folders recursively
+        // Check if any dropped file is a ZIP archive
+        let zip_files: Vec<&PathBuf> = paths.iter().filter(|p| is_zip_path(p)).collect();
+
+        if !zip_files.is_empty() {
+            // Handle ZIP files - extract images from the first ZIP file
+            // (Multiple ZIP files at once is unusual, so we use the first one)
+            let zip_path = zip_files[0];
+            log::info!("Processing ZIP file: {:?}", zip_path);
+
+            match extract_images_from_zip_file(zip_path) {
+                Ok(loaded_images) => {
+                    self.gpu_cache.clear();
+                    log::info!("Extracted {} images from ZIP archive", loaded_images.len());
+
+                    // Create project from loaded images (like WASM does)
+                    match ProjectState::from_loaded_images(loaded_images) {
+                        Ok(project) => {
+                            log::info!(
+                                "Loaded project with {} images from ZIP",
+                                project.images.len()
+                            );
+                            // Extract dimensions from all loaded images for export
+                            self.extract_dimensions_from_loaded_images(&project);
+                            self.project = Some(project);
+                            self.pending_image_load = true;
+                        }
+                        Err(e) => {
+                            log::error!("Failed to create project from ZIP contents: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to extract ZIP archive: {}", e);
+                }
+            }
+            return;
+        }
+
+        // No ZIP files - use the regular from_paths method which handles both files and folders
         match ProjectState::from_paths(paths) {
             Ok(project) => {
                 self.gpu_cache.clear();
@@ -1993,9 +2077,12 @@ impl HvatApp {
         None
     }
 
-    /// Extract and store image dimensions from loaded image bytes (WASM only).
+    /// Extract and store image dimensions from loaded image bytes.
     /// This ensures all images have dimensions available for export.
-    #[cfg(target_arch = "wasm32")]
+    ///
+    /// Used for:
+    /// - WASM: Images loaded from browser file picker or drag-drop
+    /// - Native: Images extracted from ZIP archives
     fn extract_dimensions_from_loaded_images(&mut self, project: &ProjectState) {
         log::info!(
             "Extracting dimensions from {} loaded images",
@@ -2896,8 +2983,37 @@ impl Application for HvatApp {
                     // Check if we have pending WASM files (this means we're on WASM)
                     if !self.pending_wasm_files.is_empty() {
                         // Use the pending file data directly (WASM can't read from disk)
-                        let loaded_images = std::mem::take(&mut self.pending_wasm_files);
-                        log::info!("Processing {} dropped files from WASM", loaded_images.len());
+                        let pending_files = std::mem::take(&mut self.pending_wasm_files);
+                        log::info!("Processing {} dropped files from WASM", pending_files.len());
+
+                        // Check if any dropped file is a ZIP archive
+                        let zip_files: Vec<&LoadedImage> = pending_files
+                            .iter()
+                            .filter(|f| is_zip_file(&f.name))
+                            .collect();
+
+                        let loaded_images = if !zip_files.is_empty() {
+                            // Handle ZIP files - extract images from the first ZIP
+                            let zip_file = zip_files[0];
+                            log::info!("Processing ZIP file: {}", zip_file.name);
+
+                            match extract_images_from_zip_bytes(&zip_file.data, &zip_file.name) {
+                                Ok(extracted) => {
+                                    log::info!(
+                                        "Extracted {} images from ZIP archive",
+                                        extracted.len()
+                                    );
+                                    extracted
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to extract ZIP archive: {}", e);
+                                    return;
+                                }
+                            }
+                        } else {
+                            // No ZIP files - use files directly
+                            pending_files
+                        };
 
                         match ProjectState::from_loaded_images(loaded_images) {
                             Ok(project) => {
