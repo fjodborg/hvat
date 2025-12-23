@@ -70,13 +70,16 @@ impl HvatApp {
     }
 
     /// Build annotation overlays from current annotations and drawing state.
+    /// Annotations with hidden categories are filtered out from rendering.
     fn build_overlays(&self) -> Vec<AnnotationOverlay> {
         let path = self.current_image_path();
         let image_data = self.image_data_store.get(&path);
 
+        // Filter out annotations whose categories are hidden
         let mut overlays: Vec<_> = image_data
             .annotations
             .iter()
+            .filter(|ann| !self.hidden_categories.contains(&ann.category_id))
             .map(|ann| AnnotationOverlay {
                 shape: (&ann.shape).into(),
                 color: self.get_category_color(ann.category_id),

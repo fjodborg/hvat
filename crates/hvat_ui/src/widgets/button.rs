@@ -40,6 +40,10 @@ pub struct Button<M> {
     font_size: f32,
     /// Visual style of the button
     style: ButtonStyle,
+    /// Custom background color (overrides style-based colors)
+    custom_bg: Option<Color>,
+    /// Custom text color (overrides style-based colors)
+    custom_text: Option<Color>,
 }
 
 impl<M> Button<M> {
@@ -56,6 +60,8 @@ impl<M> Button<M> {
             text_align: Alignment::Center,
             font_size: DEFAULT_FONT_SIZE,
             style: ButtonStyle::default(),
+            custom_bg: None,
+            custom_text: None,
         }
     }
 
@@ -107,6 +113,27 @@ impl<M> Button<M> {
         self
     }
 
+    /// Set a custom background color
+    ///
+    /// When set, this overrides the style-based background colors.
+    /// The color will be slightly lightened on hover and darkened on press.
+    /// Also automatically sets a contrasting text color for readability.
+    pub fn background_color(mut self, color: Color) -> Self {
+        // Automatically set contrasting text color for readability
+        self.custom_text = Some(color.contrasting_text());
+        self.custom_bg = Some(color);
+        self
+    }
+
+    /// Set a custom text color
+    ///
+    /// When set, this overrides both the style-based colors and
+    /// any auto-calculated contrasting color from background_color().
+    pub fn text_color(mut self, color: Color) -> Self {
+        self.custom_text = Some(color);
+        self
+    }
+
     /// Calculate content size
     fn content_size(&self) -> Size {
         // Approximate text size using centralized constants
@@ -116,7 +143,16 @@ impl<M> Button<M> {
     }
 
     /// Get background color based on state and style
-    fn background_color(&self) -> Option<Color> {
+    fn get_background_color(&self) -> Option<Color> {
+        // If custom background is set, use it with state variations
+        if let Some(base) = self.custom_bg {
+            return Some(match self.state {
+                ButtonState::Normal => base,
+                ButtonState::Hovered => base.lighten(0.15),
+                ButtonState::Pressed => base.darken(0.15),
+            });
+        }
+
         match self.style {
             ButtonStyle::Normal => Some(match self.state {
                 ButtonState::Normal => Color::BUTTON_BG,
@@ -135,7 +171,12 @@ impl<M> Button<M> {
     }
 
     /// Get text color based on state and style
-    fn text_color(&self) -> Color {
+    fn get_text_color(&self) -> Color {
+        // If custom text color is set, use it
+        if let Some(color) = self.custom_text {
+            return color;
+        }
+
         match self.style {
             ButtonStyle::Normal => Color::TEXT_PRIMARY,
             ButtonStyle::Text => match self.state {
@@ -171,7 +212,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let button_bounds = bounds.shrink(self.margin);
 
         // Draw background (if any)
-        if let Some(bg_color) = self.background_color() {
+        if let Some(bg_color) = self.get_background_color() {
             renderer.fill_rect(button_bounds, bg_color);
         }
 
@@ -201,7 +242,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             text_x,
             text_y,
             self.font_size,
-            self.text_color(),
+            self.get_text_color(),
         );
     }
 

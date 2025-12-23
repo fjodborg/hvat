@@ -246,6 +246,21 @@ impl<'a, M: Clone + 'static> ButtonBuilder<'a, M> {
         self.button = self.button.style(style);
         self
     }
+
+    /// Set horizontal text alignment within the button
+    pub fn text_align(mut self, align: Alignment) -> Self {
+        self.button = self.button.text_align(align);
+        self
+    }
+
+    /// Set a custom background color
+    ///
+    /// When set, this overrides the style-based background colors.
+    /// The color will be slightly lightened on hover and darkened on press.
+    pub fn background_color(mut self, color: crate::renderer::Color) -> Self {
+        self.button = self.button.background_color(color);
+        self
+    }
 }
 
 impl<'a, M: 'static> ButtonBuilder<'a, M> {

@@ -430,6 +430,14 @@ pub struct HvatApp {
     pub(crate) drag_hover_active: bool,
     /// Pending dropped files from WASM (collects DroppedFileData events)
     pub(crate) pending_wasm_files: Vec<LoadedImage>,
+
+    // Annotations Panel State (right sidebar)
+    /// Annotations section collapsible state
+    pub(crate) annotations_collapsed: CollapsibleState,
+    /// Annotations list scroll state
+    pub(crate) annotations_scroll_state: ScrollState,
+    /// Set of category IDs that are hidden (filtered out from display)
+    pub(crate) hidden_categories: std::collections::HashSet<u32>,
 }
 
 impl Default for HvatApp {
@@ -565,6 +573,10 @@ impl HvatApp {
 
             drag_hover_active: false,
             pending_wasm_files: Vec::new(),
+
+            annotations_collapsed: CollapsibleState::expanded(),
+            annotations_scroll_state: ScrollState::default(),
+            hidden_categories: std::collections::HashSet::new(),
         }
     }
 
@@ -2689,6 +2701,53 @@ impl Application for HvatApp {
                         self.pending_image_load = true;
                         log::info!("Thumbnail: selected image {}", index);
                     }
+                }
+            }
+
+            // Right Sidebar - Annotations Panel
+            Message::AnnotationsToggled(state) => {
+                self.annotations_collapsed = state;
+            }
+            Message::AnnotationsScrolled(state) => {
+                self.annotations_scroll_state = state;
+            }
+            Message::ToggleCategoryFilter(category_id) => {
+                if self.hidden_categories.contains(&category_id) {
+                    self.hidden_categories.remove(&category_id);
+                    log::info!("Category {} is now visible", category_id);
+                } else {
+                    self.hidden_categories.insert(category_id);
+                    log::info!("Category {} is now hidden", category_id);
+                }
+            }
+            Message::SelectAnnotation(annotation_id) => {
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                // Toggle selection: if already selected, deselect; otherwise select exclusively
+                let was_selected = image_data
+                    .annotations
+                    .iter()
+                    .find(|a| a.id == annotation_id)
+                    .map(|a| a.selected)
+                    .unwrap_or(false);
+
+                // Deselect all first
+                for ann in &mut image_data.annotations {
+                    ann.selected = false;
+                }
+
+                // Then select the clicked one (unless it was already selected)
+                if !was_selected {
+                    if let Some(ann) = image_data
+                        .annotations
+                        .iter_mut()
+                        .find(|a| a.id == annotation_id)
+                    {
+                        ann.selected = true;
+                        log::info!("Selected annotation #{}", annotation_id);
+                    }
+                } else {
+                    log::info!("Deselected annotation #{}", annotation_id);
                 }
             }
 

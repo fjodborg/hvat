@@ -74,6 +74,55 @@ impl Color {
             (self.a * 255.0) as u8,
         )
     }
+
+    /// Lighten the color by a factor (0.0 = no change, 1.0 = white)
+    pub fn lighten(&self, factor: f32) -> Self {
+        Self {
+            r: self.r + (1.0 - self.r) * factor,
+            g: self.g + (1.0 - self.g) * factor,
+            b: self.b + (1.0 - self.b) * factor,
+            a: self.a,
+        }
+    }
+
+    /// Darken the color by a factor (0.0 = no change, 1.0 = black)
+    pub fn darken(&self, factor: f32) -> Self {
+        Self {
+            r: self.r * (1.0 - factor),
+            g: self.g * (1.0 - factor),
+            b: self.b * (1.0 - factor),
+            a: self.a,
+        }
+    }
+
+    /// Create a color from RGB bytes (0-255)
+    pub fn from_rgb_bytes(r: u8, g: u8, b: u8) -> Self {
+        Self {
+            r: r as f32 / 255.0,
+            g: g as f32 / 255.0,
+            b: b as f32 / 255.0,
+            a: 1.0,
+        }
+    }
+
+    /// Calculate relative luminance using the sRGB formula
+    /// Returns a value between 0.0 (black) and 1.0 (white)
+    pub fn luminance(&self) -> f32 {
+        // Using the standard sRGB luminance coefficients
+        0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
+    }
+
+    /// Returns a contrasting text color (black or white) based on luminance
+    /// Uses WCAG contrast guidelines for readability
+    pub fn contrasting_text(&self) -> Self {
+        // Threshold of 0.5 works well for most cases
+        // Higher luminance = use dark text, lower = use light text
+        if self.luminance() > 0.5 {
+            Self::rgb(0.1, 0.1, 0.1) // Dark text
+        } else {
+            Self::rgb(0.95, 0.95, 0.95) // Light text
+        }
+    }
 }
 
 impl Default for Color {

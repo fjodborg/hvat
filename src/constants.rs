@@ -121,3 +121,6 @@ pub const THUMBNAIL_SIZE: f32 = 64.0;
 
 /// Spacing between thumbnails in the grid
 pub const THUMBNAIL_SPACING: f32 = 4.0;
+
+/// Maximum height for annotations panel collapsible content
+pub const ANNOTATIONS_MAX_HEIGHT: f32 = 300.0;

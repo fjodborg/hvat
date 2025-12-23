@@ -2,19 +2,22 @@
 
 use std::rc::Rc;
 
+use hvat_ui::Color;
+use hvat_ui::constants::FONT_SIZE_TINY;
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    Alignment, BorderSides, Collapsible, Column, Context, Element, Panel, ScrollDirection,
+    Alignment, BorderSides, Collapsible, Column, Context, Element, Padding, Panel, ScrollDirection,
     Scrollable, ScrollbarVisibility,
 };
 
 use crate::app::HvatApp;
 use crate::constants::{
-    BRIGHTNESS_MAX, BRIGHTNESS_MIN, BRIGHTNESS_STEP, CONTRAST_MAX, CONTRAST_MIN, CONTRAST_STEP,
-    GAMMA_MAX, GAMMA_MIN, GAMMA_STEP, HUE_MAX, HUE_MIN, HUE_STEP, SIDEBAR_CONTENT_WIDTH,
-    SIDEBAR_WIDTH, THUMBNAIL_SIZE, THUMBNAIL_SPACING, THUMBNAILS_MAX_HEIGHT,
+    ANNOTATIONS_MAX_HEIGHT, BRIGHTNESS_MAX, BRIGHTNESS_MIN, BRIGHTNESS_STEP, CONTRAST_MAX,
+    CONTRAST_MIN, CONTRAST_STEP, GAMMA_MAX, GAMMA_MIN, GAMMA_STEP, HUE_MAX, HUE_MIN, HUE_STEP,
+    SIDEBAR_CONTENT_WIDTH, SIDEBAR_WIDTH, THUMBNAIL_SIZE, THUMBNAIL_SPACING, THUMBNAILS_MAX_HEIGHT,
 };
 use crate::message::Message;
+use crate::model::AnnotationShape;
 
 impl HvatApp {
     /// Build the right sidebar with band selection and image adjustments.
@@ -43,6 +46,120 @@ impl HvatApp {
         let undo_ctx = UndoContext::new(undo_stack, slider_undo_snapshot);
 
         let mut sidebar_ctx = Context::new();
+
+        // Annotations Panel Collapsible (at top for easy access)
+        let annotations_state = self.annotations_collapsed.clone();
+        let annotations_scroll = self.annotations_scroll_state.clone();
+        let current_image_data = self.image_data_store.get(&self.current_image_path());
+        let annotations = current_image_data.annotations.clone();
+        let categories_for_annotations = self.categories.clone();
+        let hidden_categories = self.hidden_categories.clone();
+
+        // Count annotations by category
+        let mut category_counts: std::collections::HashMap<u32, usize> =
+            std::collections::HashMap::new();
+        for ann in &annotations {
+            *category_counts.entry(ann.category_id).or_insert(0) += 1;
+        }
+
+        // Filter annotations based on hidden categories
+        let visible_annotations: Vec<_> = annotations
+            .iter()
+            .filter(|ann| !hidden_categories.contains(&ann.category_id))
+            .collect();
+
+        let total_count = annotations.len();
+
+        // Minimal padding for compact buttons
+        let chip_padding = Padding::new(2.0, 6.0, 2.0, 6.0);
+
+        let collapsible_annotations = Collapsible::new("Annotations")
+            .state(&annotations_state)
+            .scroll_state(&annotations_scroll)
+            .width(Length::Fill(1.0))
+            .max_height(ANNOTATIONS_MAX_HEIGHT)
+            .on_toggle(Message::AnnotationsToggled)
+            .on_scroll(Message::AnnotationsScrolled)
+            .content(|c| {
+                if total_count == 0 {
+                    c.text("No annotations").size(FONT_SIZE_SMALL);
+                } else {
+                    // Category filters - colored buttons
+                    for cat in &categories_for_annotations {
+                        let cat_id = cat.id;
+                        let cat_color = cat.color;
+                        let cat_name = cat.name.clone();
+                        let count = category_counts.get(&cat_id).copied().unwrap_or(0);
+                        let is_hidden = hidden_categories.contains(&cat_id);
+
+                        // Format: [vis] Name (count)
+                        let vis = if is_hidden { "○" } else { "●" };
+                        let label = format!("{} {} ({})", vis, cat_name, count);
+
+                        // Convert RGB bytes to Color
+                        let bg_color =
+                            Color::from_rgb_bytes(cat_color[0], cat_color[1], cat_color[2]);
+
+                        c.button(label)
+                            .width(Length::Fill(1.0))
+                            .padding(chip_padding)
+                            .text_align(Alignment::Left)
+                            .background_color(bg_color)
+                            .on_click(Message::ToggleCategoryFilter(cat_id));
+                    }
+
+                    // Divider
+                    c.text("---").size(FONT_SIZE_TINY).align(Alignment::Center);
+
+                    // Annotation list - colored buttons
+                    if visible_annotations.is_empty() {
+                        c.text("All hidden").size(FONT_SIZE_SMALL);
+                    } else {
+                        for ann in &visible_annotations {
+                            let ann_id = ann.id;
+                            let is_selected = ann.selected;
+
+                            // Find category
+                            let cat = categories_for_annotations
+                                .iter()
+                                .find(|cat| cat.id == ann.category_id);
+                            let cat_color = cat.map(|c| c.color).unwrap_or([128, 128, 128]);
+                            let cat_name = cat.map(|c| c.name.as_str()).unwrap_or("?");
+
+                            // Size info
+                            let size_info = match &ann.shape {
+                                AnnotationShape::BoundingBox { width, height, .. } => {
+                                    format_area(width * height)
+                                }
+                                AnnotationShape::Point { .. } => "pt".to_string(),
+                                AnnotationShape::Polygon { vertices } => {
+                                    format!(
+                                        "{}v {}",
+                                        vertices.len(),
+                                        format_area(polygon_area(vertices))
+                                    )
+                                }
+                            };
+
+                            // Format: [sel] ID Category Size
+                            let sel = if is_selected { "▸" } else { " " };
+                            let label = format!("{}{} {} {}", sel, ann_id, cat_name, size_info);
+
+                            // Convert RGB bytes to Color
+                            let bg_color =
+                                Color::from_rgb_bytes(cat_color[0], cat_color[1], cat_color[2]);
+
+                            c.button(label)
+                                .width(Length::Fill(1.0))
+                                .padding(chip_padding)
+                                .text_align(Alignment::Left)
+                                .background_color(bg_color)
+                                .on_click(Message::SelectAnnotation(ann_id));
+                        }
+                    }
+                }
+            });
+        sidebar_ctx.add(Element::new(collapsible_annotations));
 
         // Band Selection Collapsible
         let band_s = band_state.clone();
@@ -318,5 +435,33 @@ impl HvatApp {
             .height(Length::Fill(1.0));
 
         Element::new(panel)
+    }
+}
+
+/// Calculate the area of a polygon using the shoelace formula.
+fn polygon_area(vertices: &[(f32, f32)]) -> f32 {
+    if vertices.len() < 3 {
+        return 0.0;
+    }
+
+    let mut area = 0.0;
+    let n = vertices.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        area += vertices[i].0 * vertices[j].1;
+        area -= vertices[j].0 * vertices[i].1;
+    }
+    (area / 2.0).abs()
+}
+
+/// Format area in a compact, human-readable format.
+/// Uses K for thousands, M for millions.
+fn format_area(area: f32) -> String {
+    if area >= 1_000_000.0 {
+        format!("{:.1}M", area / 1_000_000.0)
+    } else if area >= 1_000.0 {
+        format!("{:.1}K", area / 1_000.0)
+    } else {
+        format!("{:.0}", area)
     }
 }

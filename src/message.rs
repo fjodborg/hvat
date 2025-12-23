@@ -154,6 +154,16 @@ pub enum Message {
     /// Thumbnail clicked (by index)
     ThumbnailSelect(usize),
 
+    // Right Sidebar - Annotations Panel
+    /// Annotations section toggled
+    AnnotationsToggled(CollapsibleState),
+    /// Annotations list scrolled
+    AnnotationsScrolled(ScrollState),
+    /// Toggle category visibility filter (hide/show annotations of a category)
+    ToggleCategoryFilter(u32),
+    /// Select an annotation by ID (for highlighting/scrolling to it)
+    SelectAnnotation(u32),
+
     // Right Sidebar Scroll
     /// Right sidebar scrolled
     RightScrolled(ScrollState),
