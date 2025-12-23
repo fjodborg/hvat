@@ -402,6 +402,24 @@ impl HvatApp {
 
         sidebar_ctx.text("").size(FONT_SIZE_SMALL);
         sidebar_ctx
+            .text("Polygon Editing")
+            .size(FONT_SIZE_SECONDARY)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Select polygon, then:")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Click edge: add & drag vertex")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Right-click vertex: remove")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+
+        sidebar_ctx.text("").size(FONT_SIZE_SMALL);
+        sidebar_ctx
             .text("Settings (gear icon)")
             .size(FONT_SIZE_SECONDARY)
             .align(Alignment::Center);

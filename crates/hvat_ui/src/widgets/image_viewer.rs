@@ -55,6 +55,8 @@ pub struct ImagePointerEvent {
     pub screen_y: f32,
     /// The kind of pointer event
     pub kind: PointerEventKind,
+    /// Which mouse button triggered this event
+    pub button: MouseButton,
     /// Updated viewer state (app should use this to persist pointer_state)
     pub viewer_state: ImageViewerState,
 }
@@ -881,7 +883,6 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
 
                 // In annotation mode, emit pointer events for drawing
                 if self.interaction_mode == InteractionMode::Annotate {
-                    self.state.pointer_state = PointerState::AnnotationDrag;
                     self.state.sync_with_bounds(
                         bounds.width,
                         bounds.height,
@@ -889,6 +890,9 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                         self.texture_height,
                     );
                     let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+
+                    // Start drag
+                    self.state.pointer_state = PointerState::AnnotationDrag;
                     return self
                         .on_pointer
                         .call(ImagePointerEvent {
@@ -897,6 +901,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_x: position.0,
                             screen_y: position.1,
                             kind: PointerEventKind::DragStart,
+                            button: MouseButton::Left,
                             viewer_state: self.state.clone(),
                         })
                         .into();
@@ -927,6 +932,42 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_x: position.0,
                             screen_y: position.1,
                             kind: PointerEventKind::DragEnd,
+                            button: MouseButton::Left,
+                            viewer_state: self.state.clone(),
+                        })
+                        .into();
+                }
+                EventResult::None
+            }
+
+            // Handle right mouse click for annotation mode (vertex add/remove)
+            Event::MousePress {
+                button: MouseButton::Right,
+                position,
+                ..
+            } => {
+                if !bounds.contains(position.0, position.1) {
+                    return EventResult::None;
+                }
+
+                // In annotation mode, emit right-click pointer events for vertex editing
+                if self.interaction_mode == InteractionMode::Annotate {
+                    self.state.sync_with_bounds(
+                        bounds.width,
+                        bounds.height,
+                        self.texture_width,
+                        self.texture_height,
+                    );
+                    let (image_x, image_y) = self.screen_to_image(position.0, position.1, &bounds);
+                    return self
+                        .on_pointer
+                        .call(ImagePointerEvent {
+                            image_x,
+                            image_y,
+                            screen_x: position.0,
+                            screen_y: position.1,
+                            kind: PointerEventKind::Click,
+                            button: MouseButton::Right,
                             viewer_state: self.state.clone(),
                         })
                         .into();
@@ -994,6 +1035,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_x: position.0,
                             screen_y: position.1,
                             kind: PointerEventKind::DragMove,
+                            button: MouseButton::Left,
                             viewer_state: self.state.clone(),
                         })
                         .into();

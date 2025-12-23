@@ -1552,7 +1552,7 @@ impl HvatApp {
 
     /// Handle pointer events for annotation drawing.
     fn handle_pointer_event(&mut self, event: hvat_ui::ImagePointerEvent) {
-        use hvat_ui::PointerEventKind;
+        use hvat_ui::{MouseButton, PointerEventKind};
 
         // Update viewer state to persist pointer_state changes
         self.viewer_state = event.viewer_state.clone();
@@ -1561,13 +1561,23 @@ impl HvatApp {
         let y = event.image_y;
 
         log::trace!(
-            "ImagePointer: tool={:?}, pos=({:.1}, {:.1}), kind={:?}",
+            "ImagePointer: tool={:?}, pos=({:.1}, {:.1}), kind={:?}, button={:?}",
             self.selected_tool,
             x,
             y,
-            event.kind
+            event.kind,
+            event.button
         );
 
+        // Handle right-click on polygon vertex: remove vertex (in Select tool mode)
+        if event.button == MouseButton::Right && event.kind == PointerEventKind::Click {
+            if self.selected_tool == AnnotationTool::Select {
+                self.handle_polygon_vertex_remove(x, y);
+            }
+            return;
+        }
+
+        // Handle left-click events
         match self.selected_tool {
             AnnotationTool::Select => {
                 self.handle_select_tool(x, y, event.kind);
@@ -1633,6 +1643,55 @@ impl HvatApp {
         };
 
         if let Some((annotation_id, original_shape, handle)) = selected_handle {
+            use crate::model::{AnnotationHandle, PolygonHandle};
+
+            // Special case: clicking on a polygon edge inserts a vertex and starts dragging it
+            if let AnnotationHandle::Polygon(PolygonHandle::Edge { index: edge_idx }) = handle {
+                log::info!(
+                    "Click on edge {} of polygon {} - inserting vertex at ({:.1}, {:.1}) and starting drag",
+                    edge_idx,
+                    annotation_id,
+                    x,
+                    y
+                );
+
+                if let Some(new_shape) = original_shape.insert_polygon_vertex(edge_idx, x, y) {
+                    // Push undo point before modifying
+                    self.push_annotation_undo_point();
+
+                    // Find the annotation index and apply the change
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    if let Some(ann) = image_data
+                        .annotations
+                        .iter_mut()
+                        .find(|a| a.id == annotation_id)
+                    {
+                        ann.shape = new_shape.clone();
+                        self.auto_save.mark_dirty();
+
+                        // The new vertex is at index edge_idx + 1 (inserted after edge_idx)
+                        let new_vertex_idx = edge_idx + 1;
+                        let new_handle =
+                            AnnotationHandle::Polygon(PolygonHandle::Vertex(new_vertex_idx));
+
+                        // Start dragging the new vertex immediately
+                        image_data.edit_state = EditState::DraggingHandle {
+                            annotation_id,
+                            handle: new_handle,
+                            start_x: x,
+                            start_y: y,
+                            original_shape: new_shape,
+                        };
+
+                        log::info!(
+                            "Inserted vertex at index {} and started dragging",
+                            new_vertex_idx
+                        );
+                    }
+                }
+                return;
+            }
+
             // Record potential drag - we don't start editing until there's actual movement
             log::debug!(
                 "Potential drag on annotation {}, handle={:?}",
@@ -1810,6 +1869,65 @@ impl HvatApp {
                 log::info!("Finished editing annotation");
                 image_data.edit_state = EditState::Idle;
             }
+        }
+    }
+
+    /// Handle right-click on a selected polygon vertex to remove it.
+    /// Only removes if polygon has more than 3 vertices (minimum for a valid polygon).
+    fn handle_polygon_vertex_remove(&mut self, x: f32, y: f32) {
+        use crate::model::{AnnotationHandle, PolygonHandle};
+
+        let path = self.current_image_path();
+        let hit_radius = self.scaled_hit_radius();
+
+        // Find the selected polygon annotation
+        let selected_polygon_info = {
+            let image_data = self.image_data_store.get(&path);
+            image_data
+                .annotations
+                .iter()
+                .enumerate()
+                .find(|(_, ann)| ann.selected && ann.shape.is_polygon())
+                .map(|(idx, ann)| (idx, ann.id, ann.shape.clone()))
+        };
+
+        let Some((ann_idx, ann_id, shape)) = selected_polygon_info else {
+            log::debug!("Right-click: no polygon selected");
+            return;
+        };
+
+        // Hit-test against the polygon's handles - only care about vertices
+        let Some(handle) = shape.hit_test_handle(x, y, hit_radius) else {
+            log::debug!("Right-click: not on a polygon handle");
+            return;
+        };
+
+        if let AnnotationHandle::Polygon(PolygonHandle::Vertex(vertex_idx)) = handle {
+            log::info!(
+                "Right-click on vertex {} of polygon {} - attempting removal",
+                vertex_idx,
+                ann_id
+            );
+
+            if let Some(new_shape) = shape.remove_polygon_vertex(vertex_idx) {
+                // Push undo point before modifying
+                self.push_annotation_undo_point();
+
+                // Apply the change
+                let image_data = self.image_data_store.get_or_create(&path);
+                if let Some(ann) = image_data.annotations.get_mut(ann_idx) {
+                    ann.shape = new_shape;
+                    self.auto_save.mark_dirty();
+                    log::info!(
+                        "Removed vertex {} from polygon {} (now has {} vertices)",
+                        vertex_idx,
+                        ann_id,
+                        ann.shape.polygon_vertices().map(|v| v.len()).unwrap_or(0)
+                    );
+                }
+            }
+        } else {
+            log::debug!("Right-click not on a vertex - no action");
         }
     }
 

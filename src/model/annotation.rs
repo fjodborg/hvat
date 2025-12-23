@@ -44,11 +44,14 @@ pub enum BBoxHandle {
     Center,
 }
 
-/// Handle type for polygon vertices.
+/// Handle type for polygon vertices and edges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolygonHandle {
     /// A specific vertex index
     Vertex(usize),
+    /// An edge between vertex `index` and vertex `(index + 1) % len`
+    /// The f32 value is the interpolation factor (0.0-1.0) along the edge
+    Edge { index: usize },
     /// Center of the polygon (for move)
     Center,
 }
@@ -309,10 +312,24 @@ impl AnnotationShape {
                 }
             }
             AnnotationShape::Polygon { vertices } => {
-                // Check vertices first
+                // Check vertices first (highest priority)
                 for (i, (vx, vy)) in vertices.iter().enumerate() {
                     if point_distance(x, y, *vx, *vy) <= hit_radius {
                         return Some(AnnotationHandle::Polygon(PolygonHandle::Vertex(i)));
+                    }
+                }
+
+                // Check edges (second priority) - for closed polygons only
+                if vertices.len() >= MIN_POLYGON_VERTICES {
+                    for i in 0..vertices.len() {
+                        let (x1, y1) = vertices[i];
+                        let (x2, y2) = vertices[(i + 1) % vertices.len()];
+                        let (dist, _t) = point_to_segment_distance(x, y, x1, y1, x2, y2);
+                        if dist <= hit_radius {
+                            return Some(AnnotationHandle::Polygon(PolygonHandle::Edge {
+                                index: i,
+                            }));
+                        }
                     }
                 }
 
@@ -427,6 +444,11 @@ impl AnnotationShape {
                             new_vertices[*idx].1 += dy;
                         }
                     }
+                    PolygonHandle::Edge { .. } => {
+                        // Edge handles are used for insertion, not dragging
+                        // Return None to indicate no drag operation
+                        return None;
+                    }
                     PolygonHandle::Center => {
                         for (vx, vy) in new_vertices.iter_mut() {
                             *vx += dx;
@@ -470,6 +492,91 @@ impl AnnotationShape {
             }
         }
     }
+
+    /// Remove a vertex from a polygon at the given index.
+    /// Returns the new shape if successful, or None if:
+    /// - The shape is not a polygon
+    /// - The index is out of bounds
+    /// - Removing the vertex would leave fewer than MIN_POLYGON_VERTICES
+    pub fn remove_polygon_vertex(&self, vertex_index: usize) -> Option<AnnotationShape> {
+        match self {
+            AnnotationShape::Polygon { vertices } => {
+                if vertex_index >= vertices.len() {
+                    log::warn!(
+                        "Cannot remove vertex {}: index out of bounds (len={})",
+                        vertex_index,
+                        vertices.len()
+                    );
+                    return None;
+                }
+                if vertices.len() <= MIN_POLYGON_VERTICES {
+                    log::warn!(
+                        "Cannot remove vertex: polygon has minimum {} vertices",
+                        MIN_POLYGON_VERTICES
+                    );
+                    return None;
+                }
+                let mut new_vertices = vertices.clone();
+                new_vertices.remove(vertex_index);
+                Some(AnnotationShape::Polygon {
+                    vertices: new_vertices,
+                })
+            }
+            _ => {
+                log::warn!("Cannot remove vertex: shape is not a polygon");
+                None
+            }
+        }
+    }
+
+    /// Insert a new vertex into a polygon on the edge at the given index.
+    /// The vertex is inserted between vertices at `edge_index` and `(edge_index + 1) % len`.
+    /// The position (x, y) is the location where the new vertex will be placed.
+    /// Returns the new shape if successful, or None if:
+    /// - The shape is not a polygon
+    /// - The edge index is out of bounds
+    pub fn insert_polygon_vertex(
+        &self,
+        edge_index: usize,
+        x: f32,
+        y: f32,
+    ) -> Option<AnnotationShape> {
+        match self {
+            AnnotationShape::Polygon { vertices } => {
+                if edge_index >= vertices.len() {
+                    log::warn!(
+                        "Cannot insert vertex on edge {}: index out of bounds (len={})",
+                        edge_index,
+                        vertices.len()
+                    );
+                    return None;
+                }
+                let mut new_vertices = vertices.clone();
+                // Insert after edge_index (the edge goes from edge_index to edge_index+1)
+                new_vertices.insert(edge_index + 1, (x, y));
+                Some(AnnotationShape::Polygon {
+                    vertices: new_vertices,
+                })
+            }
+            _ => {
+                log::warn!("Cannot insert vertex: shape is not a polygon");
+                None
+            }
+        }
+    }
+
+    /// Check if this shape is a polygon.
+    pub fn is_polygon(&self) -> bool {
+        matches!(self, AnnotationShape::Polygon { .. })
+    }
+
+    /// Get the vertices if this is a polygon.
+    pub fn polygon_vertices(&self) -> Option<&Vec<(f32, f32)>> {
+        match self {
+            AnnotationShape::Polygon { vertices } => Some(vertices),
+            _ => None,
+        }
+    }
 }
 
 /// Calculate distance between two points.
@@ -479,15 +586,74 @@ fn point_distance(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     (dx * dx + dy * dy).sqrt()
 }
 
-/// Calculate the centroid of a polygon.
-fn polygon_centroid(vertices: &[(f32, f32)]) -> Option<(f32, f32)> {
-    if vertices.is_empty() {
-        return None;
+/// Calculate the shortest distance from a point to a line segment.
+/// Returns the distance and the interpolation factor t (0.0-1.0) along the segment.
+fn point_to_segment_distance(px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> (f32, f32) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len_sq = dx * dx + dy * dy;
+
+    if len_sq < 1e-10 {
+        // Degenerate segment (essentially a point)
+        return (point_distance(px, py, x1, y1), 0.0);
     }
-    let sum_x: f32 = vertices.iter().map(|(x, _)| x).sum();
-    let sum_y: f32 = vertices.iter().map(|(_, y)| y).sum();
-    let n = vertices.len() as f32;
-    Some((sum_x / n, sum_y / n))
+
+    // Project point onto line, clamped to segment
+    let t = ((px - x1) * dx + (py - y1) * dy) / len_sq;
+    let t_clamped = t.clamp(0.0, 1.0);
+
+    // Find closest point on segment
+    let closest_x = x1 + t_clamped * dx;
+    let closest_y = y1 + t_clamped * dy;
+
+    (point_distance(px, py, closest_x, closest_y), t_clamped)
+}
+
+/// Calculate the geometric centroid (center of mass) of a polygon.
+/// Uses the shoelace formula to compute the true centroid weighted by area,
+/// not just the average of vertices.
+fn polygon_centroid(vertices: &[(f32, f32)]) -> Option<(f32, f32)> {
+    if vertices.len() < 3 {
+        // For degenerate cases, fall back to average of points
+        if vertices.is_empty() {
+            return None;
+        }
+        let sum_x: f32 = vertices.iter().map(|(x, _)| x).sum();
+        let sum_y: f32 = vertices.iter().map(|(_, y)| y).sum();
+        let n = vertices.len() as f32;
+        return Some((sum_x / n, sum_y / n));
+    }
+
+    // Calculate signed area using shoelace formula
+    let mut signed_area = 0.0f32;
+    let mut cx = 0.0f32;
+    let mut cy = 0.0f32;
+    let n = vertices.len();
+
+    for i in 0..n {
+        let (x0, y0) = vertices[i];
+        let (x1, y1) = vertices[(i + 1) % n];
+
+        // Cross product term (shoelace)
+        let cross = x0 * y1 - x1 * y0;
+        signed_area += cross;
+        cx += (x0 + x1) * cross;
+        cy += (y0 + y1) * cross;
+    }
+
+    // Handle degenerate polygon (zero area)
+    if signed_area.abs() < 1e-10 {
+        // Fall back to average of vertices
+        let sum_x: f32 = vertices.iter().map(|(x, _)| x).sum();
+        let sum_y: f32 = vertices.iter().map(|(_, y)| y).sum();
+        return Some((sum_x / n as f32, sum_y / n as f32));
+    }
+
+    signed_area *= 0.5;
+    cx /= 6.0 * signed_area;
+    cy /= 6.0 * signed_area;
+
+    Some((cx, cy))
 }
 
 /// A completed annotation with metadata.
