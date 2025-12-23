@@ -6,8 +6,60 @@
 use hvat_ui::KeyCode;
 use serde::{Deserialize, Serialize};
 
+/// Log level setting for the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    /// Show only errors
+    Error,
+    /// Show errors and warnings
+    Warn,
+    /// Show errors, warnings, and info messages
+    #[default]
+    Info,
+    /// Show debug-level logging
+    Debug,
+    /// Show all log messages including trace
+    Trace,
+}
+
+impl LogLevel {
+    /// Get the display name for this log level.
+    pub fn name(&self) -> &'static str {
+        match self {
+            LogLevel::Error => "Error",
+            LogLevel::Warn => "Warn",
+            LogLevel::Info => "Info",
+            LogLevel::Debug => "Debug",
+            LogLevel::Trace => "Trace",
+        }
+    }
+
+    /// Get all log levels in order from least to most verbose.
+    pub fn all() -> &'static [LogLevel] {
+        &[
+            LogLevel::Error,
+            LogLevel::Warn,
+            LogLevel::Info,
+            LogLevel::Debug,
+            LogLevel::Trace,
+        ]
+    }
+
+    /// Convert to log crate's LevelFilter.
+    pub fn to_level_filter(&self) -> log::LevelFilter {
+        match self {
+            LogLevel::Error => log::LevelFilter::Error,
+            LogLevel::Warn => log::LevelFilter::Warn,
+            LogLevel::Info => log::LevelFilter::Info,
+            LogLevel::Debug => log::LevelFilter::Debug,
+            LogLevel::Trace => log::LevelFilter::Trace,
+        }
+    }
+}
+
 use crate::keybindings::{KeyBindings, MAX_CATEGORY_HOTKEYS};
-use crate::model::Category;
+use crate::model::{Category, default_categories};
 
 /// Current configuration file format version.
 /// Increment this when making breaking changes to the config format.
@@ -55,6 +107,10 @@ pub struct UserPreferences {
     /// Number of images to preload before/after current
     #[serde(default = "default_gpu_preload_count")]
     pub gpu_preload_count: usize,
+
+    /// Log verbosity level
+    #[serde(default)]
+    pub log_level: LogLevel,
 }
 
 fn default_dark_theme() -> bool {
@@ -72,6 +128,7 @@ impl Default for UserPreferences {
             export_folder: String::new(),
             import_folder: String::new(),
             gpu_preload_count: default_gpu_preload_count(),
+            log_level: LogLevel::default(),
         }
     }
 }
@@ -192,23 +249,10 @@ impl AppConfig {
             app_name: default_app_name(),
             preferences: UserPreferences::default(),
             keybindings: KeyBindingsConfig::default(),
-            categories: vec![
-                CategoryConfig {
-                    id: 1,
-                    name: "Background".to_string(),
-                    color: [100, 100, 100],
-                },
-                CategoryConfig {
-                    id: 2,
-                    name: "Object".to_string(),
-                    color: [255, 100, 100],
-                },
-                CategoryConfig {
-                    id: 3,
-                    name: "Region".to_string(),
-                    color: [100, 255, 100],
-                },
-            ],
+            categories: default_categories()
+                .iter()
+                .map(CategoryConfig::from)
+                .collect(),
         }
     }
 
@@ -235,6 +279,130 @@ impl AppConfig {
     /// Get the default filename for config export.
     pub fn default_filename() -> &'static str {
         "hvat-config.json"
+    }
+
+    /// Get the default config file path for auto-load/save.
+    /// Returns None on WASM (no filesystem access).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn default_path() -> Option<std::path::PathBuf> {
+        // Try to use XDG config directory, fall back to home directory
+        if let Some(config_dir) = dirs::config_dir() {
+            Some(config_dir.join("hvat").join(Self::default_filename()))
+        } else if let Some(home_dir) = dirs::home_dir() {
+            Some(
+                home_dir
+                    .join(".config")
+                    .join("hvat")
+                    .join(Self::default_filename()),
+            )
+        } else {
+            None
+        }
+    }
+
+    /// Try to load configuration from the default path.
+    /// Returns None if the file doesn't exist or can't be read.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_from_default_path() -> Option<Self> {
+        let path = Self::default_path()?;
+        if !path.exists() {
+            log::debug!("No config file found at {:?}", path);
+            return None;
+        }
+
+        match std::fs::read_to_string(&path) {
+            Ok(json) => match Self::from_json(&json) {
+                Ok(config) => {
+                    log::info!("Loaded configuration from {:?}", path);
+                    Some(config)
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse config file {:?}: {}", path, e);
+                    None
+                }
+            },
+            Err(e) => {
+                log::warn!("Failed to read config file {:?}: {}", path, e);
+                None
+            }
+        }
+    }
+
+    /// Save configuration to the default path.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn save_to_default_path(&self) -> Result<(), ConfigError> {
+        let path = Self::default_path().ok_or_else(|| {
+            ConfigError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Could not determine config directory",
+            ))
+        })?;
+
+        // Create parent directories if needed
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let json = self.to_json()?;
+        std::fs::write(&path, json)?;
+        log::info!("Saved configuration to {:?}", path);
+        Ok(())
+    }
+
+    /// LocalStorage key for WASM config persistence.
+    #[cfg(target_arch = "wasm32")]
+    const LOCALSTORAGE_KEY: &'static str = "hvat-config";
+
+    /// Try to load configuration from localStorage (WASM only).
+    /// Returns None if not found or can't be parsed.
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_from_local_storage() -> Option<Self> {
+        let window = web_sys::window()?;
+        let storage = window.local_storage().ok()??;
+
+        match storage.get_item(Self::LOCALSTORAGE_KEY) {
+            Ok(Some(json)) => match Self::from_json(&json) {
+                Ok(config) => {
+                    log::info!("Loaded configuration from localStorage");
+                    Some(config)
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse config from localStorage: {}", e);
+                    None
+                }
+            },
+            Ok(None) => {
+                log::debug!("No config found in localStorage");
+                None
+            }
+            Err(e) => {
+                log::warn!("Failed to read from localStorage: {:?}", e);
+                None
+            }
+        }
+    }
+
+    /// Save configuration to localStorage (WASM only).
+    #[cfg(target_arch = "wasm32")]
+    pub fn save_to_local_storage(&self) -> Result<(), ConfigError> {
+        let window = web_sys::window()
+            .ok_or_else(|| ConfigError::StorageError("No window object available".to_string()))?;
+
+        let storage = window
+            .local_storage()
+            .map_err(|e| ConfigError::StorageError(format!("localStorage access error: {:?}", e)))?
+            .ok_or_else(|| ConfigError::StorageError("localStorage not available".to_string()))?;
+
+        let json = self.to_json()?;
+
+        storage
+            .set_item(Self::LOCALSTORAGE_KEY, &json)
+            .map_err(|e| {
+                ConfigError::StorageError(format!("Failed to save to localStorage: {:?}", e))
+            })?;
+
+        log::info!("Saved configuration to localStorage");
+        Ok(())
     }
 }
 
@@ -263,4 +431,8 @@ pub enum ConfigError {
     /// I/O error when reading/writing config
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+
+    /// Storage error (localStorage in WASM)
+    #[error("Storage error: {0}")]
+    StorageError(String),
 }

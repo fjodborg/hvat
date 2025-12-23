@@ -20,9 +20,9 @@ use hvat_ui::prelude::*;
 use hvat_ui::{Application, Column, Element, Event, FileTreeState, KeyCode, Resources, Row};
 
 use crate::constants::{
-    DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_GPU_PRELOAD_COUNT, DEFAULT_HUE,
-    DEFAULT_RED_BAND, DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH,
-    MAX_GPU_PRELOAD_COUNT, UNDO_HISTORY_SIZE,
+    DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_HUE, DEFAULT_RED_BAND,
+    DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH, MAX_GPU_PRELOAD_COUNT,
+    UNDO_HISTORY_SIZE,
 };
 use crate::data::HyperspectralData;
 use crate::format::{AutoSaveManager, ExportOptions, FormatRegistry, ProjectData};
@@ -347,6 +347,8 @@ pub struct HvatApp {
     pub(crate) settings_section_collapsed: CollapsibleState,
     pub(crate) appearance_section_collapsed: CollapsibleState,
     pub(crate) keybindings_section_collapsed: CollapsibleState,
+    pub(crate) folders_section_collapsed: CollapsibleState,
+    pub(crate) performance_section_collapsed: CollapsibleState,
     pub(crate) dependencies_collapsed: CollapsibleState,
     /// Collapsed state for each license type in the dependencies view
     pub(crate) license_collapsed: std::collections::HashMap<String, CollapsibleState>,
@@ -364,6 +366,8 @@ pub struct HvatApp {
     pub(crate) keybindings: KeyBindings,
     /// Whether we're currently capturing a key for rebinding
     pub(crate) capturing_keybind: Option<KeybindTarget>,
+    /// Current log level setting
+    pub(crate) log_level: crate::config::LogLevel,
 
     // Format system
     /// Format registry with all supported formats
@@ -394,6 +398,18 @@ impl HvatApp {
     pub fn new() -> Self {
         let num_bands = DEFAULT_TEST_BANDS;
 
+        // Load saved configuration or use defaults
+        #[cfg(not(target_arch = "wasm32"))]
+        let config = crate::config::AppConfig::load_from_default_path().unwrap_or_default();
+        #[cfg(target_arch = "wasm32")]
+        let config = crate::config::AppConfig::load_from_local_storage().unwrap_or_default();
+
+        // Clamp GPU preload count to valid range
+        let gpu_preload_count = config
+            .preferences
+            .gpu_preload_count
+            .min(MAX_GPU_PRELOAD_COUNT);
+
         Self {
             viewer_state: ImageViewerState::new(),
             texture_id: None,
@@ -408,8 +424,8 @@ impl HvatApp {
                         "/home/fjod/Pictures",
                     )) {
                         Ok(p) => Some(p),
-                        Err(e) => {
-                            log::warn!("Failed to load test folder: {}", e);
+                        Err(_e) => {
+                            // Can't log here - logger not initialized yet
                             None
                         }
                     }
@@ -425,13 +441,13 @@ impl HvatApp {
             shared_pipeline: None,
             gpu_state: None,
             current_gpu_image_path: None,
-            gpu_cache: GpuTextureCache::new(DEFAULT_GPU_PRELOAD_COUNT),
+            gpu_cache: GpuTextureCache::new(gpu_preload_count),
 
             pending_image_load: false,
             pending_preload: false,
 
-            gpu_preload_count: DEFAULT_GPU_PRELOAD_COUNT,
-            gpu_preload_slider: SliderState::new(DEFAULT_GPU_PRELOAD_COUNT as f32),
+            gpu_preload_count,
+            gpu_preload_slider: SliderState::new(gpu_preload_count as f32),
 
             tools_collapsed: CollapsibleState::expanded(),
             categories_collapsed: CollapsibleState::expanded(),
@@ -449,12 +465,7 @@ impl HvatApp {
 
             selected_tool: AnnotationTool::default(),
 
-            // Annotations are stored per-image in image_data_store
-            categories: vec![
-                Category::new(1, "Background", [100, 100, 100]),
-                Category::new(2, "Object", [255, 100, 100]),
-                Category::new(3, "Region", [100, 255, 100]),
-            ],
+            categories: config.categories.into_iter().map(|c| c.into()).collect(),
             selected_category: 1,
             editing_category: None,
             category_name_input: String::new(),
@@ -487,16 +498,19 @@ impl HvatApp {
             settings_section_collapsed: CollapsibleState::expanded(),
             appearance_section_collapsed: CollapsibleState::expanded(),
             keybindings_section_collapsed: CollapsibleState::collapsed(),
+            folders_section_collapsed: CollapsibleState::collapsed(),
+            performance_section_collapsed: CollapsibleState::expanded(),
             dependencies_collapsed: CollapsibleState::collapsed(),
             license_collapsed: std::collections::HashMap::new(),
 
-            dark_theme: true, // Default to dark theme
-            export_folder: String::new(),
+            dark_theme: config.preferences.dark_theme,
+            export_folder: config.preferences.export_folder,
             export_folder_state: TextInputState::default(),
-            import_folder: String::new(),
+            import_folder: config.preferences.import_folder,
             import_folder_state: TextInputState::default(),
-            keybindings: KeyBindings::default(),
+            keybindings: config.keybindings.to_keybindings(),
             capturing_keybind: None,
+            log_level: config.preferences.log_level,
 
             format_registry: FormatRegistry::new(),
             auto_save: AutoSaveManager::new(),
@@ -799,9 +813,35 @@ impl HvatApp {
                 export_folder: self.export_folder.clone(),
                 import_folder: self.import_folder.clone(),
                 gpu_preload_count: self.gpu_preload_count,
+                log_level: self.log_level,
             },
             keybindings: KeyBindingsConfig::from(&self.keybindings),
             categories: self.categories.iter().map(CategoryConfig::from).collect(),
+        }
+    }
+
+    /// Auto-save configuration to persistent storage.
+    /// On native: saves to ~/.config/hvat/hvat-config.json
+    /// On WASM: saves to browser localStorage
+    fn auto_save_config(&self) {
+        let config = self.build_config();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Err(e) = config.save_to_default_path() {
+                log::warn!("Failed to auto-save config: {}", e);
+            } else {
+                log::debug!("Auto-saved configuration");
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Err(e) = config.save_to_local_storage() {
+                log::warn!("Failed to auto-save config to localStorage: {}", e);
+            } else {
+                log::debug!("Auto-saved configuration to localStorage");
+            }
         }
     }
 
@@ -833,6 +873,11 @@ impl HvatApp {
 
         #[cfg(target_arch = "wasm32")]
         {
+            // Save to localStorage for persistence
+            if let Err(e) = config.save_to_local_storage() {
+                log::warn!("Failed to save config to localStorage: {}", e);
+            }
+
             // Download file via browser
             self.download_file_wasm(
                 crate::config::AppConfig::default_filename(),
@@ -1109,6 +1154,8 @@ impl HvatApp {
                     .min(MAX_GPU_PRELOAD_COUNT);
                 self.gpu_preload_slider = SliderState::new(self.gpu_preload_count as f32);
                 self.gpu_cache.set_preload_count(self.gpu_preload_count);
+                self.log_level = config.preferences.log_level;
+                log::set_max_level(self.log_level.to_level_filter());
 
                 // Apply keybindings
                 self.keybindings = config.keybindings.to_keybindings();
@@ -1144,6 +1191,15 @@ impl HvatApp {
                         cat.name,
                         cat.color
                     );
+                }
+
+                // Save imported config to localStorage for persistence (WASM only)
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let new_config = self.build_config();
+                    if let Err(e) = new_config.save_to_local_storage() {
+                        log::warn!("Failed to save imported config to localStorage: {}", e);
+                    }
                 }
             }
             Err(e) => {
@@ -2065,7 +2121,12 @@ impl Application for HvatApp {
     type Message = Message;
 
     fn setup(&mut self, resources: &mut Resources<'_>) {
-        log::info!("HVAT setup: initializing GPU pipeline...");
+        // Apply configured log level at startup
+        log::set_max_level(self.log_level.to_level_filter());
+        log::info!(
+            "HVAT setup: log level set to {}, initializing GPU pipeline...",
+            self.log_level.name()
+        );
 
         // Create shared pipeline (once, reusable for all images)
         let gpu_ctx = resources.gpu_context();
@@ -2206,17 +2267,43 @@ impl Application for HvatApp {
             Message::KeybindingsSectionToggled(state) => {
                 self.keybindings_section_collapsed = state;
             }
+            Message::FoldersSectionToggled(state) => {
+                self.folders_section_collapsed = state;
+            }
+            Message::PerformanceSectionToggled(state) => {
+                self.performance_section_collapsed = state;
+            }
             Message::ThemeChanged(dark) => {
                 self.dark_theme = dark;
                 log::info!("Theme changed to: {}", if dark { "dark" } else { "light" });
+                self.auto_save_config();
+            }
+            Message::LogLevelChanged(level) => {
+                self.log_level = level;
+                // Update the global log level
+                log::set_max_level(level.to_level_filter());
+                log::info!("Log level changed to: {}", level.name());
+                self.auto_save_config();
             }
             Message::ExportFolderChanged(text, state) => {
+                // Only save when focus is lost (not on every keystroke)
+                let was_focused = self.export_folder_state.is_focused;
+                let now_focused = state.is_focused;
                 self.export_folder = text;
                 self.export_folder_state = state;
+                if was_focused && !now_focused {
+                    self.auto_save_config();
+                }
             }
             Message::ImportFolderChanged(text, state) => {
+                // Only save when focus is lost (not on every keystroke)
+                let was_focused = self.import_folder_state.is_focused;
+                let now_focused = state.is_focused;
                 self.import_folder = text;
                 self.import_folder_state = state;
+                if was_focused && !now_focused {
+                    self.auto_save_config();
+                }
             }
 
             // Image Viewer
@@ -2281,6 +2368,7 @@ impl Application for HvatApp {
                 ));
                 self.auto_save.mark_dirty();
                 log::info!("Added new category: {}", new_id);
+                self.auto_save_config();
             }
             Message::StartEditingCategory(id) => {
                 if let Some(cat) = self.categories.iter().find(|c| c.id == id) {
@@ -2302,6 +2390,7 @@ impl Application for HvatApp {
                             cat.name = self.category_name_input.clone();
                             self.auto_save.mark_dirty();
                             log::info!("Renamed category {} to '{}'", id, cat.name);
+                            self.auto_save_config();
                         }
                     }
                 }
@@ -2324,6 +2413,10 @@ impl Application for HvatApp {
                 }
             }
             Message::CloseCategoryColorPicker => {
+                // Save config when color picker is closed (captures final color from live updates)
+                if self.color_picker_category.is_some() {
+                    self.auto_save_config();
+                }
                 self.color_picker_category = None;
                 self.color_picker_state = ColorPickerState::default();
                 log::info!("Closed color picker");
@@ -2343,6 +2436,7 @@ impl Application for HvatApp {
                         cat.color = color;
                         self.auto_save.mark_dirty();
                         log::info!("Applied color for category {}: {:?}", id, color);
+                        self.auto_save_config();
                     }
                 }
                 self.color_picker_category = None;
@@ -2597,6 +2691,10 @@ impl Application for HvatApp {
 
             // Settings - GPU Preloading
             Message::GpuPreloadCountChanged(state) => {
+                // Only auto-save when drag ends to avoid excessive writes
+                let was_dragging = self.gpu_preload_slider.drag.is_dragging();
+                let now_dragging = state.drag.is_dragging();
+
                 self.gpu_preload_slider = state;
                 let count = (self.gpu_preload_slider.value as usize).min(MAX_GPU_PRELOAD_COUNT);
                 self.gpu_preload_count = count;
@@ -2606,6 +2704,11 @@ impl Application for HvatApp {
                 // Trigger preloading with new count if we have a project
                 if count > 0 && self.project.is_some() {
                     self.pending_preload = true;
+                }
+
+                // Auto-save when drag ends (not during drag to avoid excessive writes)
+                if was_dragging && !now_dragging {
+                    self.auto_save_config();
                 }
             }
 
@@ -2858,12 +2961,14 @@ impl Application for HvatApp {
                             log::info!("Set category {} hotkey to {:?}", index + 1, key);
                         }
                     }
+                    self.auto_save_config();
                 }
             }
             Message::ResetKeybindings => {
                 self.keybindings = KeyBindings::default();
                 self.capturing_keybind = None;
                 log::info!("Reset keybindings to defaults");
+                self.auto_save_config();
             }
 
             // Configuration Export/Import

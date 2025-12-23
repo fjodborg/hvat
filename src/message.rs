@@ -8,6 +8,7 @@ use hvat_ui::FileTreeState;
 use hvat_ui::ImagePointerEvent;
 use hvat_ui::prelude::*;
 
+use crate::config::LogLevel;
 use crate::keybindings::KeybindTarget;
 use crate::model::AnnotationTool;
 use crate::state::{LoadedImage, ProjectState};
@@ -42,8 +43,14 @@ pub enum Message {
     AppearanceSectionToggled(CollapsibleState),
     /// Keybindings section toggled
     KeybindingsSectionToggled(CollapsibleState),
+    /// Folders section toggled
+    FoldersSectionToggled(CollapsibleState),
+    /// Performance section toggled
+    PerformanceSectionToggled(CollapsibleState),
     /// Theme changed (true = dark, false = light)
     ThemeChanged(bool),
+    /// Log level changed
+    LogLevelChanged(LogLevel),
     /// Export folder path changed
     ExportFolderChanged(String, TextInputState),
     /// Import folder path changed

@@ -9,6 +9,7 @@ use hvat_ui::{
 };
 
 use crate::app::HvatApp;
+use crate::config::LogLevel;
 use crate::constants::MAX_GPU_PRELOAD_COUNT;
 use crate::keybindings::{KeybindTarget, key_to_string};
 use crate::licenses::{DEPENDENCIES, DependencyInfo};
@@ -41,11 +42,14 @@ impl HvatApp {
         let settings_section_collapsed = self.settings_section_collapsed;
         let appearance_section_collapsed = self.appearance_section_collapsed;
         let keybindings_section_collapsed = self.keybindings_section_collapsed;
+        let folders_section_collapsed = self.folders_section_collapsed;
+        let performance_section_collapsed = self.performance_section_collapsed;
         let dependencies_collapsed = self.dependencies_collapsed;
         let license_collapsed = self.license_collapsed.clone();
 
         // Clone values for closures
         let dark_theme = self.dark_theme;
+        let log_level = self.log_level;
         let export_folder = self.export_folder.clone();
         let export_folder_state = self.export_folder_state.clone();
         let import_folder = self.import_folder.clone();
@@ -55,11 +59,17 @@ impl HvatApp {
 
         let mut ctx = Context::new();
 
-        // Header with back button
+        // Header with back button and export/import
         ctx.row(|r| {
             r.button("< Back")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::CloseSettings);
+            r.button("Export")
+                .padding(BUTTON_PADDING_COMPACT)
+                .on_click(Message::ExportConfig);
+            r.button("Import")
+                .padding(BUTTON_PADDING_COMPACT)
+                .on_click(Message::ImportConfig);
             r.text("Settings").size(FONT_SIZE_TITLE);
         });
 
@@ -72,7 +82,9 @@ impl HvatApp {
             .state(&settings_section_collapsed)
             .on_toggle(Message::SettingsSectionToggled)
             .content(|c| {
-                // Appearance subsection
+                // --------------------------------
+                // Appearance subsection (collapsible)
+                // --------------------------------
                 let appearance_collapsible = Collapsible::new("Appearance")
                     .state(&appearance_section_collapsed)
                     .on_toggle(Message::AppearanceSectionToggled)
@@ -85,76 +97,91 @@ impl HvatApp {
                         });
                         ac.text("(Theme switching not yet implemented)")
                             .size(FONT_SIZE_SMALL);
+
+                        ac.text("");
+
+                        // Log Level setting
+                        ac.row(|r| {
+                            r.text("Log Level:");
+                            for level in LogLevel::all() {
+                                let is_selected = *level == log_level;
+                                let label = if is_selected {
+                                    format!("[{}]", level.name())
+                                } else {
+                                    level.name().to_string()
+                                };
+                                r.button(label)
+                                    .padding(BUTTON_PADDING_COMPACT)
+                                    .on_click(Message::LogLevelChanged(*level));
+                            }
+                        });
+                        ac.text("Controls verbosity of log output (Error = least, Trace = most)")
+                            .size(FONT_SIZE_SMALL);
                     });
                 c.add(Element::new(appearance_collapsible));
 
                 c.text("");
 
-                // Default Folders subsection
-                c.text("Default Folders");
-                c.text("");
+                // --------------------------------
+                // Default Folders subsection (collapsible)
+                // --------------------------------
+                let folders_collapsible = Collapsible::new("Default Folders")
+                    .state(&folders_section_collapsed)
+                    .on_toggle(Message::FoldersSectionToggled)
+                    .content(|fc| {
+                        fc.row(|r| {
+                            r.text("Export:");
+                            r.text_input()
+                                .placeholder("./exports")
+                                .value(&export_folder)
+                                .state(&export_folder_state)
+                                .width(Length::Fixed(200.0))
+                                .on_change(Message::ExportFolderChanged)
+                                .build();
+                        });
 
-                c.row(|r| {
-                    r.text("Export:");
-                    r.text_input()
-                        .placeholder("./exports")
-                        .value(&export_folder)
-                        .state(&export_folder_state)
-                        .width(Length::Fixed(200.0))
-                        .on_change(Message::ExportFolderChanged)
-                        .build();
-                });
-
-                c.row(|r| {
-                    r.text("Import:");
-                    r.text_input()
-                        .placeholder("./imports")
-                        .value(&import_folder)
-                        .state(&import_folder_state)
-                        .width(Length::Fixed(200.0))
-                        .on_change(Message::ImportFolderChanged)
-                        .build();
-                });
-
-                c.text("");
-
-                // Performance subsection
-                c.text("Performance");
-                c.text("");
-
-                c.row(|r| {
-                    r.text("GPU Preload:");
-                    r.slider(0.0, MAX_GPU_PRELOAD_COUNT as f32)
-                        .step(1.0)
-                        .state(&gpu_preload_slider)
-                        .width(Length::Fixed(120.0))
-                        .on_change(Message::GpuPreloadCountChanged)
-                        .build();
-                    r.text(format!("{}", gpu_preload_count));
-                });
-                c.text("Number of images to preload before/after current (0 = disabled)")
-                    .size(FONT_SIZE_SMALL);
+                        fc.row(|r| {
+                            r.text("Import:");
+                            r.text_input()
+                                .placeholder("./imports")
+                                .value(&import_folder)
+                                .state(&import_folder_state)
+                                .width(Length::Fixed(200.0))
+                                .on_change(Message::ImportFolderChanged)
+                                .build();
+                        });
+                    });
+                c.add(Element::new(folders_collapsible));
 
                 c.text("");
 
-                // Configuration Import/Export subsection
-                c.text("Configuration");
+                // --------------------------------
+                // Performance subsection (collapsible)
+                // --------------------------------
+                let performance_collapsible = Collapsible::new("Performance")
+                    .state(&performance_section_collapsed)
+                    .on_toggle(Message::PerformanceSectionToggled)
+                    .content(|pc| {
+                        pc.row(|r| {
+                            r.text("GPU Preload:");
+                            r.slider(0.0, MAX_GPU_PRELOAD_COUNT as f32)
+                                .step(1.0)
+                                .state(&gpu_preload_slider)
+                                .width(Length::Fixed(120.0))
+                                .on_change(Message::GpuPreloadCountChanged)
+                                .build();
+                            r.text(format!("{}", gpu_preload_count));
+                        });
+                        pc.text("Number of images to preload before/after current (0 = disabled)")
+                            .size(FONT_SIZE_SMALL);
+                    });
+                c.add(Element::new(performance_collapsible));
+
                 c.text("");
 
-                c.row(|r| {
-                    r.button("Export Settings")
-                        .padding(BUTTON_PADDING_COMPACT)
-                        .on_click(Message::ExportConfig);
-                    r.button("Import Settings")
-                        .padding(BUTTON_PADDING_COMPACT)
-                        .on_click(Message::ImportConfig);
-                });
-                c.text("Export or import all settings including keybindings and categories")
-                    .size(FONT_SIZE_SMALL);
-
-                c.text("");
-
-                // Keybindings subsection
+                // --------------------------------
+                // Keybindings subsection (collapsible)
+                // --------------------------------
                 let keybindings = self.keybindings.clone();
                 let categories = self.categories.clone();
                 let capturing_keybind = self.capturing_keybind;

@@ -23,6 +23,7 @@ quick-xml = { version = "0.31", features = ["serialize"] }
 thiserror = "1.0"
 log = "0.4"
 web-time = "1.1"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
@@ -50,6 +51,8 @@ web-sys = { version = "0.3", features = [
     "FileSystemFileHandle",
     "FileSystemHandle",
     "FileSystemHandleKind",
+    # LocalStorage for config persistence
+    "Storage",
 ] }
 winit = "0.29"
 wgpu = "27"
@@ -60,6 +63,7 @@ env_logger = "0.11"
 winit = "0.29"
 wgpu = "27"
 rfd = "0.15"
+dirs = "5.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.rfd]
 version = "0.15"

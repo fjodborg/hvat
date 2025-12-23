@@ -23,3 +23,12 @@ impl Category {
         }
     }
 }
+
+/// Default categories for new projects.
+pub fn default_categories() -> Vec<Category> {
+    vec![
+        Category::new(1, "Background", [100, 100, 100]),
+        Category::new(2, "Object", [255, 100, 100]),
+        Category::new(3, "Region", [100, 255, 100]),
+    ]
+}
