@@ -56,27 +56,49 @@ impl AnnotationFormat for HvatJsonFormat {
         &self,
         data: &ProjectData,
         path: &Path,
-        _options: &ExportOptions,
+        options: &ExportOptions,
     ) -> Result<ExportResult, FormatError> {
         log::info!("Exporting HVAT project to {:?}", path);
 
+        let (bytes, mut result) = self.export_to_bytes(data, options)?;
+        std::fs::write(path, &bytes)?;
+        result.files_created = vec![path.to_path_buf()];
+
+        log::info!(
+            "Exported {} images with {} annotations",
+            result.images_exported,
+            result.annotations_exported
+        );
+
+        Ok(result)
+    }
+
+    fn export_to_bytes(
+        &self,
+        data: &ProjectData,
+        _options: &ExportOptions,
+    ) -> Result<(Vec<u8>, ExportResult), FormatError> {
+        log::info!("Exporting HVAT project to bytes");
+
         // Serialize with pretty printing for readability
         let json = serde_json::to_string_pretty(data)?;
-        std::fs::write(path, &json)?;
-
         let annotations_count = data.total_annotations();
+
         log::info!(
             "Exported {} images with {} annotations",
             data.images.len(),
             annotations_count
         );
 
-        Ok(ExportResult {
-            images_exported: data.images.len(),
-            annotations_exported: annotations_count,
-            warnings: Vec::new(),
-            files_created: vec![path.to_path_buf()],
-        })
+        Ok((
+            json.into_bytes(),
+            ExportResult {
+                images_exported: data.images.len(),
+                annotations_exported: annotations_count,
+                warnings: Vec::new(),
+                files_created: Vec::new(),
+            },
+        ))
     }
 
     fn import(&self, path: &Path, _options: &ImportOptions) -> Result<ProjectData, FormatError> {

@@ -449,12 +449,13 @@ impl<A: Application> AppState<A> {
             let result = self.app.tick_with_resources(&mut resources);
             if result {
                 self.needs_rebuild = true;
+                self.redraw_requested = true;
             }
             result
         };
 
         // Keep requesting redraws if tick_with_resources indicated more work
-        self.redraw_requested = needs_more_ticks;
+        self.redraw_requested = self.redraw_requested || needs_more_ticks;
 
         // Rebuild view if needed.
         // NOTE: We previously deferred rebuilds while mouse button was pressed to preserve

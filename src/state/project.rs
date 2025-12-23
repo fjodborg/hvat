@@ -186,11 +186,21 @@ impl ProjectState {
             return Err("No images loaded".to_string());
         }
 
+        log::info!(
+            "from_loaded_images: creating project from {} loaded images",
+            loaded_images.len()
+        );
+
         // Create virtual paths from image names
         let images: Vec<PathBuf> = loaded_images
             .iter()
             .map(|img| PathBuf::from(&img.name))
             .collect();
+
+        log::info!("from_loaded_images: created {} image paths", images.len());
+        for (i, img) in images.iter().enumerate() {
+            log::debug!("  Image {}: {:?}", i, img);
+        }
 
         Ok(Self {
             folder: PathBuf::from(""),

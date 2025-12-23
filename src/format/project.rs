@@ -498,6 +498,13 @@ impl ProjectData {
         get_image_data: impl Fn(&PathBuf) -> ImageData,
         get_dimensions: impl Fn(&PathBuf) -> Option<(u32, u32)>,
     ) -> Self {
+        log::info!(
+            "ProjectData::from_app_state: folder={:?}, {} images, {} categories",
+            folder,
+            image_paths.len(),
+            categories.len()
+        );
+
         let mut data = Self::new();
         data.folder = folder;
 
@@ -511,7 +518,7 @@ impl ProjectData {
         data.global_tags = global_tags.to_vec();
 
         // Convert images and annotations
-        for path in image_paths {
+        for (idx, path) in image_paths.iter().enumerate() {
             let image_data = get_image_data(path);
             let mut entry = ImageEntry::new(path.clone());
 
@@ -526,8 +533,19 @@ impl ProjectData {
                 .map(AnnotationEntry::from_annotation)
                 .collect();
 
+            log::debug!(
+                "  Image {}: {:?} ({} annotations)",
+                idx,
+                path,
+                entry.annotations.len()
+            );
             data.images.push(entry);
         }
+
+        log::info!(
+            "ProjectData::from_app_state: created {} image entries",
+            data.images.len()
+        );
 
         data.metadata = ProjectMetadata::new();
         data

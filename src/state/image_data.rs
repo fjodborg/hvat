@@ -14,6 +14,9 @@ pub struct ImageData {
     pub selected_tags: HashSet<String>,
     /// Annotations on this image
     pub annotations: Vec<Annotation>,
+    /// Image dimensions (width, height) - stored when image is loaded
+    #[serde(default)]
+    pub dimensions: Option<(u32, u32)>,
     /// Current drawing state for this image (transient, not serialized)
     #[serde(skip)]
     pub drawing_state: DrawingState,

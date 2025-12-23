@@ -81,6 +81,10 @@ pub enum FormatError {
         /// The image missing dimensions
         image: String,
     },
+
+    /// Operation not supported by this format
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
 }
 
 impl FormatError {

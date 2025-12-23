@@ -58,9 +58,30 @@ impl AnnotationFormat for CocoFormat {
         &self,
         data: &ProjectData,
         path: &Path,
-        _options: &ExportOptions,
+        options: &ExportOptions,
     ) -> Result<ExportResult, FormatError> {
         log::info!("Exporting COCO annotations to {:?}", path);
+
+        let (bytes, mut result) = self.export_to_bytes(data, options)?;
+        std::fs::write(path, &bytes)?;
+        result.files_created = vec![path.to_path_buf()];
+
+        log::info!(
+            "Exported {} images with {} annotations ({} warnings)",
+            result.images_exported,
+            result.annotations_exported,
+            result.warnings.len()
+        );
+
+        Ok(result)
+    }
+
+    fn export_to_bytes(
+        &self,
+        data: &ProjectData,
+        _options: &ExportOptions,
+    ) -> Result<(Vec<u8>, ExportResult), FormatError> {
+        log::info!("Exporting COCO annotations to bytes");
 
         let mut warnings = Vec::new();
         let mut coco = CocoDataset::new();
@@ -92,9 +113,25 @@ impl AnnotationFormat for CocoFormat {
                 );
             }
 
+            // Compute relative path from project folder to preserve structure
+            let relative_path = if !data.folder.as_os_str().is_empty() {
+                image
+                    .path
+                    .strip_prefix(&data.folder)
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| image.path.to_string_lossy().to_string())
+            } else {
+                // When folder is empty (e.g., WASM), use the path directly
+                // It's already a relative path in WASM case
+                image.path.to_string_lossy().to_string()
+            };
+            // Normalize path separators for cross-platform compatibility
+            let file_name = relative_path.replace('\\', "/");
+
             coco.images.push(CocoImage {
                 id: image_id,
-                file_name: image.filename.clone(),
+                file_name,
                 width,
                 height,
                 license: None,
@@ -117,9 +154,8 @@ impl AnnotationFormat for CocoFormat {
             }
         }
 
-        // Serialize and write
+        // Serialize to JSON
         let json = serde_json::to_string_pretty(&coco)?;
-        std::fs::write(path, &json)?;
 
         log::info!(
             "Exported {} images with {} annotations ({} warnings)",
@@ -128,12 +164,15 @@ impl AnnotationFormat for CocoFormat {
             warnings.len()
         );
 
-        Ok(ExportResult {
-            images_exported: data.images.len(),
-            annotations_exported,
-            warnings,
-            files_created: vec![path.to_path_buf()],
-        })
+        Ok((
+            json.into_bytes(),
+            ExportResult {
+                images_exported: data.images.len(),
+                annotations_exported,
+                warnings,
+                files_created: Vec::new(),
+            },
+        ))
     }
 
     fn import(&self, path: &Path, options: &ImportOptions) -> Result<ProjectData, FormatError> {

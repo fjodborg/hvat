@@ -25,9 +25,7 @@ use crate::constants::{
     MAX_GPU_PRELOAD_COUNT, UNDO_HISTORY_SIZE,
 };
 use crate::data::HyperspectralData;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::format::ExportOptions;
-use crate::format::{AutoSaveManager, FormatRegistry, ProjectData};
+use crate::format::{AutoSaveManager, ExportOptions, FormatRegistry, ProjectData};
 use crate::keybindings::{KeyBindings, KeybindTarget};
 use crate::message::Message;
 use crate::model::{
@@ -891,27 +889,68 @@ impl HvatApp {
             }
         };
 
-        // Create and trigger download link
+        // Create anchor element for download
         let anchor: web_sys::HtmlAnchorElement = match document.create_element("a") {
             Ok(el) => match el.dyn_into() {
                 Ok(a) => a,
                 Err(_) => {
                     log::error!("Failed to cast to anchor");
+                    let _ = web_sys::Url::revoke_object_url(&url);
                     return;
                 }
             },
             Err(e) => {
                 log::error!("Failed to create anchor: {:?}", e);
+                let _ = web_sys::Url::revoke_object_url(&url);
                 return;
             }
         };
 
         anchor.set_href(&url);
         anchor.set_download(filename);
+
+        // Some browsers require the anchor to be in the DOM
+        let body = match document.body() {
+            Some(b) => b,
+            None => {
+                log::error!("No document body for download");
+                let _ = web_sys::Url::revoke_object_url(&url);
+                return;
+            }
+        };
+
+        // Temporarily add to DOM, click, then remove
+        if let Err(e) = body.append_child(&anchor) {
+            log::error!("Failed to append anchor to body: {:?}", e);
+            let _ = web_sys::Url::revoke_object_url(&url);
+            return;
+        }
+
         anchor.click();
 
-        // Revoke the URL after a short delay
-        let _ = web_sys::Url::revoke_object_url(&url);
+        // Remove from DOM
+        let _ = body.remove_child(&anchor);
+
+        // Schedule URL revocation after download has started
+        // Use setTimeout to delay revocation - the download needs time to begin
+        let url_clone = url.clone();
+        let closure = wasm_bindgen::closure::Closure::once(Box::new(move || {
+            let _ = web_sys::Url::revoke_object_url(&url_clone);
+            log::debug!("Revoked object URL for download");
+        }) as Box<dyn FnOnce()>);
+
+        if let Err(e) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            1000, // 1 second delay
+        ) {
+            log::warn!("Failed to schedule URL revocation: {:?}", e);
+            // Clean up immediately if setTimeout fails
+            let _ = web_sys::Url::revoke_object_url(&url);
+        } else {
+            // Prevent closure from being dropped before timeout fires
+            closure.forget();
+        }
+
         log::info!("Configuration download initiated: {}", filename);
     }
 
@@ -1040,9 +1079,25 @@ impl HvatApp {
     fn apply_config_from_json(&mut self, json: &str) {
         use crate::config::AppConfig;
 
+        log::info!("Applying config from JSON ({} bytes)", json.len());
+
         match AppConfig::from_json(json) {
             Ok(config) => {
-                log::info!("Loaded configuration version {}", config.version);
+                log::info!(
+                    "Parsed config version {}: dark_theme={}, gpu_preload={}, {} categories",
+                    config.version,
+                    config.preferences.dark_theme,
+                    config.preferences.gpu_preload_count,
+                    config.categories.len()
+                );
+
+                // Log current state before applying
+                log::debug!(
+                    "Before apply: dark_theme={}, gpu_preload={}, {} categories",
+                    self.dark_theme,
+                    self.gpu_preload_count,
+                    self.categories.len()
+                );
 
                 // Apply preferences
                 self.dark_theme = config.preferences.dark_theme;
@@ -1074,11 +1129,22 @@ impl HvatApp {
                     self.selected_category = self.categories[0].id;
                 }
 
+                // Log state after applying
                 log::info!(
-                    "Configuration applied: {} categories, gpu_preload={}",
-                    self.categories.len(),
-                    self.gpu_preload_count
+                    "After apply: dark_theme={}, gpu_preload={}, {} categories",
+                    self.dark_theme,
+                    self.gpu_preload_count,
+                    self.categories.len()
                 );
+                for (i, cat) in self.categories.iter().enumerate() {
+                    log::debug!(
+                        "  Category {}: id={}, name='{}', color={:?}",
+                        i,
+                        cat.id,
+                        cat.name,
+                        cat.color
+                    );
+                }
             }
             Err(e) => {
                 log::error!("Failed to parse configuration: {}", e);
@@ -1183,6 +1249,9 @@ impl HvatApp {
                     self.image_size = (state.width, state.height);
                     self.gpu_state = Some(state);
                     self.current_gpu_image_path = Some(path.clone());
+                    // Store dimensions in image data for export
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    image_data.dimensions = Some(self.image_size);
                     // Render immediately so image displays in same frame
                     self.render_to_texture(resources);
                     self.needs_gpu_render = false;
@@ -1234,6 +1303,9 @@ impl HvatApp {
 
                 self.init_gpu_state(resources);
                 self.current_gpu_image_path = Some(path.clone());
+                // Store dimensions in image data for export
+                let image_data = self.image_data_store.get_or_create(&path);
+                image_data.dimensions = Some(self.image_size);
                 self.render_to_texture(resources);
                 self.pending_preload = true; // Trigger preloading for adjacent images
 
@@ -1821,19 +1893,40 @@ impl HvatApp {
             .map(|p| p.images.clone())
             .unwrap_or_default();
 
-        ProjectData::from_app_state(
+        log::info!(
+            "to_project_data: folder={:?}, {} images, {} categories",
+            folder,
+            image_paths.len(),
+            self.categories.len()
+        );
+
+        let data = ProjectData::from_app_state(
             folder,
             &image_paths,
             &self.categories,
             &self.global_tags,
             |path| self.image_data_store.get(path),
             |path| self.get_image_dimensions(path),
-        )
+        );
+
+        log::info!(
+            "to_project_data: exported {} images with {} total annotations",
+            data.images.len(),
+            data.total_annotations()
+        );
+
+        data
     }
 
     /// Get image dimensions for a path (from hyperspectral data if current image).
     fn get_image_dimensions(&self, path: &PathBuf) -> Option<(u32, u32)> {
-        // If this is the current image, we have dimensions
+        // First check stored dimensions in image data (set when image was loaded)
+        let image_data = self.image_data_store.get(path);
+        if let Some(dims) = image_data.dimensions {
+            return Some(dims);
+        }
+
+        // Fall back to current image dimensions if this is the current image
         if let Some(ref project) = self.project {
             if project.current_image() == Some(path) {
                 if self.image_size.0 > 0 && self.image_size.1 > 0 {
@@ -1841,9 +1934,39 @@ impl HvatApp {
                 }
             }
         }
-        // Otherwise we'd need to load the image to get dimensions
-        // For now, return None - dimensions will be filled during export if needed
         None
+    }
+
+    /// Extract and store image dimensions from loaded image bytes (WASM only).
+    /// This ensures all images have dimensions available for export.
+    #[cfg(target_arch = "wasm32")]
+    fn extract_dimensions_from_loaded_images(&mut self, project: &ProjectState) {
+        log::info!(
+            "Extracting dimensions from {} loaded images",
+            project.loaded_images.len()
+        );
+
+        for loaded_img in &project.loaded_images {
+            let path = PathBuf::from(&loaded_img.name);
+
+            // Try to decode image to get dimensions
+            match image::load_from_memory(&loaded_img.data) {
+                Ok(img) => {
+                    let dims = (img.width(), img.height());
+                    let image_data = self.image_data_store.get_or_create(&path);
+                    image_data.dimensions = Some(dims);
+                    log::debug!("Extracted dimensions for {:?}: {}x{}", path, dims.0, dims.1);
+                }
+                Err(e) => {
+                    log::warn!("Failed to decode image {:?} for dimensions: {}", path, e);
+                }
+            }
+        }
+
+        log::info!(
+            "Finished extracting dimensions for {} images",
+            project.loaded_images.len()
+        );
     }
 
     /// Apply imported ProjectData to app state.
@@ -2550,6 +2673,43 @@ impl Application for HvatApp {
                         }
                     }
                 }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    if let Some(format) = self.format_registry.get(&format_id) {
+                        let data = self.to_project_data();
+
+                        match format.export_to_bytes(&data, &ExportOptions::default()) {
+                            Ok((bytes, result)) => {
+                                // Per-image formats export as ZIP, single-file as their native format
+                                let (filename, mime_type) = if format.supports_per_image() {
+                                    (
+                                        format!("annotations-{}.zip", format.id()),
+                                        "application/zip",
+                                    )
+                                } else {
+                                    let ext =
+                                        format.extensions().first().copied().unwrap_or("json");
+                                    (format!("annotations.{}", ext), "application/json")
+                                };
+
+                                log::info!(
+                                    "Exporting {} images with {} annotations as download ({})",
+                                    result.images_exported,
+                                    result.annotations_exported,
+                                    filename
+                                );
+                                for warning in &result.warnings {
+                                    log::warn!("Export warning: {}", warning.message);
+                                }
+                                self.download_file_wasm(&filename, mime_type, &bytes);
+                            }
+                            Err(e) => {
+                                log::error!("Export failed: {:?}", e);
+                            }
+                        }
+                    }
+                }
             }
             Message::ImportAnnotations => {
                 log::info!("Import requested");
@@ -2643,6 +2803,8 @@ impl Application for HvatApp {
                                     "Loaded project with {} images from drop",
                                     project.images.len()
                                 );
+                                // Extract dimensions from all loaded images for export
+                                self.extract_dimensions_from_loaded_images(&project);
                                 self.project = Some(project);
                                 self.pending_image_load = true;
                             }
@@ -2741,6 +2903,8 @@ impl Application for HvatApp {
                                 // Clear GPU cache when folder changes
                                 self.gpu_cache.clear();
                                 log::info!("Loaded project with {} images", project.images.len());
+                                // Extract dimensions from all loaded images for export
+                                self.extract_dimensions_from_loaded_images(&project);
                                 self.project = Some(project);
                                 self.pending_image_load = true;
                             }

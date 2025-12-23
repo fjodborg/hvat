@@ -4,7 +4,11 @@
 //! with normalized bounding box coordinates.
 
 use std::collections::HashMap;
+use std::io::{Cursor, Write};
 use std::path::Path;
+
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 use crate::format::error::FormatError;
 use crate::format::project::{
@@ -181,6 +185,159 @@ impl AnnotationFormat for YoloFormat {
             warnings,
             files_created,
         })
+    }
+
+    fn export_to_bytes(
+        &self,
+        data: &ProjectData,
+        _options: &ExportOptions,
+    ) -> Result<(Vec<u8>, ExportResult), FormatError> {
+        log::info!("Exporting YOLO annotations to ZIP");
+
+        let mut warnings = Vec::new();
+        let mut annotations_exported = 0;
+
+        // Create ZIP file in memory
+        let buffer = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(buffer);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+
+        // Write classes.txt at root level
+        let classes_content: String = data
+            .categories
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        zip.start_file("classes.txt", options)
+            .map_err(|e| FormatError::Io(std::io::Error::other(e.to_string())))?;
+        zip.write_all(classes_content.as_bytes())?;
+
+        // Build category_id -> index map
+        let cat_to_idx: HashMap<u32, usize> = data
+            .categories
+            .iter()
+            .enumerate()
+            .map(|(idx, c)| (c.id, idx))
+            .collect();
+
+        // Write per-image annotation files, preserving folder structure
+        for image in &data.images {
+            let (width, height) = match image.dimensions {
+                Some((w, h)) if w > 0 && h > 0 => (w as f32, h as f32),
+                _ => {
+                    warnings.push(
+                        FormatWarning::error(format!(
+                            "Skipping image '{}': dimensions required for YOLO format",
+                            image.filename
+                        ))
+                        .with_image(&image.path),
+                    );
+                    continue;
+                }
+            };
+
+            // Compute relative path from project folder to preserve structure
+            let relative_path = if !data.folder.as_os_str().is_empty() {
+                image
+                    .path
+                    .strip_prefix(&data.folder)
+                    .ok()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| image.path.clone())
+            } else {
+                image.path.clone()
+            };
+
+            // Replace image extension with .txt, keeping the folder structure
+            let txt_path = relative_path.with_extension("txt");
+            let txt_filename = txt_path
+                .to_str()
+                .unwrap_or("unknown.txt")
+                .replace('\\', "/"); // Normalize path separators for ZIP
+
+            let mut lines = Vec::new();
+            for ann in &image.annotations {
+                match &ann.shape {
+                    ShapeEntry::BoundingBox {
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    } => {
+                        let class_idx = match cat_to_idx.get(&ann.category_id) {
+                            Some(&idx) => idx,
+                            None => {
+                                warnings.push(
+                                    FormatWarning::warning(format!(
+                                        "Unknown category ID {}, skipping annotation",
+                                        ann.category_id
+                                    ))
+                                    .with_image(&image.path),
+                                );
+                                continue;
+                            }
+                        };
+
+                        // Convert to YOLO normalized format
+                        // YOLO uses center coordinates, normalized to [0, 1]
+                        let cx = (x + w / 2.0) / width;
+                        let cy = (y + h / 2.0) / height;
+                        let nw = w / width;
+                        let nh = h / height;
+
+                        lines.push(format!(
+                            "{} {:.6} {:.6} {:.6} {:.6}",
+                            class_idx, cx, cy, nw, nh
+                        ));
+                        annotations_exported += 1;
+                    }
+                    ShapeEntry::Point { .. } => {
+                        warnings.push(
+                            FormatWarning::warning(
+                                "Skipped point annotation (YOLO only supports bounding boxes)",
+                            )
+                            .with_image(&image.path),
+                        );
+                    }
+                    ShapeEntry::Polygon { .. } => {
+                        warnings.push(
+                            FormatWarning::warning(
+                                "Skipped polygon annotation (YOLO only supports bounding boxes)",
+                            )
+                            .with_image(&image.path),
+                        );
+                    }
+                }
+            }
+
+            zip.start_file(&txt_filename, options)
+                .map_err(|e| FormatError::Io(std::io::Error::other(e.to_string())))?;
+            zip.write_all(lines.join("\n").as_bytes())?;
+        }
+
+        let buffer = zip
+            .finish()
+            .map_err(|e| FormatError::Io(std::io::Error::other(e.to_string())))?;
+
+        log::info!(
+            "Exported {} images with {} annotations ({} warnings) to ZIP",
+            data.images.len(),
+            annotations_exported,
+            warnings.len()
+        );
+
+        Ok((
+            buffer.into_inner(),
+            ExportResult {
+                images_exported: data.images.len(),
+                annotations_exported,
+                warnings,
+                files_created: Vec::new(),
+            },
+        ))
     }
 
     fn import(&self, path: &Path, _options: &ImportOptions) -> Result<ProjectData, FormatError> {

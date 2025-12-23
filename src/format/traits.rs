@@ -40,6 +40,22 @@ pub trait AnnotationFormat: Send + Sync {
         options: &ExportOptions,
     ) -> Result<ExportResult, FormatError>;
 
+    /// Export project data to bytes (for WASM/in-memory use).
+    ///
+    /// Returns the serialized data as bytes along with export statistics.
+    /// Default implementation returns an error for formats that don't support it.
+    /// Per-image formats (YOLO, VOC) typically don't support this.
+    fn export_to_bytes(
+        &self,
+        _data: &ProjectData,
+        _options: &ExportOptions,
+    ) -> Result<(Vec<u8>, ExportResult), FormatError> {
+        Err(FormatError::UnsupportedOperation(format!(
+            "Format '{}' does not support in-memory export",
+            self.id()
+        )))
+    }
+
     /// Import project data from the specified path.
     ///
     /// For single-file formats, `path` is the input file.

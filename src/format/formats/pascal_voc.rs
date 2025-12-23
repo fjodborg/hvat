@@ -3,11 +3,13 @@
 //! Implements the Pascal Visual Object Classes (VOC) annotation format,
 //! which uses one XML file per image.
 
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::Path;
 
 use quick_xml::Writer;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 use crate::format::error::FormatError;
 use crate::format::project::{
@@ -132,6 +134,108 @@ impl AnnotationFormat for PascalVocFormat {
             warnings,
             files_created,
         })
+    }
+
+    fn export_to_bytes(
+        &self,
+        data: &ProjectData,
+        _options: &ExportOptions,
+    ) -> Result<(Vec<u8>, ExportResult), FormatError> {
+        log::info!("Exporting Pascal VOC annotations to ZIP");
+
+        let mut warnings = Vec::new();
+        let mut annotations_exported = 0;
+
+        // Create ZIP file in memory
+        let buffer = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(buffer);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o644);
+
+        // Build category_id -> name map
+        let cat_names: std::collections::HashMap<u32, &str> = data
+            .categories
+            .iter()
+            .map(|c| (c.id, c.name.as_str()))
+            .collect();
+
+        // Write per-image annotation files, preserving folder structure
+        for image in &data.images {
+            let (width, height) = image.dimensions.unwrap_or((0, 0));
+            if width == 0 || height == 0 {
+                warnings.push(
+                    FormatWarning::warning(format!(
+                        "Image '{}' has no dimensions, using 0x0",
+                        image.filename
+                    ))
+                    .with_image(&image.path),
+                );
+            }
+
+            // Compute relative path from project folder to preserve structure
+            let relative_path = if !data.folder.as_os_str().is_empty() {
+                image
+                    .path
+                    .strip_prefix(&data.folder)
+                    .ok()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| image.path.clone())
+            } else {
+                image.path.clone()
+            };
+
+            // Replace image extension with .xml, keeping the folder structure
+            let xml_path = relative_path.with_extension("xml");
+            let xml_filename = xml_path
+                .to_str()
+                .unwrap_or("unknown.xml")
+                .replace('\\', "/"); // Normalize path separators for ZIP
+
+            // Get the relative folder for the XML content
+            let folder = relative_path
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("")
+                .replace('\\', "/");
+
+            let xml_content = self.build_xml(
+                &folder,
+                &image.filename,
+                width,
+                height,
+                &image.annotations,
+                &cat_names,
+                &mut warnings,
+                &image.path,
+                &mut annotations_exported,
+            )?;
+
+            zip.start_file(&xml_filename, options)
+                .map_err(|e| FormatError::Io(std::io::Error::other(e.to_string())))?;
+            zip.write_all(xml_content.as_bytes())?;
+        }
+
+        let buffer = zip
+            .finish()
+            .map_err(|e| FormatError::Io(std::io::Error::other(e.to_string())))?;
+
+        log::info!(
+            "Exported {} images with {} annotations ({} warnings) to ZIP",
+            data.images.len(),
+            annotations_exported,
+            warnings.len()
+        );
+
+        Ok((
+            buffer.into_inner(),
+            ExportResult {
+                images_exported: data.images.len(),
+                annotations_exported,
+                warnings,
+                files_created: Vec::new(),
+            },
+        ))
     }
 
     fn import(&self, path: &Path, _options: &ImportOptions) -> Result<ProjectData, FormatError> {
