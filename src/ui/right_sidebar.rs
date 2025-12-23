@@ -4,15 +4,15 @@ use std::rc::Rc;
 
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    BorderSides, Collapsible, Column, Context, Element, FileTree, Panel, ScrollDirection,
+    Alignment, BorderSides, Collapsible, Column, Context, Element, Panel, ScrollDirection,
     Scrollable, ScrollbarVisibility,
 };
 
 use crate::app::HvatApp;
 use crate::constants::{
     BRIGHTNESS_MAX, BRIGHTNESS_MIN, BRIGHTNESS_STEP, CONTRAST_MAX, CONTRAST_MIN, CONTRAST_STEP,
-    FILE_LIST_MAX_HEIGHT, GAMMA_MAX, GAMMA_MIN, GAMMA_STEP, HUE_MAX, HUE_MIN, HUE_STEP,
-    SIDEBAR_CONTENT_WIDTH, SIDEBAR_WIDTH, THUMBNAIL_SIZE, THUMBNAIL_SPACING, THUMBNAILS_MAX_HEIGHT,
+    GAMMA_MAX, GAMMA_MIN, GAMMA_STEP, HUE_MAX, HUE_MIN, HUE_STEP, SIDEBAR_CONTENT_WIDTH,
+    SIDEBAR_WIDTH, THUMBNAIL_SIZE, THUMBNAIL_SPACING, THUMBNAILS_MAX_HEIGHT,
 };
 use crate::message::Message;
 
@@ -43,10 +43,6 @@ impl HvatApp {
         let undo_ctx = UndoContext::new(undo_stack, slider_undo_snapshot);
 
         let mut sidebar_ctx = Context::new();
-
-        sidebar_ctx
-            .text("Image Controls")
-            .size(FONT_SIZE_SUBSECTION);
 
         // Band Selection Collapsible
         let band_s = band_state.clone();
@@ -144,55 +140,6 @@ impl HvatApp {
             });
         sidebar_ctx.add(Element::new(collapsible_adj));
 
-        // File Explorer Collapsible (VSCode-style tree view)
-        let file_explorer_state = self.file_explorer_collapsed.clone();
-        let file_explorer_scroll = self.file_explorer_scroll_state.clone();
-        let file_tree_state = self.file_explorer_state.clone();
-
-        // Build the file tree from project
-        let file_tree_nodes = self
-            .project
-            .as_ref()
-            .map(|p| p.build_file_tree())
-            .unwrap_or_default();
-        let current_path = self
-            .project
-            .as_ref()
-            .and_then(|p| p.current_relative_path());
-        let num_files = self.project.as_ref().map(|p| p.images.len()).unwrap_or(0);
-
-        let collapsible_files = Collapsible::new("File Explorer")
-            .state(&file_explorer_state)
-            .scroll_state(&file_explorer_scroll)
-            .scroll_direction(ScrollDirection::Both)
-            .width(Length::Fill(1.0))
-            .max_height(FILE_LIST_MAX_HEIGHT)
-            .on_toggle(Message::FileExplorerToggled)
-            .on_scroll(Message::FileExplorerScrolled)
-            .content(|c| {
-                if file_tree_nodes.is_empty() {
-                    c.text("No files loaded").size(FONT_SIZE_SECONDARY);
-                    c.text("Use 'Open Folder' to load images")
-                        .size(FONT_SIZE_SMALL);
-                } else {
-                    c.text(format!("{} files", num_files))
-                        .size(FONT_SIZE_SECONDARY);
-                    c.text("");
-
-                    // Create the file tree widget
-                    let file_tree = FileTree::new()
-                        .nodes(file_tree_nodes)
-                        .state(&file_tree_state)
-                        .selected(current_path)
-                        .width(Length::Fill(1.0))
-                        .on_select(Message::FileExplorerSelect)
-                        .on_state_change(Message::FileExplorerStateChanged);
-
-                    c.add(Element::new(file_tree));
-                }
-            });
-        sidebar_ctx.add(Element::new(collapsible_files));
-
         // Thumbnails Collapsible (placeholder - actual thumbnails need texture loading)
         let thumbnails_state = self.thumbnails_collapsed.clone();
         let thumbnails_scroll = self.thumbnails_scroll_state.clone();
@@ -221,7 +168,6 @@ impl HvatApp {
                         THUMBNAIL_SIZE as u32
                     ))
                     .size(FONT_SIZE_SECONDARY);
-                    c.text("");
 
                     // Display as a grid of placeholder buttons
                     // Calculate how many fit per row (account for padding/margins)
@@ -259,17 +205,101 @@ impl HvatApp {
             });
         sidebar_ctx.add(Element::new(collapsible_thumbs));
 
-        // Keyboard shortcuts info
-        sidebar_ctx.text("");
-        sidebar_ctx.text("--------------------");
+        // Quick Reference - "Tips" title left-aligned, content centered
+        sidebar_ctx.text("Tips").size(FONT_SIZE_TITLE);
         sidebar_ctx
-            .text("Keyboard shortcuts:")
-            .size(FONT_SIZE_SECONDARY);
-        sidebar_ctx.text("Ctrl+Z - Undo").size(FONT_SIZE_SMALL);
-        sidebar_ctx.text("Ctrl+Y - Redo").size(FONT_SIZE_SMALL);
-        sidebar_ctx.text("0 - Zoom to 100%").size(FONT_SIZE_SMALL);
-        sidebar_ctx.text("F - Fit to window").size(FONT_SIZE_SMALL);
-        sidebar_ctx.text("+/- - Zoom in/out").size(FONT_SIZE_SMALL);
+            .text("Quick Reference")
+            .size(FONT_SIZE_SUBSECTION)
+            .align(Alignment::Center);
+
+        sidebar_ctx
+            .text("Keyboard Shortcuts")
+            .size(FONT_SIZE_SECONDARY)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Ctrl+Z/Y - Undo/Redo")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("0 - Zoom 100%, F - Fit")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("+/- - Zoom in/out")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Left/Right - Prev/Next image")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Del - Delete annotation")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+
+        sidebar_ctx.text("").size(FONT_SIZE_SMALL);
+        sidebar_ctx
+            .text("Navigation")
+            .size(FONT_SIZE_SECONDARY)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Pan: Click+drag on image")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Zoom: Scroll wheel or +/-")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Images: Arrow keys or topbar")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+
+        sidebar_ctx.text("").size(FONT_SIZE_SMALL);
+        sidebar_ctx
+            .text("Categories & Colors")
+            .size(FONT_SIZE_SECONDARY)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Click swatch to pick color")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("1-0 keys select categories")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+
+        sidebar_ctx.text("").size(FONT_SIZE_SMALL);
+        sidebar_ctx
+            .text("Band Selection")
+            .size(FONT_SIZE_SECONDARY)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Drag sliders to change bands")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Type values in input fields")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+
+        sidebar_ctx.text("").size(FONT_SIZE_SMALL);
+        sidebar_ctx
+            .text("Settings (gear icon)")
+            .size(FONT_SIZE_SECONDARY)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("GPU preload: cache images")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Export/Import config files")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
+        sidebar_ctx
+            .text("Customize keybindings")
+            .size(FONT_SIZE_SMALL)
+            .align(Alignment::Center);
 
         // Wrap in scrollable
         let content = Element::new(Column::new(sidebar_ctx.take()));

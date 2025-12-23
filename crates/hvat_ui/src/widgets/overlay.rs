@@ -28,20 +28,6 @@ impl OverlayCloseHelper {
         !overlay_bounds.contains(position.0, position.1)
     }
 
-    /// Check if an event should close the overlay (Escape key or FocusLost).
-    ///
-    /// Returns `true` for Escape key press or FocusLost events.
-    #[inline]
-    pub fn should_close_on_event(event: &Event) -> bool {
-        matches!(
-            event,
-            Event::KeyPress {
-                key: KeyCode::Escape,
-                ..
-            } | Event::FocusLost
-        )
-    }
-
     /// Combined check for whether any event should close an open overlay.
     ///
     /// This handles:
@@ -100,25 +86,30 @@ mod tests {
 
     #[test]
     fn test_should_close_on_escape() {
+        let bounds = Bounds::new(100.0, 100.0, 50.0, 50.0);
         let event = Event::KeyPress {
             key: KeyCode::Escape,
             modifiers: crate::event::KeyModifiers::default(),
+            text_input_focused: false,
         };
-        assert!(OverlayCloseHelper::should_close_on_event(&event));
+        assert!(OverlayCloseHelper::should_close(&event, bounds));
     }
 
     #[test]
     fn test_should_close_on_focus_lost() {
+        let bounds = Bounds::new(100.0, 100.0, 50.0, 50.0);
         let event = Event::FocusLost;
-        assert!(OverlayCloseHelper::should_close_on_event(&event));
+        assert!(OverlayCloseHelper::should_close(&event, bounds));
     }
 
     #[test]
     fn test_should_not_close_on_other_events() {
+        let bounds = Bounds::new(100.0, 100.0, 50.0, 50.0);
         let event = Event::KeyPress {
             key: KeyCode::Enter,
             modifiers: crate::event::KeyModifiers::default(),
+            text_input_focused: false,
         };
-        assert!(!OverlayCloseHelper::should_close_on_event(&event));
+        assert!(!OverlayCloseHelper::should_close(&event, bounds));
     }
 }

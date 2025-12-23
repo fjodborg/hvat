@@ -304,18 +304,18 @@ impl From<[f32; 4]> for Padding {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Alignment {
     #[default]
-    Start,
+    Left,
     Center,
-    End,
+    Right,
 }
 
 impl Alignment {
     /// Calculate offset for aligning content within available space
     pub fn align(&self, available: f32, content: f32) -> f32 {
         match self {
-            Alignment::Start => 0.0,
+            Alignment::Left => 0.0,
             Alignment::Center => (available - content) / 2.0,
-            Alignment::End => available - content,
+            Alignment::Right => available - content,
         }
     }
 }
@@ -614,8 +614,8 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn alignment_start() {
-        let align = Alignment::Start;
+    fn alignment_left() {
+        let align = Alignment::Left;
         assert_eq!(align.align(100.0, 50.0), 0.0);
         assert_eq!(align.align(200.0, 80.0), 0.0);
     }
@@ -628,14 +628,14 @@ mod tests {
     }
 
     #[test]
-    fn alignment_end() {
-        let align = Alignment::End;
+    fn alignment_right() {
+        let align = Alignment::Right;
         assert_eq!(align.align(100.0, 50.0), 50.0); // 100 - 50
         assert_eq!(align.align(200.0, 80.0), 120.0); // 200 - 80
     }
 
     #[test]
     fn alignment_default() {
-        assert_eq!(Alignment::default(), Alignment::Start);
+        assert_eq!(Alignment::default(), Alignment::Left);
     }
 }

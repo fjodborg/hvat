@@ -46,13 +46,20 @@ impl<M> FlexLayout<M> {
             FlexDirection::Vertical => Length::Shrink,
         };
 
+        // Row: Center vertical alignment (common for toolbars/buttons)
+        // Column: Left horizontal alignment (common for text/forms)
+        let cross_align = match direction {
+            FlexDirection::Horizontal => Alignment::Center,
+            FlexDirection::Vertical => Alignment::Left,
+        };
+
         Self {
             children,
             spacing: DEFAULT_SPACING,
             padding: Padding::ZERO,
             width,
             height: Length::Shrink,
-            cross_align: Alignment::Center,
+            cross_align,
             direction,
             child_bounds: Vec::new(),
         }

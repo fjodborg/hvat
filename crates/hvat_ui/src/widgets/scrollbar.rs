@@ -58,13 +58,6 @@ use crate::constants::{SCROLLBAR_MIN_THUMB, SCROLLBAR_WIDTH};
 use crate::layout::Bounds;
 use crate::renderer::{Color, Renderer};
 
-/// Scrollbar orientation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScrollbarOrientation {
-    Vertical,
-    Horizontal,
-}
-
 /// Parameters for scrollbar thumb calculation
 #[derive(Debug, Clone, Copy)]
 pub struct ScrollbarParams {
@@ -120,8 +113,6 @@ pub struct ScrollbarThumb {
     pub bounds: Bounds,
     /// Ratio of scroll position (0.0 to 1.0)
     pub scroll_ratio: f32,
-    /// Whether scrolling is needed (content > viewport)
-    pub needs_scroll: bool,
 }
 
 // =============================================================================
@@ -163,7 +154,6 @@ pub fn calculate_vertical_thumb(params: &ScrollbarParams) -> Option<ScrollbarThu
             thumb_height,
         ),
         scroll_ratio,
-        needs_scroll: true,
     })
 }
 
@@ -202,7 +192,6 @@ pub fn calculate_horizontal_thumb(params: &ScrollbarParams) -> Option<ScrollbarT
             params.bar_size,
         ),
         scroll_ratio,
-        needs_scroll: true,
     })
 }
 
@@ -272,76 +261,6 @@ pub fn clamp_scroll_offsets(
 // Rendering
 // =============================================================================
 
-/// Colors for scrollbar rendering
-#[derive(Debug, Clone, Copy)]
-pub struct ScrollbarColors {
-    pub track: Color,
-    pub thumb: Color,
-    pub thumb_hover: Color,
-    pub thumb_drag: Color,
-}
-
-impl Default for ScrollbarColors {
-    fn default() -> Self {
-        Self {
-            track: Color::SCROLLBAR_TRACK,
-            thumb: Color::SCROLLBAR_THUMB,
-            thumb_hover: Color::rgba(0.55, 0.55, 0.6, 0.9),
-            thumb_drag: Color::rgba(0.6, 0.6, 0.65, 1.0),
-        }
-    }
-}
-
-/// Draw a vertical scrollbar track
-pub fn draw_vertical_track(renderer: &mut Renderer, bounds: Bounds, color: Color) {
-    renderer.fill_rect(bounds, color);
-}
-
-/// Draw a scrollbar thumb with state-based color
-pub fn draw_thumb(
-    renderer: &mut Renderer,
-    bounds: Bounds,
-    colors: &ScrollbarColors,
-    is_hovered: bool,
-    is_dragging: bool,
-) {
-    let color = if is_dragging {
-        colors.thumb_drag
-    } else if is_hovered {
-        colors.thumb_hover
-    } else {
-        colors.thumb
-    };
-    renderer.fill_rect(bounds, color);
-}
-
-/// Draw a complete vertical scrollbar (track + thumb)
-pub fn draw_vertical_scrollbar(
-    renderer: &mut Renderer,
-    track_bounds: Bounds,
-    thumb: &ScrollbarThumb,
-    colors: &ScrollbarColors,
-    is_hovered: bool,
-    is_dragging: bool,
-) {
-    draw_vertical_track(renderer, track_bounds, colors.track);
-    draw_thumb(renderer, thumb.bounds, colors, is_hovered, is_dragging);
-}
-
-/// Draw a complete horizontal scrollbar (track + thumb)
-pub fn draw_horizontal_scrollbar(
-    renderer: &mut Renderer,
-    track_bounds: Bounds,
-    thumb: &ScrollbarThumb,
-    colors: &ScrollbarColors,
-    is_hovered: bool,
-    is_dragging: bool,
-) {
-    // Track is horizontal, at the bottom
-    renderer.fill_rect(track_bounds, colors.track);
-    draw_thumb(renderer, thumb.bounds, colors, is_hovered, is_dragging);
-}
-
 /// Draw a simple vertical scrollbar with default colors (no hover/drag states)
 ///
 /// This is a convenience function for widgets that don't need interactive scrollbar states
@@ -402,22 +321,6 @@ pub fn draw_simple_horizontal_scrollbar(
     }
 }
 
-// =============================================================================
-// Hit Testing
-// =============================================================================
-
-/// Check if a point is inside the vertical scrollbar track area
-pub fn point_in_vertical_track(x: f32, y: f32, track_bounds: Bounds, bar_size: f32) -> bool {
-    let track_x = track_bounds.right() - bar_size;
-    x >= track_x && x <= track_bounds.right() && y >= track_bounds.y && y <= track_bounds.bottom()
-}
-
-/// Check if a point is inside the horizontal scrollbar track area
-pub fn point_in_horizontal_track(x: f32, y: f32, track_bounds: Bounds, bar_size: f32) -> bool {
-    let track_y = track_bounds.bottom() - bar_size;
-    x >= track_bounds.x && x <= track_bounds.right() && y >= track_y && y <= track_bounds.bottom()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,7 +336,6 @@ mod tests {
         let params = ScrollbarParams::new(400.0, 200.0, 0.0, Bounds::new(0.0, 0.0, 100.0, 200.0));
         let thumb = calculate_vertical_thumb(&params).unwrap();
         assert!((thumb.scroll_ratio - 0.0).abs() < 0.001);
-        assert!(thumb.needs_scroll);
     }
 
     #[test]

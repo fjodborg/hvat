@@ -15,9 +15,7 @@ use std::path::Path;
 
 use crate::format::error::FormatError;
 use crate::format::project::ProjectData;
-use crate::format::traits::{
-    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions, WarningSeverity,
-};
+use crate::format::traits::{AnnotationFormat, ExportOptions, ExportResult, ImportOptions};
 
 /// Native HVAT JSON format.
 ///

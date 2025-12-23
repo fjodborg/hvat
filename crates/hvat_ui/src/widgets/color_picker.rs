@@ -7,7 +7,7 @@
 use crate::callback::Callback;
 use crate::constants::DEFAULT_FONT_SIZE;
 use crate::event::{Event, MouseButton};
-use crate::layout::{Bounds, Size};
+use crate::layout::{Alignment, Bounds, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{ColorPickerDragging, ColorPickerState};
 use crate::widget::{EventResult, Widget};
@@ -54,15 +54,9 @@ const PREVIEW_WIDTH: f32 = 20.0;
 /// Gap between preview and label
 const PREVIEW_GAP: f32 = 4.0;
 
-/// Horizontal alignment for the color picker overlay
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PickerAlignment {
-    /// Align to the right of the anchor point (default)
-    #[default]
-    Right,
-    /// Align to the left of the anchor point (picker opens leftward)
-    Left,
-}
+// PickerAlignment is now replaced by Alignment from layout module
+// Use Alignment::Right (default) or Alignment::Left for picker positioning
+// Note: Alignment::Center is not used for picker positioning
 
 /// A color picker popup widget with a palette of predefined colors and RGB sliders
 pub struct ColorPicker<M> {
@@ -73,7 +67,7 @@ pub struct ColorPicker<M> {
     /// Position to render the overlay at (set by parent via layout bounds)
     overlay_position: (f32, f32),
     /// Horizontal alignment of the picker relative to anchor
-    alignment: PickerAlignment,
+    alignment: Alignment,
     /// Horizontal offset from anchor position (positive = move right)
     x_offset: f32,
     /// Vertical offset from anchor position (negative = move up)
@@ -99,7 +93,7 @@ impl<M> ColorPicker<M> {
             current_color: [128, 128, 128],
             is_open: false,
             overlay_position: (0.0, 0.0),
-            alignment: PickerAlignment::default(),
+            alignment: Alignment::Right,
             x_offset: 0.0,
             y_offset: 0.0,
             hovered_cell: None,
@@ -137,16 +131,17 @@ impl<M> ColorPicker<M> {
 
     /// Set the horizontal alignment of the picker
     ///
-    /// - `PickerAlignment::Right`: Opens to the right of the anchor (default)
-    /// - `PickerAlignment::Left`: Opens to the left of the anchor
-    pub fn alignment(mut self, alignment: PickerAlignment) -> Self {
+    /// - `Alignment::Right`: Opens to the right of the anchor (default)
+    /// - `Alignment::Left`: Opens to the left of the anchor
+    /// - `Alignment::Center`: Not used for picker positioning (treated as Right)
+    pub fn alignment(mut self, alignment: Alignment) -> Self {
         self.alignment = alignment;
         self
     }
 
     /// Convenience: open picker to the left of the anchor point
     pub fn align_left(mut self) -> Self {
-        self.alignment = PickerAlignment::Left;
+        self.alignment = Alignment::Left;
         self
     }
 
@@ -298,8 +293,8 @@ impl<M> ColorPicker<M> {
         };
         // Apply alignment
         match self.alignment {
-            PickerAlignment::Right => anchor,
-            PickerAlignment::Left => (anchor.0 - size.width, anchor.1),
+            Alignment::Right | Alignment::Center => anchor,
+            Alignment::Left => (anchor.0 - size.width, anchor.1),
         }
     }
 }

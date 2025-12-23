@@ -10,6 +10,7 @@ pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tiff", "ti
 
 /// Check if a filename (string) has a supported image extension.
 /// Works with both full paths and just filenames.
+#[cfg(target_arch = "wasm32")]
 pub fn is_image_filename(name: &str) -> bool {
     let lower = name.to_lowercase();
     IMAGE_EXTENSIONS
@@ -18,6 +19,7 @@ pub fn is_image_filename(name: &str) -> bool {
 }
 
 /// Check if a path has a supported image extension
+#[cfg(not(target_arch = "wasm32"))]
 fn is_image_file(path: &PathBuf) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())

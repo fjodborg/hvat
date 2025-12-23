@@ -45,6 +45,7 @@ impl Color {
     pub const TEXT_PRIMARY: Color = Color::rgb(0.9, 0.9, 0.92);
     pub const TEXT_SECONDARY: Color = Color::rgb(0.6, 0.6, 0.65);
     pub const ACCENT: Color = Color::rgb(0.4, 0.6, 1.0);
+    pub const ERROR: Color = Color::rgb(0.9, 0.3, 0.3);
     pub const BORDER: Color = Color::rgb(0.3, 0.3, 0.35);
 
     // Scrollbar colors
@@ -97,7 +98,6 @@ struct TextRequest {
     size: f32,
     color: Color,
     clip: Option<Bounds>,
-    is_overlay: bool,
     /// Optional width constraint for word wrapping
     wrap_width: Option<f32>,
     /// Text alignment within the wrap width
@@ -724,7 +724,6 @@ impl Renderer {
             size,
             color,
             clip,
-            is_overlay: self.drawing_overlay,
             wrap_width,
             align,
         };

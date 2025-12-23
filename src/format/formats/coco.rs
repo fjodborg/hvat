@@ -13,7 +13,7 @@ use crate::format::project::{
     AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry,
 };
 use crate::format::traits::{
-    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions, WarningSeverity,
+    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions,
 };
 
 /// COCO JSON format.
@@ -150,14 +150,6 @@ impl AnnotationFormat for CocoFormat {
         } else if let Some(parent) = path.parent() {
             data.folder = parent.to_path_buf();
         }
-
-        // Convert categories
-        let category_map: HashMap<u32, usize> = coco
-            .categories
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| (c.id, idx))
-            .collect();
 
         for cat in &coco.categories {
             let mut entry = CategoryEntry::new(cat.id, &cat.name);

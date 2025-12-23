@@ -11,5 +11,7 @@ pub use gpu_cache::{CachedGpuTexture, GpuTextureCache};
 #[allow(unused_imports)]
 pub use image_data::ImageData;
 pub use image_data::ImageDataStore;
-pub use project::{IMAGE_EXTENSIONS, LoadedImage, ProjectState, is_image_filename};
+#[cfg(target_arch = "wasm32")]
+pub use project::is_image_filename;
+pub use project::{LoadedImage, ProjectState};
 pub use snapshot::{AnnotationState, AppSnapshot};

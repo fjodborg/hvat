@@ -14,7 +14,7 @@ use crate::format::project::{
     AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry,
 };
 use crate::format::traits::{
-    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions, WarningSeverity,
+    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions,
 };
 
 /// Pascal VOC XML format.
@@ -134,7 +134,7 @@ impl AnnotationFormat for PascalVocFormat {
         })
     }
 
-    fn import(&self, path: &Path, options: &ImportOptions) -> Result<ProjectData, FormatError> {
+    fn import(&self, path: &Path, _options: &ImportOptions) -> Result<ProjectData, FormatError> {
         log::info!("Importing Pascal VOC annotations from {:?}", path);
 
         let input_dir = path;

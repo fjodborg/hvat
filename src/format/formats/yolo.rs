@@ -11,7 +11,7 @@ use crate::format::project::{
     AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry,
 };
 use crate::format::traits::{
-    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions, WarningSeverity,
+    AnnotationFormat, ExportOptions, ExportResult, FormatWarning, ImportOptions,
 };
 
 /// YOLO TXT format.
@@ -183,7 +183,7 @@ impl AnnotationFormat for YoloFormat {
         })
     }
 
-    fn import(&self, path: &Path, options: &ImportOptions) -> Result<ProjectData, FormatError> {
+    fn import(&self, path: &Path, _options: &ImportOptions) -> Result<ProjectData, FormatError> {
         log::info!("Importing YOLO annotations from {:?}", path);
 
         let input_dir = path;

@@ -516,8 +516,10 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
         // Layout content if present
         if let Some(content) = &mut self.content {
             // Account for content padding when calculating available space
-            let content_width = width - padding * 2.0;
+            let mut content_width = width - padding * 2.0;
+
             // For scrollable content, give it unlimited height to measure full size
+            // First pass: measure content to see if vertical scrolling will be needed
             let content_available = if self.config.max_content_height.is_some() {
                 Size::new(content_width, f32::MAX)
             } else {
@@ -527,6 +529,27 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                 )
             };
             self.content_size = content.layout(content_available);
+
+            // If vertical scrolling will be needed, reserve space for the scrollbar
+            // and re-layout content with the reduced width
+            if self.config.max_content_height.is_some()
+                && matches!(
+                    self.scroll_direction,
+                    ScrollDirection::Vertical | ScrollDirection::Both
+                )
+                && self.content_size.height > self.config.max_content_height.unwrap()
+            {
+                // Reserve space for vertical scrollbar
+                content_width -= SCROLLBAR_WIDTH_COMPACT + SCROLLBAR_PADDING;
+                let adjusted_available = Size::new(content_width, f32::MAX);
+                self.content_size = content.layout(adjusted_available);
+
+                log::debug!(
+                    "Content needs v_scrolling: {} > {:?}, reserved scrollbar width",
+                    self.content_size.height,
+                    self.config.max_content_height
+                );
+            }
 
             // Create/update scrollable wrapper if needed
             if self.needs_scrolling() {

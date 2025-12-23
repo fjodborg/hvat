@@ -114,9 +114,9 @@ pub fn dispatch_event_to_children<M: 'static>(
 
     // Don't filter by bounds for MouseRelease - children may need to handle
     // release events even if mouse moved outside (e.g., buttons)
-    // Also don't filter MouseMove when a child is being dragged
-    let should_filter = !matches!(event, Event::MouseRelease { .. })
-        && !(matches!(event, Event::MouseMove { .. }) && has_drag);
+    // Don't filter MouseMove - children need to receive it to clear hover state
+    // when mouse leaves their bounds (even if outside container)
+    let should_filter = !matches!(event, Event::MouseRelease { .. } | Event::MouseMove { .. });
 
     if should_filter {
         if let Some(pos) = event.position() {
@@ -189,6 +189,11 @@ pub fn dispatch_event_to_children<M: 'static>(
     }
 
     // Phase 3: Dispatch to remaining children normally
+    // For MouseMove, we need to dispatch to ALL children so they can update their hover state
+    // (e.g., when mouse moves from one button to another, the old button needs to know it's no longer hovered)
+    let is_mouse_move = matches!(event, Event::MouseMove { .. });
+    let mut accumulated_result: EventResult<M> = EventResult::None;
+
     for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
         if child.has_active_overlay() {
             continue; // Already handled above
@@ -196,12 +201,21 @@ pub fn dispatch_event_to_children<M: 'static>(
 
         let absolute_bounds = translate_bounds(*bounds, container_bounds);
         let result = child.on_event(event, absolute_bounds);
-        if result.needs_redraw() {
+
+        if is_mouse_move {
+            // For MouseMove, accumulate results but don't stop early
+            // Keep the most "important" result (Message > Redraw > None)
+            match (&accumulated_result, &result) {
+                (_, EventResult::Message(_)) => accumulated_result = result,
+                (EventResult::None, EventResult::Redraw) => accumulated_result = result,
+                _ => {}
+            }
+        } else if result.needs_redraw() {
             return result;
         }
     }
 
-    EventResult::None
+    accumulated_result
 }
 
 /// Translate relative child bounds to absolute bounds within the container.

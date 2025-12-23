@@ -96,12 +96,6 @@ pub const DEFAULT_HUE: f32 = 0.0;
 /// Default red band index
 pub const DEFAULT_RED_BAND: usize = 0;
 
-/// Default green band index
-pub const DEFAULT_GREEN_BAND: usize = 1;
-
-/// Default blue band index
-pub const DEFAULT_BLUE_BAND: usize = 2;
-
 // =============================================================================
 // GPU Preloading
 // =============================================================================
@@ -117,7 +111,7 @@ pub const MAX_GPU_PRELOAD_COUNT: usize = 10;
 // =============================================================================
 
 /// Maximum height for file list collapsible content (forces scrollbar)
-pub const FILE_LIST_MAX_HEIGHT: f32 = 200.0;
+pub const FILE_LIST_MAX_HEIGHT: f32 = 250.0;
 
 /// Maximum height for thumbnails collapsible content (forces scrollbar)
 pub const THUMBNAILS_MAX_HEIGHT: f32 = 200.0;

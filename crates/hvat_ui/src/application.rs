@@ -6,8 +6,6 @@ use crate::layout::{Bounds, Size};
 use crate::renderer::{Renderer, TextureId};
 use hvat_gpu::{ClearColor, GpuConfig, GpuContext, Texture};
 use std::sync::Arc;
-use std::time::Duration;
-use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -241,10 +239,6 @@ struct AppState<A: Application> {
     settings: Settings,
     /// Whether view needs to be rebuilt (dirty flag)
     needs_rebuild: bool,
-    /// Last frame time for FPS limiting
-    last_frame_time: Instant,
-    /// Minimum frame duration based on target FPS
-    frame_duration: Duration,
     /// Whether a redraw was requested (by user interaction)
     redraw_requested: bool,
     /// Whether the current click was consumed by GlobalMousePress (e.g., closing an overlay).
@@ -292,13 +286,6 @@ impl<A: Application> AppState<A> {
             app.setup(&mut resources);
         }
 
-        // Calculate frame duration from target FPS
-        let frame_duration = if settings.target_fps > 0 {
-            Duration::from_secs_f64(1.0 / settings.target_fps as f64)
-        } else {
-            Duration::ZERO
-        };
-
         Self {
             app,
             gpu_ctx,
@@ -308,9 +295,7 @@ impl<A: Application> AppState<A> {
             cursor_position: (0.0, 0.0),
             modifiers: KeyModifiers::default(),
             settings,
-            needs_rebuild: true, // Initial build needed
-            last_frame_time: Instant::now(),
-            frame_duration,
+            needs_rebuild: true,    // Initial build needed
             redraw_requested: true, // Initial redraw needed
             click_consumed: false,
             mouse_button_pressed: false,
@@ -416,14 +401,6 @@ impl<A: Application> AppState<A> {
         false
     }
 
-    /// Check if enough time has passed for next frame (FPS limiting)
-    fn should_render(&self) -> bool {
-        if self.frame_duration.is_zero() {
-            return true;
-        }
-        self.last_frame_time.elapsed() >= self.frame_duration
-    }
-
     /// Request a redraw for next frame
     fn request_redraw(&mut self) {
         self.redraw_requested = true;
@@ -476,8 +453,6 @@ impl<A: Application> AppState<A> {
             result
         };
 
-        // Update frame timing
-        self.last_frame_time = Instant::now();
         // Keep requesting redraws if tick_with_resources indicated more work
         self.redraw_requested = needs_more_ticks;
 

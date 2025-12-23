@@ -31,8 +31,6 @@ pub struct GpuTextureCache {
     entries: HashMap<PathBuf, CachedGpuTexture>,
     /// Maximum number of images to preload in each direction
     preload_count: usize,
-    /// Paths currently being loaded (to avoid duplicate loads)
-    loading: HashSet<PathBuf>,
 }
 
 impl GpuTextureCache {
@@ -41,13 +39,7 @@ impl GpuTextureCache {
         Self {
             entries: HashMap::new(),
             preload_count,
-            loading: HashSet::new(),
         }
-    }
-
-    /// Get the current preload count setting.
-    pub fn preload_count(&self) -> usize {
-        self.preload_count
     }
 
     /// Set the preload count.
@@ -59,27 +51,6 @@ impl GpuTextureCache {
     /// Check if an image is already cached.
     pub fn contains(&self, path: &PathBuf) -> bool {
         self.entries.contains_key(path)
-    }
-
-    /// Check if an image is currently being loaded.
-    pub fn is_loading(&self, path: &PathBuf) -> bool {
-        self.loading.contains(path)
-    }
-
-    /// Mark an image as currently loading.
-    pub fn mark_loading(&mut self, path: &PathBuf) {
-        self.loading.insert(path.clone());
-    }
-
-    /// Remove loading mark for an image.
-    pub fn unmark_loading(&mut self, path: &PathBuf) {
-        self.loading.remove(path);
-    }
-
-    /// Get cached GPU data for an image (immutable reference).
-    #[allow(dead_code)]
-    pub fn get(&self, path: &PathBuf) -> Option<&CachedGpuTexture> {
-        self.entries.get(path)
     }
 
     /// Take cached GPU data, removing it from cache.
@@ -149,7 +120,6 @@ impl GpuTextureCache {
     pub fn clear(&mut self) {
         let count = self.entries.len();
         self.entries.clear();
-        self.loading.clear();
         if count > 0 {
             log::info!("Cleared GPU texture cache ({} entries)", count);
         }
@@ -172,7 +142,7 @@ impl GpuTextureCache {
 
     /// Get paths that should be preloaded based on current index.
     ///
-    /// Returns paths that are within preload range and not yet cached or loading.
+    /// Returns paths that are within preload range and not yet cached.
     /// The current image is excluded since it's already being displayed.
     pub fn paths_to_preload(&self, images: &[PathBuf], current_index: usize) -> Vec<PathBuf> {
         if self.preload_count == 0 || images.is_empty() {
@@ -188,11 +158,8 @@ impl GpuTextureCache {
             // Forward (next images)
             let forward_idx = (current_index + offset) % len;
             let forward_path = &images[forward_idx];
-            // Skip if it's the current image (wraparound case), already cached, or loading
-            if forward_path != current_path
-                && !self.contains(forward_path)
-                && !self.is_loading(forward_path)
-            {
+            // Skip if it's the current image (wraparound case) or already cached
+            if forward_path != current_path && !self.contains(forward_path) {
                 to_preload.push(forward_path.clone());
             }
 
@@ -203,11 +170,8 @@ impl GpuTextureCache {
                 current_index - offset
             };
             let backward_path = &images[backward_idx];
-            // Skip if it's the current image (wraparound case), already cached, or loading
-            if backward_path != current_path
-                && !self.contains(backward_path)
-                && !self.is_loading(backward_path)
-            {
+            // Skip if it's the current image (wraparound case) or already cached
+            if backward_path != current_path && !self.contains(backward_path) {
                 to_preload.push(backward_path.clone());
             }
         }

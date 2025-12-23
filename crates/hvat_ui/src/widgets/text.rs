@@ -29,7 +29,7 @@ impl Text {
             color: Color::TEXT_PRIMARY,
             // Shrink to content by default (works well in rows)
             width: Length::Shrink,
-            text_align: Alignment::Start,
+            text_align: Alignment::Left,
             wrap: false,
             layout_width: None,
         }
@@ -127,9 +127,9 @@ impl<M> Widget<M> for Text {
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
         // Convert alignment to TextAlign for renderer
         let text_align = match self.text_align {
-            Alignment::Start => TextAlign::Left,
+            Alignment::Left => TextAlign::Left,
             Alignment::Center => TextAlign::Center,
-            Alignment::End => TextAlign::Right,
+            Alignment::Right => TextAlign::Right,
         };
 
         // Handle wrapped text - use glyphon's native alignment

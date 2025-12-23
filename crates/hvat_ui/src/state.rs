@@ -457,8 +457,6 @@ impl ScrollDragExt for ScrollDragState {
 pub struct ScrollState {
     /// Scroll offset (x, y)
     pub offset: (f32, f32),
-    /// Velocity for momentum scrolling
-    pub(crate) velocity: (f32, f32),
     /// Drag interaction state for scrollbar thumb
     pub(crate) drag: ScrollDragState,
 }
@@ -844,6 +842,8 @@ pub struct SliderState {
     pub input_cursor: usize,
     /// Input field selection range
     pub input_selection: Option<(usize, usize)>,
+    /// Whether the input field has an invalid value (for error display)
+    pub input_error: bool,
     /// Text undo/redo history (for Ctrl+Z/Ctrl+Y in input field)
     pub(crate) input_history: TextUndoHistory,
 }
@@ -857,6 +857,7 @@ impl Default for SliderState {
             input_text: String::new(),
             input_cursor: 0,
             input_selection: None,
+            input_error: false,
             input_history: TextUndoHistory::default(),
         }
     }
@@ -873,6 +874,7 @@ impl SliderState {
             input_text: text,
             input_cursor: cursor,
             input_selection: None,
+            input_error: false,
             input_history: TextUndoHistory::default(),
         }
     }
@@ -928,6 +930,7 @@ impl SliderState {
         if !self.input_focused {
             self.input_text = Self::format_value(value);
             self.input_cursor = self.input_text.len();
+            self.input_error = false;
         }
     }
 
@@ -942,6 +945,7 @@ impl SliderState {
             self.input_text = Self::format_value(self.value);
             self.input_cursor = self.input_text.len();
             self.input_selection = None;
+            self.input_error = false;
         }
     }
 }

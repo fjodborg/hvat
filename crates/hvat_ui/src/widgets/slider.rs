@@ -200,17 +200,21 @@ impl<M> Slider<M> {
         self
     }
 
+    /// Snap a value to the step grid and clamp to range
+    fn snap_and_clamp(&self, value: f32) -> f32 {
+        let mut result = value;
+        // Snap to step if configured
+        if let Some(step) = self.step {
+            result = ((result - self.min) / step).round() * step + self.min;
+        }
+        result.clamp(self.min, self.max)
+    }
+
     /// Convert a position to a value
     fn position_to_value(&self, x: f32, track_bounds: &Bounds) -> f32 {
         let progress = ((x - track_bounds.x) / track_bounds.width).clamp(0.0, 1.0);
-        let mut value = self.min + progress * (self.max - self.min);
-
-        // Snap to step if configured
-        if let Some(step) = self.step {
-            value = ((value - self.min) / step).round() * step + self.min;
-        }
-
-        value.clamp(self.min, self.max)
+        let value = self.min + progress * (self.max - self.min);
+        self.snap_and_clamp(value)
     }
 
     /// Convert a value to a position (0.0 to 1.0)
@@ -365,23 +369,25 @@ impl<M> Slider<M> {
     }
 
     /// Parse input text and update value
+    /// Returns true if value was changed, false if invalid (sets input_error)
     fn apply_input_value(&mut self) -> bool {
         if let Ok(value) = self.state.input_text.parse::<f32>() {
-            let clamped = value.clamp(self.min, self.max);
-            if (clamped - self.state.value).abs() > f32::EPSILON {
-                self.state.value = clamped;
-                self.state.input_text = self.format_value_for_input(clamped);
+            let snapped = self.snap_and_clamp(value);
+            self.state.input_error = false;
+            if (snapped - self.state.value).abs() > f32::EPSILON {
+                self.state.value = snapped;
+                self.state.input_text = self.format_value_for_input(snapped);
                 self.state.input_cursor = text_core::char_count(&self.state.input_text);
                 return true;
             } else {
                 // Value same but text may differ - update text to canonical form
-                self.state.input_text = self.format_value_for_input(clamped);
+                self.state.input_text = self.format_value_for_input(snapped);
                 self.state.input_cursor = text_core::char_count(&self.state.input_text);
             }
         } else {
-            // Invalid input - revert to current value
-            self.state.input_text = self.format_value_for_input(self.state.value);
-            self.state.input_cursor = text_core::char_count(&self.state.input_text);
+            // Invalid input - show error but keep the text so user can fix it
+            self.state.input_error = true;
+            log::debug!("Slider input: invalid value '{}'", self.state.input_text);
         }
         false
     }
@@ -391,7 +397,18 @@ impl<M> Slider<M> {
         if !self.state.input_focused {
             self.state.input_text = self.format_value_for_input(self.state.value);
             self.state.input_cursor = text_core::char_count(&self.state.input_text);
+            self.state.input_error = false;
         }
+    }
+
+    /// Try to update value from current input text (live update while typing)
+    /// Updates value if text is valid, clears error state either way
+    fn try_update_value_from_input(&mut self) {
+        if let Ok(value) = self.state.input_text.parse::<f32>() {
+            self.state.value = self.snap_and_clamp(value);
+        }
+        // Don't show error while typing - only on commit
+        self.state.input_error = false;
     }
 
     /// Emit a state change if handler is set
@@ -461,8 +478,10 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                 input_bounds,
                 self.config.input.background(self.state.input_focused),
             );
-            // Use track_fill_color for focused border to match slider theme
-            let border_color = if self.state.input_focused {
+            // Border color: red if error, accent if focused, default otherwise
+            let border_color = if self.state.input_error {
+                Color::ERROR
+            } else if self.state.input_focused {
                 self.config.track_fill_color
             } else {
                 self.config.border_color
@@ -659,15 +678,8 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     }
                 }
                 if changed {
-                    // Try to parse and update value live
-                    if let Ok(value) = self.state.input_text.parse::<f32>() {
-                        let clamped = value.clamp(self.min, self.max);
-                        if (clamped - self.state.value).abs() > f32::EPSILON {
-                            self.state.value = clamped;
-                            log::debug!("Slider input: live update value = {}", clamped);
-                            return self.emit_change();
-                        }
-                    }
+                    self.try_update_value_from_input();
+                    return self.emit_change();
                 }
                 EventResult::None
             }
@@ -678,20 +690,14 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                     match key {
                         KeyCode::Backspace => {
                             if self.input_handle_backspace() {
-                                if let Ok(value) = self.state.input_text.parse::<f32>() {
-                                    let clamped = value.clamp(self.min, self.max);
-                                    self.state.value = clamped;
-                                    return self.emit_change();
-                                }
+                                self.try_update_value_from_input();
+                                return self.emit_change();
                             }
                         }
                         KeyCode::Delete => {
                             if self.input_handle_delete() {
-                                if let Ok(value) = self.state.input_text.parse::<f32>() {
-                                    let clamped = value.clamp(self.min, self.max);
-                                    self.state.value = clamped;
-                                    return self.emit_change();
-                                }
+                                self.try_update_value_from_input();
+                                return self.emit_change();
                             }
                         }
                         KeyCode::Left => {
@@ -743,10 +749,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             // Ctrl+Shift+Z = Redo
                             if self.state.text_redo() {
                                 log::debug!("Slider input: text redo");
-                                // Try to update slider value from new text
-                                if let Ok(value) = self.state.input_text.parse::<f32>() {
-                                    self.state.value = value.clamp(self.min, self.max);
-                                }
+                                self.try_update_value_from_input();
                                 return self.emit_change();
                             }
                             return EventResult::None;
@@ -755,10 +758,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             // Ctrl+Z = Undo
                             if self.state.text_undo() {
                                 log::debug!("Slider input: text undo");
-                                // Try to update slider value from new text
-                                if let Ok(value) = self.state.input_text.parse::<f32>() {
-                                    self.state.value = value.clamp(self.min, self.max);
-                                }
+                                self.try_update_value_from_input();
                                 return self.emit_change();
                             }
                             return EventResult::None;
@@ -767,10 +767,7 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
                             // Ctrl+Y = Redo (Windows style)
                             if self.state.text_redo() {
                                 log::debug!("Slider input: text redo (Ctrl+Y)");
-                                // Try to update slider value from new text
-                                if let Ok(value) = self.state.input_text.parse::<f32>() {
-                                    self.state.value = value.clamp(self.min, self.max);
-                                }
+                                self.try_update_value_from_input();
                                 return self.emit_change();
                             }
                             return EventResult::None;

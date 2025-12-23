@@ -24,7 +24,7 @@ mod text_input;
 
 pub use button::{Button, ButtonStyle};
 pub use collapsible::{Collapsible, CollapsibleConfig};
-pub use color_picker::{ColorPicker, PickerAlignment};
+pub use color_picker::ColorPicker;
 pub use color_swatch::ColorSwatch;
 pub use column::Column;
 pub use config::BaseInputConfig;
@@ -34,7 +34,6 @@ pub use image_viewer::{
     AnnotationOverlay, ImagePointerEvent, ImageViewer, OverlayShape, PointerEventKind,
 };
 pub use number_input::{NumberInput, NumberInputConfig};
-pub use overlay::OverlayCloseHelper;
 pub use panel::{BorderSides, Panel};
 pub use row::Row;
 pub use scrollable::{ScrollDirection, Scrollable, ScrollbarConfig, ScrollbarVisibility};

@@ -3,12 +3,12 @@
 use hvat_ui::constants::{BUTTON_PADDING_COMPACT, COLOR_PICKER_SWATCH_OFFSET, ROW_ITEM_HEIGHT};
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, Panel,
+    BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, FileTree, Panel,
     ScrollDirection, Scrollable, ScrollbarVisibility,
 };
 
 use crate::app::HvatApp;
-use crate::constants::SIDEBAR_WIDTH;
+use crate::constants::{FILE_LIST_MAX_HEIGHT, SIDEBAR_WIDTH};
 use crate::keybindings::{key_to_string, optional_key_to_string};
 use crate::message::Message;
 use crate::model::AnnotationTool;
@@ -42,6 +42,54 @@ impl HvatApp {
 
         let mut sidebar_ctx = Context::new();
 
+        // File Explorer Collapsible (VSCode-style tree view)
+        let file_explorer_state = self.file_explorer_collapsed.clone();
+        let file_explorer_scroll = self.file_explorer_scroll_state.clone();
+        let file_tree_state = self.file_explorer_state.clone();
+
+        // Build the file tree from project
+        let file_tree_nodes = self
+            .project
+            .as_ref()
+            .map(|p| p.build_file_tree())
+            .unwrap_or_default();
+        let current_path = self
+            .project
+            .as_ref()
+            .and_then(|p| p.current_relative_path());
+        let num_files = self.project.as_ref().map(|p| p.images.len()).unwrap_or(0);
+
+        let collapsible_files = Collapsible::new("File Explorer")
+            .state(&file_explorer_state)
+            .scroll_state(&file_explorer_scroll)
+            .scroll_direction(ScrollDirection::Both)
+            .width(Length::Fill(1.0))
+            .max_height(FILE_LIST_MAX_HEIGHT)
+            .on_toggle(Message::FileExplorerToggled)
+            .on_scroll(Message::FileExplorerScrolled)
+            .content(|c| {
+                if file_tree_nodes.is_empty() {
+                    c.text("No files loaded").size(FONT_SIZE_SECONDARY);
+                    c.text("Use 'Open Folder' to load images")
+                        .size(FONT_SIZE_SMALL);
+                } else {
+                    c.text(format!("{} files", num_files))
+                        .size(FONT_SIZE_SECONDARY);
+
+                    // Create the file tree widget
+                    let file_tree = FileTree::new()
+                        .nodes(file_tree_nodes)
+                        .state(&file_tree_state)
+                        .selected(current_path)
+                        .width(Length::Fill(1.0))
+                        .on_select(Message::FileExplorerSelect)
+                        .on_state_change(Message::FileExplorerStateChanged);
+
+                    c.add(Element::new(file_tree));
+                }
+            });
+        sidebar_ctx.add(Element::new(collapsible_files));
+
         // Tools Collapsible
         let tools_s = tools_state.clone();
         let keybindings_for_tools = keybindings.clone();
@@ -50,9 +98,6 @@ impl HvatApp {
             .width(Length::Fill(1.0))
             .on_toggle(Message::ToolsToggled)
             .content(move |c| {
-                c.text(format!("Current: {}", selected_tool.name()))
-                    .size(FONT_SIZE_SECONDARY);
-                c.text("");
                 for tool in AnnotationTool::all() {
                     let is_selected = *tool == selected_tool;
                     let tool_copy = *tool;
@@ -157,7 +202,6 @@ impl HvatApp {
                         c.add(Element::new(picker));
                     }
                 }
-                c.text("");
                 c.button("+ Add Category")
                     .width(Length::Fill(1.0))
                     .on_click(Message::AddCategory);

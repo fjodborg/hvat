@@ -25,7 +25,9 @@ use crate::constants::{
     MAX_GPU_PRELOAD_COUNT, UNDO_HISTORY_SIZE,
 };
 use crate::data::HyperspectralData;
-use crate::format::{AutoSaveManager, ExportOptions, FormatRegistry, ProjectData};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::format::ExportOptions;
+use crate::format::{AutoSaveManager, FormatRegistry, ProjectData};
 use crate::keybindings::{KeyBindings, KeybindTarget};
 use crate::message::Message;
 use crate::model::{
@@ -42,18 +44,19 @@ use crate::test_image::generate_test_hyperspectral;
 // Async Picker State (for WASM file picker)
 // ============================================================================
 
-/// Result of async file picker (used for WASM).
+/// Result of async file picker (WASM only).
+#[cfg(target_arch = "wasm32")]
 pub enum AsyncPickerResult {
-    /// Folder selected (native only - contains folder path)
-    Folder(PathBuf),
     /// Files selected (WASM - contains loaded image data)
     Files(Vec<LoadedImage>),
 }
 
-// Global shared state for receiving async picker results
+// Global shared state for receiving async picker results (WASM only)
+#[cfg(target_arch = "wasm32")]
 static PENDING_PICKER_RESULT: OnceLock<std::sync::Mutex<Option<AsyncPickerResult>>> =
     OnceLock::new();
 
+#[cfg(target_arch = "wasm32")]
 fn pending_picker_state() -> &'static std::sync::Mutex<Option<AsyncPickerResult>> {
     PENDING_PICKER_RESULT.get_or_init(|| std::sync::Mutex::new(None))
 }
@@ -73,11 +76,9 @@ fn pending_config_state() -> &'static std::sync::Mutex<Option<String>> {
 mod wasm_folder_picker {
     use crate::state::{LoadedImage, is_image_filename};
     use hvat_ui::read_file_async;
-    use js_sys::Reflect;
     use std::cell::RefCell;
     use std::rc::Rc;
     use wasm_bindgen::JsCast;
-    use wasm_bindgen::JsValue;
     use wasm_bindgen::prelude::*;
 
     /// Show folder picker using hidden input with webkitdirectory attribute.
@@ -371,7 +372,8 @@ pub struct HvatApp {
     pub(crate) format_registry: FormatRegistry,
     /// Auto-save manager for automatic project persistence
     pub(crate) auto_save: AutoSaveManager,
-    /// Path to the current project file (for auto-save)
+    /// Path to the current project file (for auto-save, native only)
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) project_file_path: Option<PathBuf>,
     /// Whether the export dialog is open
     pub(crate) export_dialog_open: bool,
@@ -500,6 +502,7 @@ impl HvatApp {
 
             format_registry: FormatRegistry::new(),
             auto_save: AutoSaveManager::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             project_file_path: None,
             export_dialog_open: false,
 
@@ -606,11 +609,6 @@ impl HvatApp {
         self.blue_band_slider.set_value(blue_band);
 
         self.band_selection = (DEFAULT_RED_BAND, green_band as usize, blue_band as usize);
-    }
-
-    /// Find a category by ID and return a mutable reference.
-    fn find_category_mut(&mut self, id: u32) -> Option<&mut Category> {
-        self.categories.iter_mut().find(|c| c.id == id)
     }
 
     /// Check if any text input field is currently focused.
@@ -945,8 +943,6 @@ impl HvatApp {
     /// Show file picker for importing config in WASM.
     #[cfg(target_arch = "wasm32")]
     fn show_file_picker_wasm(&self) {
-        use std::cell::RefCell;
-        use std::rc::Rc;
         use wasm_bindgen::JsCast;
         use wasm_bindgen::prelude::*;
 
@@ -2733,31 +2729,11 @@ impl Application for HvatApp {
     fn tick_with_resources(&mut self, resources: &mut Resources<'_>) -> bool {
         let mut needs_rebuild = false;
 
-        // Check for async picker result
+        // Check for async picker result (WASM only)
+        #[cfg(target_arch = "wasm32")]
         if let Ok(mut pending) = pending_picker_state().lock() {
             if let Some(result) = pending.take() {
                 match result {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    AsyncPickerResult::Folder(folder) => {
-                        log::info!("Processing folder from async picker: {:?}", folder);
-                        match ProjectState::from_folder(folder) {
-                            Ok(project) => {
-                                // Clear GPU cache when folder changes
-                                self.gpu_cache.clear();
-                                log::info!(
-                                    "Loaded project with {} images from {:?}",
-                                    project.images.len(),
-                                    project.folder
-                                );
-                                self.project = Some(project);
-                                self.pending_image_load = true;
-                            }
-                            Err(e) => {
-                                log::error!("Failed to load project: {}", e);
-                            }
-                        }
-                    }
-                    #[cfg(target_arch = "wasm32")]
                     AsyncPickerResult::Files(loaded_images) => {
                         log::info!("Processing {} files from async picker", loaded_images.len());
                         match ProjectState::from_loaded_images(loaded_images) {
@@ -2772,10 +2748,6 @@ impl Application for HvatApp {
                                 log::error!("Failed to load project: {}", e);
                             }
                         }
-                    }
-                    #[allow(unreachable_patterns)]
-                    _ => {
-                        log::warn!("Unexpected picker result type for current platform");
                     }
                 }
             }

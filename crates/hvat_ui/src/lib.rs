@@ -40,7 +40,7 @@ pub use widgets::{
     slider, text, text_input, AnnotationOverlay, BaseInputConfig, BorderSides, Collapsible,
     CollapsibleConfig, ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig, FileTree,
     FileTreeConfig, FileTreeNode, ImagePointerEvent, NumberInput, NumberInputConfig, OverlayShape,
-    Panel, PickerAlignment, PointerEventKind, Row, ScrollDirection, Scrollable, ScrollbarConfig,
+    Panel, PointerEventKind, Row, ScrollDirection, Scrollable, ScrollbarConfig,
     ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
 };
 

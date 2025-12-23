@@ -57,7 +57,7 @@ pub fn normalize_selection(selection: (usize, usize)) -> (usize, usize) {
 
 /// Get the selection anchor for extending selection with shift+arrow keys
 /// Returns the existing anchor if selection exists, otherwise the cursor position
-pub fn get_selection_anchor(selection: Option<(usize, usize)>, cursor: usize) -> usize {
+fn get_selection_anchor(selection: Option<(usize, usize)>, cursor: usize) -> usize {
     selection.map(|(s, _)| s).unwrap_or(cursor)
 }
 
@@ -385,51 +385,6 @@ pub fn draw_input_background(
 ) {
     renderer.fill_rect(bounds, config.background(is_focused));
     renderer.stroke_rect(bounds, config.border(is_focused), 1.0);
-}
-
-/// Draw the complete input field visuals (background, selection, text, cursor)
-///
-/// This consolidates the common drawing sequence used by text input widgets.
-///
-/// # Arguments
-/// * `renderer` - The renderer to draw with
-/// * `bounds` - The outer widget bounds
-/// * `content` - The content bounds (inside padding)
-/// * `text` - The text to display
-/// * `cursor` - Cursor position (character index)
-/// * `selection` - Optional selection range
-/// * `is_focused` - Whether the input is focused
-/// * `font_size` - Font size for text rendering
-/// * `config` - Color configuration
-pub fn draw_input_field(
-    renderer: &mut Renderer,
-    bounds: Bounds,
-    content: Bounds,
-    text: &str,
-    cursor: usize,
-    selection: Option<(usize, usize)>,
-    is_focused: bool,
-    font_size: f32,
-    config: &BaseInputConfig,
-) {
-    // Draw background and border
-    draw_input_background(renderer, bounds, is_focused, config);
-
-    // Draw selection if present and focused
-    if is_focused {
-        if let Some(sel) = selection {
-            draw_selection(renderer, content, sel, font_size, config.selection_color);
-        }
-    }
-
-    // Draw text
-    let text_y = content.y + (content.height - font_size) / 2.0;
-    renderer.text(text, content.x, text_y, font_size, config.text_color);
-
-    // Draw cursor if focused
-    if is_focused {
-        draw_cursor(renderer, content, cursor, font_size, config.cursor_color);
-    }
 }
 
 // =============================================================================

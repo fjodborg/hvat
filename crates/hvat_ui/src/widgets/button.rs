@@ -235,7 +235,14 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             } => {
                 if button_bounds.contains(position.0, position.1) {
                     self.state = ButtonState::Pressed;
-                    EventResult::Redraw
+                    // Fire click on press (not release) to handle the case where
+                    // a text input blur causes a view rebuild before MouseRelease.
+                    // This is common in immediate-mode UIs where widget state
+                    // doesn't persist between frames.
+                    match self.on_click.clone() {
+                        Some(msg) => EventResult::Message(msg),
+                        None => EventResult::Redraw,
+                    }
                 } else {
                     EventResult::None
                 }
@@ -255,19 +262,21 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                     ButtonState::Normal
                 };
 
-                // Fire click on release when button was pressed and mouse is still inside
-                // This is standard button behavior that allows users to cancel by moving off
-                if was_pressed && inside {
-                    match self.on_click.clone() {
-                        Some(msg) => EventResult::Message(msg),
-                        None => EventResult::Redraw,
-                    }
-                } else if was_pressed {
-                    // State changed from Pressed to something else
+                // Just update visual state on release, click already fired on press
+                if was_pressed {
                     EventResult::Redraw
                 } else {
                     EventResult::None
                 }
+            }
+
+            Event::CursorLeft => {
+                // Cursor left the window - clear hover state
+                if self.state == ButtonState::Hovered {
+                    self.state = ButtonState::Normal;
+                    return EventResult::Redraw;
+                }
+                EventResult::None
             }
 
             _ => EventResult::None,

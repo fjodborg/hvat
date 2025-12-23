@@ -26,6 +26,7 @@ impl HyperspectralData {
 
     /// Load from an image file (PNG, JPEG, etc).
     /// Converts RGB channels to 3 bands.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_image_file(path: &std::path::Path) -> Result<Self, String> {
         let img = image::open(path)
             .map_err(|e| format!("Failed to open image: {}", e))?
@@ -55,6 +56,7 @@ impl HyperspectralData {
 
     /// Load from raw bytes (for WASM).
     /// Converts RGB channels to 3 bands.
+    #[cfg(target_arch = "wasm32")]
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
         let img = image::load_from_memory(data)
             .map_err(|e| format!("Failed to decode image: {}", e))?
