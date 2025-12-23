@@ -17,7 +17,7 @@ use crate::message::Message;
 use crate::model::AnnotationTool;
 
 /// Application version
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Application name
 const APP_NAME: &str = "HVAT - Hyperspectral Vision Annotation Tool";
@@ -71,6 +71,9 @@ impl HvatApp {
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ImportConfig);
             r.text("Settings").size(FONT_SIZE_TITLE);
+            // Spacer to push version to the right
+            r.add(Element::new(Text::new("").width(Length::Fill(1.0))));
+            r.text(format!("v{}", APP_VERSION)).size(FONT_SIZE_SMALL);
         });
 
         ctx.text("");
@@ -291,8 +294,6 @@ impl HvatApp {
             .align(Alignment::Center);
         ctx.text("");
         ctx.text(APP_NAME).align(Alignment::Center);
-        ctx.text(format!("Version: {}", APP_VERSION))
-            .align(Alignment::Center);
         ctx.text("");
         ctx.text("A GPU-accelerated desktop and web application")
             .align(Alignment::Center);

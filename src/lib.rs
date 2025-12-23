@@ -18,8 +18,10 @@ mod ui;
 pub use app::HvatApp;
 use hvat_ui::{ClearColor, Settings};
 
-/// Application title shown in window titlebar
-const APP_TITLE: &str = "HVAT - Hyperspectral Vision Annotation Tool";
+use crate::ui::APP_VERSION;
+
+/// Application title shown in window titlebar (version appended at runtime)
+const APP_TITLE_BASE: &str = "HVAT - Hyperspectral Vision Annotation Tool";
 
 /// Default window width
 const DEFAULT_WINDOW_WIDTH: u32 = 1400;
@@ -36,8 +38,9 @@ const WINDOW_ICON: &[u8] = include_bytes!("../assets/icon.png");
 
 /// Create default application settings for both native and WASM builds.
 pub fn default_settings() -> Settings {
+    let title = format!("{} v{}", APP_TITLE_BASE, APP_VERSION);
     let settings = Settings::new()
-        .title(APP_TITLE)
+        .title(&title)
         .size(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         .background(ClearColor::rgb(0.12, 0.12, 0.15))
         .target_fps(TARGET_FPS);

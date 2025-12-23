@@ -7,7 +7,8 @@ mod export_dialog;
 mod image_viewer;
 mod left_sidebar;
 mod right_sidebar;
-mod settings;
+pub(crate) mod settings;
 mod topbar;
 
-// Re-export nothing - the impl blocks extend HvatApp directly
+// Re-export APP_VERSION for use in lib.rs and topbar
+pub(crate) use settings::APP_VERSION;

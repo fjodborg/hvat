@@ -2,10 +2,11 @@
 
 use hvat_ui::constants::BUTTON_PADDING_COMPACT;
 use hvat_ui::prelude::*;
-use hvat_ui::{Context, Element, Row};
+use hvat_ui::{Context, Element, Row, Text};
 
 use crate::app::HvatApp;
 use crate::message::Message;
+use crate::ui::APP_VERSION;
 
 impl HvatApp {
     /// Build the top bar with navigation and control buttons.
@@ -52,6 +53,9 @@ impl HvatApp {
             r.button("Settings")
                 .padding(BUTTON_PADDING_COMPACT)
                 .on_click(Message::ToggleSettings);
+            // Spacer to push version to the right
+            r.add(Element::new(Text::new("").width(Length::Fill(1.0))));
+            r.text(format!("v{}", APP_VERSION)).size(FONT_SIZE_SMALL);
         });
 
         let row = Row::new(ctx.take())
