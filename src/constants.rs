@@ -101,7 +101,7 @@ pub const DEFAULT_RED_BAND: usize = 0;
 // =============================================================================
 
 /// Default number of images to preload in each direction (before and after current)
-pub const DEFAULT_GPU_PRELOAD_COUNT: usize = 1;
+pub const DEFAULT_GPU_PRELOAD_COUNT: usize = 5;
 
 /// Maximum preload count (prevents excessive GPU memory usage)
 pub const MAX_GPU_PRELOAD_COUNT: usize = 10;
