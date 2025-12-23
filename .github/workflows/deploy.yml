@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - experimental
+      # - experimental  # Uncomment when experimental branch exists
   workflow_dispatch:
 
 permissions:
@@ -51,47 +51,45 @@ jobs:
           path: dist
           retention-days: 1
 
-  build-experimental:
-    runs-on: self-hosted
-    # Only build if experimental branch exists
-    continue-on-error: true
-    steps:
-      - name: Checkout experimental
-        uses: actions/checkout@v4
-        with:
-          ref: experimental
-
-      - name: Build WASM (experimental)
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo fmt --all -- --check
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          trunk build --release --public-url "/${REPO_NAME}/experimental/"
-
-      - name: Fix PWA paths
-        run: |
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          BASE="/${REPO_NAME}/experimental"
-          sed -i "s|'/'|'${BASE}/'|g" dist/sw.js
-          sed -i "s|'/index.html'|'${BASE}/index.html'|g" dist/sw.js
-          sed -i "s|'/manifest.json'|'${BASE}/manifest.json'|g" dist/sw.js
-          sed -i "s|'/icons/|'${BASE}/icons/|g" dist/sw.js
-          sed -i "s|\"start_url\": \"/\"|\"start_url\": \"${BASE}/\"|g" dist/manifest.json
-          sed -i "s|\"scope\": \"/\"|\"scope\": \"${BASE}/\"|g" dist/manifest.json
-          sed -i "s|href=\"manifest.json\"|href=\"${BASE}/manifest.json\"|g" dist/index.html
-          sed -i "s|href=\"icons/|href=\"${BASE}/icons/|g" dist/index.html
-
-      - name: Upload experimental artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-experimental
-          path: dist
-          retention-days: 1
+  # build-experimental:
+  #   runs-on: self-hosted
+  #   continue-on-error: true
+  #   steps:
+  #     - name: Checkout experimental
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: experimental
+  #
+  #     - name: Build WASM (experimental)
+  #       run: |
+  #         rustup target add wasm32-unknown-unknown
+  #         cargo fmt --all -- --check
+  #         REPO_NAME="${GITHUB_REPOSITORY#*/}"
+  #         trunk build --release --public-url "/${REPO_NAME}/experimental/"
+  #
+  #     - name: Fix PWA paths
+  #       run: |
+  #         REPO_NAME="${GITHUB_REPOSITORY#*/}"
+  #         BASE="/${REPO_NAME}/experimental"
+  #         sed -i "s|'/'|'${BASE}/'|g" dist/sw.js
+  #         sed -i "s|'/index.html'|'${BASE}/index.html'|g" dist/sw.js
+  #         sed -i "s|'/manifest.json'|'${BASE}/manifest.json'|g" dist/sw.js
+  #         sed -i "s|'/icons/|'${BASE}/icons/|g" dist/sw.js
+  #         sed -i "s|\"start_url\": \"/\"|\"start_url\": \"${BASE}/\"|g" dist/manifest.json
+  #         sed -i "s|\"scope\": \"/\"|\"scope\": \"${BASE}/\"|g" dist/manifest.json
+  #         sed -i "s|href=\"manifest.json\"|href=\"${BASE}/manifest.json\"|g" dist/index.html
+  #         sed -i "s|href=\"icons/|href=\"${BASE}/icons/|g" dist/index.html
+  #
+  #     - name: Upload experimental artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: dist-experimental
+  #         path: dist
+  #         retention-days: 1
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [build-main, build-experimental]
-    if: always() && needs.build-main.result == 'success'
+    needs: [build-main]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -102,12 +100,12 @@ jobs:
           name: dist-main
           path: site
 
-      - name: Download experimental artifact
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: dist-experimental
-          path: site/experimental
+      # - name: Download experimental artifact
+      #   uses: actions/download-artifact@v4
+      #   continue-on-error: true
+      #   with:
+      #     name: dist-experimental
+      #     path: site/experimental
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
