@@ -741,10 +741,11 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
             );
             self.window = Some(window.clone());
 
-            // Set up ResizeObserver and drag-drop for the canvas
+            // Set up ResizeObserver, context menu, and drag-drop for the canvas
             if let Some(ref canvas) = canvas {
                 let window_for_resize = window.clone();
                 setup_canvas_resize_observer(canvas.clone(), window_for_resize);
+                setup_canvas_context_menu(canvas.clone());
                 let window_for_dragdrop = window.clone();
                 setup_canvas_drag_drop(canvas.clone(), window_for_dragdrop);
             }
@@ -1227,6 +1228,34 @@ fn setup_canvas_resize_observer(_canvas: web_sys::HtmlCanvasElement, window: Arc
             let _ = window.request_inner_size(winit::dpi::LogicalSize::new(width, height));
         }
     }
+}
+
+/// Set up context menu event listener for WASM.
+/// This allows conditionally showing the browser's native context menu.
+#[cfg(target_arch = "wasm32")]
+fn setup_canvas_context_menu(canvas: web_sys::HtmlCanvasElement) {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+
+    let contextmenu_callback =
+        Closure::<dyn Fn(web_sys::MouseEvent)>::new(|event: web_sys::MouseEvent| {
+            // Allow browser context menu if Shift is held
+            if event.shift_key() {
+                log::info!("Shift+right-click: allowing browser context menu");
+                // Don't prevent default - let browser show its menu
+            } else {
+                // Prevent the browser's context menu so our custom one can show
+                event.prevent_default();
+            }
+        });
+
+    if let Err(e) = canvas.add_event_listener_with_callback(
+        "contextmenu",
+        contextmenu_callback.as_ref().unchecked_ref(),
+    ) {
+        log::error!("Failed to add contextmenu listener: {:?}", e);
+    }
+    contextmenu_callback.forget();
 }
 
 /// Set up drag-drop event listeners for WASM.

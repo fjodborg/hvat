@@ -3,6 +3,7 @@
 //! Each module contains `impl HvatApp` blocks that extend the main
 //! application struct with UI building methods.
 
+mod context_menu;
 mod export_dialog;
 mod image_viewer;
 mod left_sidebar;

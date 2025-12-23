@@ -451,6 +451,14 @@ pub struct HvatApp {
     last_tick: Option<std::time::Instant>,
     #[cfg(target_arch = "wasm32")]
     last_tick: Option<f64>, // performance.now() value in ms
+
+    // Context menu state
+    /// Whether the context menu is open
+    pub(crate) context_menu_open: bool,
+    /// Position where the context menu was opened (screen coordinates)
+    pub(crate) context_menu_position: (f32, f32),
+    /// Annotation ID that was right-clicked (if any)
+    pub(crate) context_menu_annotation_id: Option<u32>,
 }
 
 impl Default for HvatApp {
@@ -595,6 +603,11 @@ impl HvatApp {
             tooltip_manager: TooltipManager::new(),
             window_size: (1920.0, 1080.0), // Default, updated on resize
             last_tick: None,
+
+            // Context menu
+            context_menu_open: false,
+            context_menu_position: (0.0, 0.0),
+            context_menu_annotation_id: None,
         }
     }
 
@@ -1587,11 +1600,31 @@ impl HvatApp {
             event.button
         );
 
-        // Handle right-click on polygon vertex: remove vertex (in Select tool mode)
+        // Handle right-click: open context menu
         if event.button == MouseButton::Right && event.kind == PointerEventKind::Click {
+            // Check if we clicked on a polygon vertex (for vertex removal - priority action)
             if self.selected_tool == AnnotationTool::Select {
-                self.handle_polygon_vertex_remove(x, y);
+                if self.try_remove_polygon_vertex(x, y) {
+                    return;
+                }
             }
+
+            // Open context menu at the click position
+            // Try to find an annotation under the click
+            let annotation_id = self.find_annotation_at(x, y);
+            let screen_pos = (event.screen_x, event.screen_y);
+            log::info!(
+                "Right-click at image ({:.1}, {:.1}), screen ({:.0}, {:.0}), annotation_id={:?}",
+                x,
+                y,
+                screen_pos.0,
+                screen_pos.1,
+                annotation_id
+            );
+
+            self.context_menu_open = true;
+            self.context_menu_position = screen_pos;
+            self.context_menu_annotation_id = annotation_id;
             return;
         }
 
@@ -1890,9 +1923,10 @@ impl HvatApp {
         }
     }
 
-    /// Handle right-click on a selected polygon vertex to remove it.
-    /// Only removes if polygon has more than 3 vertices (minimum for a valid polygon).
-    fn handle_polygon_vertex_remove(&mut self, x: f32, y: f32) {
+    /// Try to remove a polygon vertex at the given position.
+    /// Returns true if a vertex was removed, false otherwise.
+    /// This is used to give priority to vertex removal over opening context menu.
+    fn try_remove_polygon_vertex(&mut self, x: f32, y: f32) -> bool {
         use crate::model::{AnnotationHandle, PolygonHandle};
 
         let path = self.current_image_path();
@@ -1910,14 +1944,12 @@ impl HvatApp {
         };
 
         let Some((ann_idx, ann_id, shape)) = selected_polygon_info else {
-            log::debug!("Right-click: no polygon selected");
-            return;
+            return false;
         };
 
         // Hit-test against the polygon's handles - only care about vertices
         let Some(handle) = shape.hit_test_handle(x, y, hit_radius) else {
-            log::debug!("Right-click: not on a polygon handle");
-            return;
+            return false;
         };
 
         if let AnnotationHandle::Polygon(PolygonHandle::Vertex(vertex_idx)) = handle {
@@ -1942,11 +1974,35 @@ impl HvatApp {
                         ann_id,
                         ann.shape.polygon_vertices().map(|v| v.len()).unwrap_or(0)
                     );
+                    return true;
                 }
             }
-        } else {
-            log::debug!("Right-click not on a vertex - no action");
         }
+
+        false
+    }
+
+    /// Find an annotation at the given image coordinates.
+    /// Returns the annotation ID if found, None otherwise.
+    fn find_annotation_at(&self, x: f32, y: f32) -> Option<u32> {
+        let path = self.current_image_path();
+        let image_data = self.image_data_store.get(&path);
+
+        // First check if there's a selected annotation that contains the point
+        for ann in &image_data.annotations {
+            if ann.selected && ann.shape.contains_point(x, y) {
+                return Some(ann.id);
+            }
+        }
+
+        // If no selected annotation at point, check all annotations
+        for ann in &image_data.annotations {
+            if ann.shape.contains_point(x, y) {
+                return Some(ann.id);
+            }
+        }
+
+        None
     }
 
     /// Handle bounding box drawing.
@@ -2408,6 +2464,11 @@ impl Application for HvatApp {
         let mut ctx = hvat_ui::Context::new();
         ctx.add(topbar);
         ctx.add(Element::new(main_row));
+
+        // Add context menu overlay if open
+        if self.context_menu_open {
+            ctx.add(self.build_context_menu());
+        }
 
         // Add tooltip overlay if visible (rendered last for highest z-order)
         if let Some((content, pos)) = self.tooltip_manager.visible_tooltip() {
@@ -3336,6 +3397,61 @@ impl Application for HvatApp {
                         }
                     }
                 }
+            }
+
+            // Context Menu Events
+            Message::OpenContextMenu(position, annotation_id) => {
+                log::debug!(
+                    "Opening context menu at {:?}, annotation_id={:?}",
+                    position,
+                    annotation_id
+                );
+                self.context_menu_open = true;
+                self.context_menu_position = position;
+                self.context_menu_annotation_id = annotation_id;
+            }
+            Message::CloseContextMenu => {
+                log::debug!("Closing context menu");
+                self.context_menu_open = false;
+                self.context_menu_annotation_id = None;
+            }
+            Message::ContextMenuSelect(item_id) => {
+                log::debug!("Context menu item selected: {}", item_id);
+                self.context_menu_open = false;
+
+                // Handle category selection (item_id is "category_{id}")
+                if let Some(category_id_str) = item_id.strip_prefix("category_") {
+                    if let Ok(category_id) = category_id_str.parse::<u32>() {
+                        // If we have an annotation selected, change its category
+                        if let Some(ann_id) = self.context_menu_annotation_id {
+                            let path = self.current_image_path();
+
+                            // Push undo point before modifying
+                            self.push_annotation_undo_point();
+
+                            // Find and update the annotation
+                            if let Some(image_data) = self.image_data_store.get_mut(&path) {
+                                for annotation in &mut image_data.annotations {
+                                    if annotation.id == ann_id {
+                                        annotation.category_id = category_id;
+                                        log::info!(
+                                            "Changed annotation {} category to {}",
+                                            ann_id,
+                                            category_id
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            // No annotation - just select this category for new annotations
+                            self.selected_category = category_id;
+                            log::info!("Selected category {} for new annotations", category_id);
+                        }
+                    }
+                }
+
+                self.context_menu_annotation_id = None;
             }
         }
     }

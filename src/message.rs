@@ -246,4 +246,12 @@ pub enum Message {
     TooltipClear(String),
     /// Update mouse position for current tooltip (for tracking movement)
     TooltipMouseMove((f32, f32)),
+
+    // Context Menu Events
+    /// Open context menu at position (position, annotation_id if clicked on annotation)
+    OpenContextMenu((f32, f32), Option<u32>),
+    /// Close context menu without selection
+    CloseContextMenu,
+    /// Context menu item selected (item id)
+    ContextMenuSelect(String),
 }

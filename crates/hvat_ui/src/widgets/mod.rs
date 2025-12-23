@@ -7,6 +7,7 @@ mod color_swatch;
 mod column;
 pub mod config;
 mod container_helpers;
+mod context_menu;
 mod dropdown;
 mod file_tree;
 mod flex_layout;
@@ -29,6 +30,7 @@ pub use color_picker::ColorPicker;
 pub use color_swatch::ColorSwatch;
 pub use column::Column;
 pub use config::BaseInputConfig;
+pub use context_menu::{ContextMenu, ContextMenuConfig, MenuItem};
 pub use dropdown::{Dropdown, DropdownConfig};
 pub use file_tree::{FileTree, FileTreeConfig, FileTreeNode};
 pub use image_viewer::{
