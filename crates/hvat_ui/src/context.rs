@@ -1,9 +1,11 @@
 //! Builder context for constructing widget trees
 
 use crate::element::Element;
-use crate::layout::{Alignment, Length, Padding};
+use crate::layout::{Alignment, Bounds, Length, Padding};
 use crate::renderer::TextureId;
-use crate::state::{InteractionMode, NumberInputState, SliderState, TextInputState};
+use crate::state::{
+    InteractionMode, NumberInputState, SliderState, TextInputState, TooltipContent,
+};
 use crate::widgets::{
     AnnotationOverlay, Button, Column, ImagePointerEvent, ImageViewer, NumberInput, Row, Slider,
     Text, TextInput,
@@ -259,6 +261,32 @@ impl<'a, M: Clone + 'static> ButtonBuilder<'a, M> {
     /// The color will be slightly lightened on hover and darkened on press.
     pub fn background_color(mut self, color: crate::renderer::Color) -> Self {
         self.button = self.button.background_color(color);
+        self
+    }
+
+    /// Add a tooltip to the button
+    ///
+    /// The tooltip will appear when hovering over the button.
+    ///
+    /// # Example
+    /// ```ignore
+    /// ctx.button("Polygon")
+    ///     .tooltip(
+    ///         "tool_polygon",
+    ///         TooltipContent::rich("Polygon Tool", "Hotkey: R\nDraw polygon annotations"),
+    ///         |id, content, bounds, pos| Message::TooltipRequest(id, content, bounds, pos),
+    ///         |id| Message::TooltipClear(id),
+    ///     )
+    ///     .on_click(Message::ToolSelected(AnnotationTool::Polygon));
+    /// ```
+    pub fn tooltip(
+        mut self,
+        id: impl Into<String>,
+        content: TooltipContent,
+        on_hover: impl Fn(String, TooltipContent, Bounds, (f32, f32)) -> M + 'static,
+        on_leave: impl Fn(String) -> M + 'static,
+    ) -> Self {
+        self.button = self.button.tooltip(id, content, on_hover, on_leave);
         self
     }
 }

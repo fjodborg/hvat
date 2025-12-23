@@ -4,9 +4,8 @@
 
 use std::path::PathBuf;
 
-use hvat_ui::FileTreeState;
-use hvat_ui::ImagePointerEvent;
 use hvat_ui::prelude::*;
+use hvat_ui::{FileTreeState, ImagePointerEvent, TooltipContent};
 
 use crate::config::LogLevel;
 use crate::keybindings::KeybindTarget;
@@ -239,4 +238,12 @@ pub enum Message {
     ConfigImportCompleted,
     /// Configuration import failed with error message
     ConfigImportFailed(String),
+
+    // Tooltip Events
+    /// Request to show a tooltip (id, content, trigger_bounds, mouse_position)
+    TooltipRequest(String, TooltipContent, Bounds, (f32, f32)),
+    /// Clear tooltip if it matches the given ID (mouse left the trigger area)
+    TooltipClear(String),
+    /// Update mouse position for current tooltip (for tracking movement)
+    TooltipMouseMove((f32, f32)),
 }

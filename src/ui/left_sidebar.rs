@@ -4,7 +4,7 @@ use hvat_ui::constants::{BUTTON_PADDING_COMPACT, COLOR_PICKER_SWATCH_OFFSET, ROW
 use hvat_ui::prelude::*;
 use hvat_ui::{
     BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, FileTree, Panel,
-    ScrollDirection, Scrollable, ScrollbarVisibility,
+    ScrollDirection, Scrollable, ScrollbarVisibility, TooltipContent,
 };
 
 use crate::app::HvatApp;
@@ -12,6 +12,46 @@ use crate::constants::{FILE_LIST_MAX_HEIGHT, SIDEBAR_WIDTH};
 use crate::keybindings::{key_to_string, optional_key_to_string};
 use crate::message::Message;
 use crate::model::AnnotationTool;
+
+/// Get tooltip content for an annotation tool
+fn tool_tooltip(tool: AnnotationTool, hotkey: &str) -> TooltipContent {
+    match tool {
+        AnnotationTool::Select => TooltipContent::rich(
+            "Select Tool",
+            format!(
+                "Hotkey: {}\n\nSelect and modify existing annotations.\n\
+                Click to select, drag to move.\n\
+                Click corners/edges to resize.",
+                hotkey
+            ),
+        ),
+        AnnotationTool::BoundingBox => TooltipContent::rich(
+            "Bounding Box Tool",
+            format!(
+                "Hotkey: {}\n\nDraw rectangular annotations.\n\
+                Click and drag to create a box.",
+                hotkey
+            ),
+        ),
+        AnnotationTool::Polygon => TooltipContent::rich(
+            "Polygon Tool",
+            format!(
+                "Hotkey: {}\n\nDraw polygon annotations.\n\
+                Click to add points, click first point to close.\n\
+                Right-click or press Enter to finish.",
+                hotkey
+            ),
+        ),
+        AnnotationTool::Point => TooltipContent::rich(
+            "Point Tool",
+            format!(
+                "Hotkey: {}\n\nPlace point annotations.\n\
+                Click to place a point marker.",
+                hotkey
+            ),
+        ),
+    }
+}
 
 impl HvatApp {
     /// Build the left sidebar with tools, categories, and tags.
@@ -109,8 +149,21 @@ impl HvatApp {
                     } else {
                         format!("{} ({})", tool.name(), hotkey_str)
                     };
+
+                    // Create tooltip ID and content for this tool
+                    let tooltip_id = format!("tool_{}", tool.name().to_lowercase());
+                    let tooltip_content = tool_tooltip(*tool, &hotkey_str);
+
                     c.button(label)
                         .width(Length::Fill(1.0))
+                        .tooltip(
+                            tooltip_id,
+                            tooltip_content,
+                            |id, content, bounds, pos| {
+                                Message::TooltipRequest(id, content, bounds, pos)
+                            },
+                            |id| Message::TooltipClear(id),
+                        )
                         .on_click(Message::ToolSelected(tool_copy));
                 }
             });

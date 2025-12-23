@@ -4,6 +4,7 @@ use crate::constants::{char_width, line_height, BUTTON_PADDING, DEFAULT_FONT_SIZ
 use crate::event::{Event, MouseButton};
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
+use crate::state::TooltipContent;
 use crate::widget::{EventResult, Widget};
 
 /// Button visual style
@@ -44,6 +45,13 @@ pub struct Button<M> {
     custom_bg: Option<Color>,
     /// Custom text color (overrides style-based colors)
     custom_text: Option<Color>,
+    /// Optional tooltip content
+    tooltip_content: Option<(String, TooltipContent)>,
+    /// Callback to generate tooltip request message
+    on_tooltip_request:
+        Option<Box<dyn Fn(String, TooltipContent, Bounds, (f32, f32)) -> M + 'static>>,
+    /// Callback to generate tooltip clear message
+    on_tooltip_clear: Option<Box<dyn Fn(String) -> M + 'static>>,
 }
 
 impl<M> Button<M> {
@@ -62,7 +70,38 @@ impl<M> Button<M> {
             style: ButtonStyle::default(),
             custom_bg: None,
             custom_text: None,
+            tooltip_content: None,
+            on_tooltip_request: None,
+            on_tooltip_clear: None,
         }
+    }
+
+    /// Add a tooltip to this button
+    ///
+    /// The tooltip will be shown when hovering over the button.
+    /// You must provide factory functions to create the hover and leave messages.
+    ///
+    /// # Example
+    /// ```ignore
+    /// button("Polygon")
+    ///     .tooltip(
+    ///         "tool_polygon",
+    ///         TooltipContent::rich("Polygon Tool", "Hotkey: R\nDraw polygon annotations"),
+    ///         |id, content, bounds, pos| Message::TooltipRequest(id, content, bounds, pos),
+    ///         |id| Message::TooltipClear(id),
+    ///     )
+    /// ```
+    pub fn tooltip(
+        mut self,
+        id: impl Into<String>,
+        content: TooltipContent,
+        on_hover: impl Fn(String, TooltipContent, Bounds, (f32, f32)) -> M + 'static,
+        on_leave: impl Fn(String) -> M + 'static,
+    ) -> Self {
+        self.tooltip_content = Some((id.into(), content));
+        self.on_tooltip_request = Some(Box::new(on_hover));
+        self.on_tooltip_clear = Some(Box::new(on_leave));
+        self
     }
 
     /// Set the button style
@@ -254,11 +293,35 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             Event::MouseMove { position, .. } => {
                 let inside = button_bounds.contains(position.0, position.1);
                 let old_state = self.state;
+                let was_hovered = old_state == ButtonState::Hovered;
 
                 if inside && self.state != ButtonState::Pressed {
                     self.state = ButtonState::Hovered;
                 } else if !inside && self.state == ButtonState::Hovered {
                     self.state = ButtonState::Normal;
+                }
+
+                let is_hovered = self.state == ButtonState::Hovered;
+
+                // Handle tooltip messages on hover state change
+                if let (Some((ref id, ref content)), Some(ref on_request), Some(ref on_clear)) = (
+                    &self.tooltip_content,
+                    &self.on_tooltip_request,
+                    &self.on_tooltip_clear,
+                ) {
+                    if !was_hovered && is_hovered {
+                        // Just entered hover - emit tooltip request
+                        let msg = on_request(id.clone(), content.clone(), button_bounds, *position);
+                        return EventResult::Message(msg);
+                    } else if was_hovered && !is_hovered {
+                        // Just left hover - emit tooltip clear
+                        let msg = on_clear(id.clone());
+                        return EventResult::Message(msg);
+                    } else if is_hovered {
+                        // Still hovering - emit tooltip request with updated position
+                        let msg = on_request(id.clone(), content.clone(), button_bounds, *position);
+                        return EventResult::Message(msg);
+                    }
                 }
 
                 // Return Redraw if state changed
@@ -312,9 +375,18 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
             }
 
             Event::CursorLeft => {
-                // Cursor left the window - clear hover state
+                // Cursor left the window - clear hover state and tooltip
                 if self.state == ButtonState::Hovered {
                     self.state = ButtonState::Normal;
+                    // Clear tooltip if we have one
+                    if let (Some((ref id, _)), _, Some(ref on_clear)) = (
+                        &self.tooltip_content,
+                        &self.on_tooltip_request,
+                        &self.on_tooltip_clear,
+                    ) {
+                        let msg = on_clear(id.clone());
+                        return EventResult::Message(msg);
+                    }
                     return EventResult::Redraw;
                 }
                 EventResult::None

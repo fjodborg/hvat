@@ -21,6 +21,7 @@ mod slider;
 mod text;
 pub mod text_core;
 mod text_input;
+mod tooltip;
 
 pub use button::{Button, ButtonStyle};
 pub use collapsible::{Collapsible, CollapsibleConfig};
@@ -40,6 +41,7 @@ pub use scrollable::{ScrollDirection, Scrollable, ScrollbarConfig, ScrollbarVisi
 pub use slider::{Slider, SliderConfig};
 pub use text::Text;
 pub use text_input::{TextInput, TextInputConfig};
+pub use tooltip::{tooltip_overlay, tooltip_overlay_with_size, TooltipConfig, TooltipOverlay};
 
 use crate::element::Element;
 use crate::renderer::TextureId;

@@ -1139,6 +1139,236 @@ impl<T: Clone + 'static> UndoContext<T> {
 }
 
 // =============================================================================
+// Tooltip System
+// =============================================================================
+
+/// Content that can be displayed in a tooltip
+#[derive(Debug, Clone)]
+pub enum TooltipContent {
+    /// Simple text content
+    Text(String),
+    /// Rich content with title and body text
+    Rich {
+        /// Title shown in bold/emphasized style
+        title: String,
+        /// Body text (can be multiple lines)
+        body: String,
+    },
+    /// Custom content (for future extensions like images/gifs)
+    /// The string is a hint for what type of content (e.g., "image:path/to/image.png")
+    Custom(String),
+}
+
+impl TooltipContent {
+    /// Create simple text tooltip content
+    pub fn text(text: impl Into<String>) -> Self {
+        TooltipContent::Text(text.into())
+    }
+
+    /// Create rich tooltip content with title and body
+    pub fn rich(title: impl Into<String>, body: impl Into<String>) -> Self {
+        TooltipContent::Rich {
+            title: title.into(),
+            body: body.into(),
+        }
+    }
+}
+
+impl Default for TooltipContent {
+    fn default() -> Self {
+        TooltipContent::Text(String::new())
+    }
+}
+
+/// Request to show a tooltip
+///
+/// Widgets create this to request showing a tooltip. The tooltip manager
+/// decides whether to show it based on hover duration.
+#[derive(Debug, Clone)]
+pub struct TooltipRequest {
+    /// Unique identifier for this tooltip (e.g., "tool_polygon", "category_0")
+    pub id: String,
+    /// The content to display
+    pub content: TooltipContent,
+    /// Bounds of the widget that triggered this tooltip (for positioning fallback)
+    pub trigger_bounds: crate::layout::Bounds,
+}
+
+impl TooltipRequest {
+    /// Create a new tooltip request
+    pub fn new(
+        id: impl Into<String>,
+        content: TooltipContent,
+        trigger_bounds: crate::layout::Bounds,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            content,
+            trigger_bounds,
+        }
+    }
+}
+
+/// State for a pending or visible tooltip
+#[derive(Debug, Clone)]
+struct TooltipInstance {
+    /// The request that created this tooltip
+    request: TooltipRequest,
+    /// Mouse position when tooltip was requested
+    initial_mouse_pos: (f32, f32),
+    /// Last known mouse position
+    last_mouse_pos: (f32, f32),
+    /// Time accumulated while hovering (in seconds)
+    hover_time: f32,
+    /// Whether the tooltip is currently visible
+    is_visible: bool,
+}
+
+/// Centralized tooltip manager
+///
+/// Handles tooltip timing, visibility, and ensures only one tooltip
+/// is shown at a time. Widget code should:
+/// 1. Call `request()` when mouse is over a tooltipped area
+/// 2. Call `clear_if_id()` when mouse leaves the area
+/// 3. The manager handles timing and visibility automatically
+#[derive(Debug, Clone, Default)]
+pub struct TooltipManager {
+    /// Current tooltip instance (pending or visible)
+    current: Option<TooltipInstance>,
+    /// Delay before showing tooltip (in seconds)
+    delay: f32,
+    /// Distance threshold for resetting hover time (pixels)
+    move_threshold: f32,
+}
+
+impl TooltipManager {
+    /// Default delay before showing tooltip (200ms)
+    pub const DEFAULT_DELAY: f32 = 0.2;
+    /// Default movement threshold before resetting timer (5 pixels)
+    pub const DEFAULT_MOVE_THRESHOLD: f32 = 5.0;
+
+    /// Create a new tooltip manager with default settings
+    pub fn new() -> Self {
+        Self {
+            current: None,
+            delay: Self::DEFAULT_DELAY,
+            move_threshold: Self::DEFAULT_MOVE_THRESHOLD,
+        }
+    }
+
+    /// Set the delay before showing tooltips
+    pub fn with_delay(mut self, delay_seconds: f32) -> Self {
+        self.delay = delay_seconds;
+        self
+    }
+
+    /// Set the movement threshold for resetting hover time
+    pub fn with_move_threshold(mut self, threshold_pixels: f32) -> Self {
+        self.move_threshold = threshold_pixels;
+        self
+    }
+
+    /// Request to show a tooltip
+    ///
+    /// If this is a new tooltip (different ID), resets timing.
+    /// If same ID, updates mouse position.
+    pub fn request(&mut self, request: TooltipRequest, mouse_pos: (f32, f32)) {
+        if let Some(ref mut current) = self.current {
+            if current.request.id == request.id {
+                // Same tooltip - update position but don't reset timer
+                // Unless mouse moved significantly
+                let dx = mouse_pos.0 - current.last_mouse_pos.0;
+                let dy = mouse_pos.1 - current.last_mouse_pos.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                if dist > self.move_threshold && !current.is_visible {
+                    // Significant movement while not visible - reset timer
+                    current.hover_time = 0.0;
+                    current.initial_mouse_pos = mouse_pos;
+                }
+                current.last_mouse_pos = mouse_pos;
+                return;
+            }
+        }
+
+        // New tooltip or no current tooltip
+        self.current = Some(TooltipInstance {
+            request,
+            initial_mouse_pos: mouse_pos,
+            last_mouse_pos: mouse_pos,
+            hover_time: 0.0,
+            is_visible: false,
+        });
+    }
+
+    /// Clear the current tooltip if it matches the given ID
+    ///
+    /// Called when mouse leaves the tooltipped widget
+    pub fn clear_if_id(&mut self, id: &str) {
+        if let Some(ref current) = self.current {
+            if current.request.id == id {
+                self.current = None;
+            }
+        }
+    }
+
+    /// Clear any current tooltip unconditionally
+    pub fn clear(&mut self) {
+        self.current = None;
+    }
+
+    /// Update tooltip timing
+    ///
+    /// Call this every frame with the elapsed time since last frame.
+    /// Returns true if tooltip visibility changed.
+    pub fn tick(&mut self, delta_seconds: f32) -> bool {
+        if let Some(ref mut current) = self.current {
+            if !current.is_visible {
+                current.hover_time += delta_seconds;
+                if current.hover_time >= self.delay {
+                    current.is_visible = true;
+                    log::debug!(
+                        "Tooltip '{}' became visible after {:.2}s",
+                        current.request.id,
+                        current.hover_time
+                    );
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if a tooltip is currently visible
+    pub fn is_visible(&self) -> bool {
+        self.current.as_ref().map(|c| c.is_visible).unwrap_or(false)
+    }
+
+    /// Get the current visible tooltip's content and position
+    ///
+    /// Returns (content, mouse_position) if a tooltip should be shown
+    pub fn visible_tooltip(&self) -> Option<(&TooltipContent, (f32, f32))> {
+        self.current.as_ref().and_then(|c| {
+            if c.is_visible {
+                Some((&c.request.content, c.last_mouse_pos))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Get current tooltip ID if any
+    pub fn current_id(&self) -> Option<&str> {
+        self.current.as_ref().map(|c| c.request.id.as_str())
+    }
+
+    /// Get the trigger bounds of the current tooltip (for positioning fallback)
+    pub fn trigger_bounds(&self) -> Option<crate::layout::Bounds> {
+        self.current.as_ref().map(|c| c.request.trigger_bounds)
+    }
+}
+
+// =============================================================================
 // Unit Tests
 // =============================================================================
 
@@ -1606,5 +1836,165 @@ mod tests {
         let redone = state.redo();
         assert!(redone);
         assert_eq!(state.text, "20");
+    }
+
+    // =========================================================================
+    // TooltipManager Tests
+    // =========================================================================
+
+    #[test]
+    fn tooltip_manager_new() {
+        let manager = TooltipManager::new();
+        assert!(!manager.is_visible());
+        assert_eq!(manager.current_id(), None);
+    }
+
+    #[test]
+    fn tooltip_manager_request_and_tick() {
+        let mut manager = TooltipManager::new().with_delay(0.2);
+
+        let request = TooltipRequest::new(
+            "test_tooltip",
+            TooltipContent::text("Hello"),
+            crate::layout::Bounds::new(0.0, 0.0, 100.0, 50.0),
+        );
+
+        // Request tooltip
+        manager.request(request, (50.0, 25.0));
+        assert_eq!(manager.current_id(), Some("test_tooltip"));
+        assert!(!manager.is_visible());
+
+        // Tick but not enough time
+        manager.tick(0.1);
+        assert!(!manager.is_visible());
+
+        // Tick past delay
+        manager.tick(0.15);
+        assert!(manager.is_visible());
+    }
+
+    #[test]
+    fn tooltip_manager_clear_if_id() {
+        let mut manager = TooltipManager::new();
+
+        let request = TooltipRequest::new(
+            "my_tooltip",
+            TooltipContent::text("Test"),
+            crate::layout::Bounds::new(0.0, 0.0, 100.0, 50.0),
+        );
+
+        manager.request(request, (10.0, 10.0));
+        assert_eq!(manager.current_id(), Some("my_tooltip"));
+
+        // Wrong ID - should not clear
+        manager.clear_if_id("wrong_id");
+        assert_eq!(manager.current_id(), Some("my_tooltip"));
+
+        // Correct ID - should clear
+        manager.clear_if_id("my_tooltip");
+        assert_eq!(manager.current_id(), None);
+    }
+
+    #[test]
+    fn tooltip_manager_move_resets_timer() {
+        let mut manager = TooltipManager::new()
+            .with_delay(0.2)
+            .with_move_threshold(5.0);
+
+        let bounds = crate::layout::Bounds::new(0.0, 0.0, 100.0, 50.0);
+        let content = TooltipContent::text("Test");
+
+        // Request at position
+        manager.request(
+            TooltipRequest::new("t", content.clone(), bounds),
+            (10.0, 10.0),
+        );
+        manager.tick(0.15); // Almost at delay
+        assert!(!manager.is_visible());
+
+        // Move significantly - should reset timer
+        manager.request(
+            TooltipRequest::new("t", content.clone(), bounds),
+            (20.0, 20.0),
+        );
+        manager.tick(0.15); // Same time again - not enough since timer reset
+        assert!(!manager.is_visible());
+
+        // Now wait full delay
+        manager.tick(0.1);
+        assert!(manager.is_visible());
+    }
+
+    #[test]
+    fn tooltip_manager_small_move_does_not_reset() {
+        let mut manager = TooltipManager::new()
+            .with_delay(0.2)
+            .with_move_threshold(5.0);
+
+        let bounds = crate::layout::Bounds::new(0.0, 0.0, 100.0, 50.0);
+        let content = TooltipContent::text("Test");
+
+        // Request at position
+        manager.request(
+            TooltipRequest::new("t", content.clone(), bounds),
+            (10.0, 10.0),
+        );
+        manager.tick(0.15); // Almost at delay
+
+        // Small move (< threshold) - should NOT reset timer
+        manager.request(
+            TooltipRequest::new("t", content.clone(), bounds),
+            (12.0, 12.0),
+        );
+        manager.tick(0.1); // Should be visible now since timer wasn't reset
+        assert!(manager.is_visible());
+    }
+
+    #[test]
+    fn tooltip_manager_visible_tooltip() {
+        let mut manager = TooltipManager::new().with_delay(0.0); // Instant show
+
+        let request = TooltipRequest::new(
+            "t",
+            TooltipContent::rich("Title", "Body"),
+            crate::layout::Bounds::new(0.0, 0.0, 100.0, 50.0),
+        );
+
+        manager.request(request, (25.0, 30.0));
+        manager.tick(0.01); // Any tick should make it visible
+
+        let visible = manager.visible_tooltip();
+        assert!(visible.is_some());
+
+        let (content, pos) = visible.unwrap();
+        assert_eq!(pos, (25.0, 30.0));
+        match content {
+            TooltipContent::Rich { title, body } => {
+                assert_eq!(title, "Title");
+                assert_eq!(body, "Body");
+            }
+            _ => panic!("Expected Rich content"),
+        }
+    }
+
+    #[test]
+    fn tooltip_content_text() {
+        let content = TooltipContent::text("Hello World");
+        match content {
+            TooltipContent::Text(s) => assert_eq!(s, "Hello World"),
+            _ => panic!("Expected Text variant"),
+        }
+    }
+
+    #[test]
+    fn tooltip_content_rich() {
+        let content = TooltipContent::rich("My Title", "Some body text");
+        match content {
+            TooltipContent::Rich { title, body } => {
+                assert_eq!(title, "My Title");
+                assert_eq!(body, "Some body text");
+            }
+            _ => panic!("Expected Rich variant"),
+        }
     }
 }

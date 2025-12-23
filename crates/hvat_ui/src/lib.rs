@@ -37,11 +37,12 @@ pub use widget::{EventResult, Widget};
 // Re-export widgets
 pub use widgets::{
     button, col, collapsible, column, dropdown, image_viewer, number_input, row, scrollable,
-    slider, text, text_input, AnnotationOverlay, BaseInputConfig, BorderSides, Collapsible,
-    CollapsibleConfig, ColorPicker, ColorSwatch, Column, Dropdown, DropdownConfig, FileTree,
-    FileTreeConfig, FileTreeNode, ImagePointerEvent, NumberInput, NumberInputConfig, OverlayShape,
-    Panel, PointerEventKind, Row, ScrollDirection, Scrollable, ScrollbarConfig,
-    ScrollbarVisibility, Slider, SliderConfig, Text, TextInput, TextInputConfig,
+    slider, text, text_input, tooltip_overlay, tooltip_overlay_with_size, AnnotationOverlay,
+    BaseInputConfig, BorderSides, Collapsible, CollapsibleConfig, ColorPicker, ColorSwatch, Column,
+    Dropdown, DropdownConfig, FileTree, FileTreeConfig, FileTreeNode, ImagePointerEvent,
+    NumberInput, NumberInputConfig, OverlayShape, Panel, PointerEventKind, Row, ScrollDirection,
+    Scrollable, ScrollbarConfig, ScrollbarVisibility, Slider, SliderConfig, Text, TextInput,
+    TextInputConfig, TooltipConfig, TooltipOverlay,
 };
 
 // Re-export hvat_gpu types that users need

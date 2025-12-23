@@ -17,7 +17,9 @@ use std::sync::OnceLock;
 
 use hvat_gpu::{BandSelectionUniform, ImageAdjustments};
 use hvat_ui::prelude::*;
-use hvat_ui::{Application, Column, Element, Event, FileTreeState, KeyCode, Resources, Row};
+use hvat_ui::{
+    Application, Column, Element, Event, FileTreeState, KeyCode, Resources, Row, TooltipManager,
+};
 
 use crate::constants::{
     DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_HUE, DEFAULT_RED_BAND,
@@ -438,6 +440,17 @@ pub struct HvatApp {
     pub(crate) annotations_scroll_state: ScrollState,
     /// Set of category IDs that are hidden (filtered out from display)
     pub(crate) hidden_categories: std::collections::HashSet<u32>,
+
+    // Tooltip system
+    /// Tooltip manager for hover-triggered tooltips
+    pub(crate) tooltip_manager: TooltipManager,
+    /// Current window size (for tooltip boundary detection)
+    pub(crate) window_size: (f32, f32),
+    /// Last tick timestamp for delta time calculation
+    #[cfg(not(target_arch = "wasm32"))]
+    last_tick: Option<std::time::Instant>,
+    #[cfg(target_arch = "wasm32")]
+    last_tick: Option<f64>, // performance.now() value in ms
 }
 
 impl Default for HvatApp {
@@ -577,6 +590,11 @@ impl HvatApp {
             annotations_collapsed: CollapsibleState::expanded(),
             annotations_scroll_state: ScrollState::default(),
             hidden_categories: std::collections::HashSet::new(),
+
+            // Tooltip system
+            tooltip_manager: TooltipManager::new(),
+            window_size: (1920.0, 1080.0), // Default, updated on resize
+            last_tick: None,
         }
     }
 
@@ -2391,6 +2409,15 @@ impl Application for HvatApp {
         ctx.add(topbar);
         ctx.add(Element::new(main_row));
 
+        // Add tooltip overlay if visible (rendered last for highest z-order)
+        if let Some((content, pos)) = self.tooltip_manager.visible_tooltip() {
+            ctx.add(hvat_ui::tooltip_overlay_with_size(
+                content.clone(),
+                pos,
+                self.window_size,
+            ));
+        }
+
         Element::new(Column::new(ctx.take()))
     }
 
@@ -3283,11 +3310,68 @@ impl Application for HvatApp {
             Message::ConfigImportFailed(error) => {
                 log::error!("Configuration import failed: {}", error);
             }
+
+            // Tooltip Events
+            Message::TooltipRequest(id, content, bounds, mouse_pos) => {
+                let request = hvat_ui::TooltipRequest::new(id, content, bounds);
+                self.tooltip_manager.request(request, mouse_pos);
+            }
+            Message::TooltipClear(id) => {
+                self.tooltip_manager.clear_if_id(&id);
+            }
+            Message::TooltipMouseMove(pos) => {
+                // Check if mouse is still within trigger bounds
+                if let Some(bounds) = self.tooltip_manager.trigger_bounds() {
+                    if !bounds.contains(pos.0, pos.1) {
+                        // Mouse left the trigger area - clear tooltip
+                        self.tooltip_manager.clear();
+                    } else if let Some(current_id) = self.tooltip_manager.current_id() {
+                        // Still within bounds - update position if visible
+                        if let Some((content, _)) = self.tooltip_manager.visible_tooltip() {
+                            let content_clone = content.clone();
+                            let id_clone = current_id.to_string();
+                            let request =
+                                hvat_ui::TooltipRequest::new(id_clone, content_clone, bounds);
+                            self.tooltip_manager.request(request, pos);
+                        }
+                    }
+                }
+            }
         }
     }
 
     fn tick_with_resources(&mut self, resources: &mut Resources<'_>) -> bool {
         let mut needs_rebuild = false;
+
+        // Calculate delta time for tooltip timing
+        #[cfg(not(target_arch = "wasm32"))]
+        let delta_seconds = {
+            let now = std::time::Instant::now();
+            let delta = self
+                .last_tick
+                .map(|last| now.duration_since(last).as_secs_f32())
+                .unwrap_or(0.016); // Default to ~60fps
+            self.last_tick = Some(now);
+            delta
+        };
+        #[cfg(target_arch = "wasm32")]
+        let delta_seconds = {
+            let now = web_sys::window()
+                .and_then(|w| w.performance())
+                .map(|p| p.now())
+                .unwrap_or(0.0);
+            let delta = self
+                .last_tick
+                .map(|last| ((now - last) / 1000.0) as f32) // Convert ms to seconds
+                .unwrap_or(0.016);
+            self.last_tick = Some(now);
+            delta
+        };
+
+        // Update tooltip manager timing
+        if self.tooltip_manager.tick(delta_seconds) {
+            needs_rebuild = true;
+        }
 
         // Check for async picker result (WASM only)
         #[cfg(target_arch = "wasm32")]
@@ -3396,6 +3480,20 @@ impl Application for HvatApp {
                 log::debug!("on_event: FileHoverEnded");
                 return Some(Message::FileHoverEnded);
             }
+            Event::MouseMove { position, .. } => {
+                // Track mouse movement for tooltip boundary checking
+                // This runs before widget event dispatch, so if mouse left the trigger
+                // bounds, the tooltip will be cleared even if no widget handles the move
+                if self.tooltip_manager.current_id().is_some() {
+                    return Some(Message::TooltipMouseMove(*position));
+                }
+            }
+            Event::CursorLeft => {
+                // Clear tooltip when cursor leaves the window
+                if self.tooltip_manager.current_id().is_some() {
+                    self.tooltip_manager.clear();
+                }
+            }
             _ => {}
         }
 
@@ -3403,8 +3501,9 @@ impl Application for HvatApp {
         self.handle_key_event(event)
     }
 
-    fn on_resize(&mut self, _width: f32, height: f32) {
+    fn on_resize(&mut self, width: f32, height: f32) {
         self.window_height = height;
+        self.window_size = (width, height);
     }
 
     fn is_text_input_focused(&self) -> bool {
