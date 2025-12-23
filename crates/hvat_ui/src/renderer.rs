@@ -9,6 +9,7 @@ use crate::constants::{
 };
 use crate::layout::Bounds;
 use crate::overlay::OverlayRegistry;
+use crate::widgets::BorderSides;
 use glyphon::{
     Attrs, Buffer, Cache, Color as GlyphonColor, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Wrap,
@@ -495,6 +496,52 @@ impl Renderer {
             w as f32,
             h as f32,
         );
+    }
+
+    /// Stroke specific sides of a rectangle (borders drawn inside bounds)
+    ///
+    /// Unlike `stroke_rect` which draws all four sides, this method allows
+    /// drawing only the specified sides. Useful for panels and containers
+    /// that need borders on specific edges only.
+    pub fn stroke_rect_sides(
+        &mut self,
+        bounds: Bounds,
+        color: Color,
+        thickness: f32,
+        sides: BorderSides,
+    ) {
+        // Early exit if no sides requested
+        if !sides.top && !sides.bottom && !sides.left && !sides.right {
+            return;
+        }
+
+        // Draw each requested side as a filled rectangle (inside the bounds)
+        if sides.top {
+            let edge = Bounds::new(bounds.x, bounds.y, bounds.width, thickness);
+            self.fill_rect(edge, color);
+        }
+        if sides.bottom {
+            let edge = Bounds::new(
+                bounds.x,
+                bounds.y + bounds.height - thickness,
+                bounds.width,
+                thickness,
+            );
+            self.fill_rect(edge, color);
+        }
+        if sides.left {
+            let edge = Bounds::new(bounds.x, bounds.y, thickness, bounds.height);
+            self.fill_rect(edge, color);
+        }
+        if sides.right {
+            let edge = Bounds::new(
+                bounds.x + bounds.width - thickness,
+                bounds.y,
+                thickness,
+                bounds.height,
+            );
+            self.fill_rect(edge, color);
+        }
     }
 
     /// Internal fill_rect that doesn't apply clipping (for use by stroke_rect which pre-clips)

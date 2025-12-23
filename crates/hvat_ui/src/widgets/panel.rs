@@ -186,36 +186,14 @@ impl<M: 'static> Widget<M> for Panel<M> {
         // Draw content
         self.content.draw(renderer, bounds);
 
-        // Draw borders on specified sides
-        let w = self.border_width;
-        let color = self.border_color;
-
-        if self.border_sides.top {
-            renderer.line(bounds.x, bounds.y, bounds.right(), bounds.y, color, w);
-        }
-        if self.border_sides.bottom {
-            renderer.line(
-                bounds.x,
-                bounds.bottom(),
-                bounds.right(),
-                bounds.bottom(),
-                color,
-                w,
-            );
-        }
-        if self.border_sides.left {
-            renderer.line(bounds.x, bounds.y, bounds.x, bounds.bottom(), color, w);
-        }
-        if self.border_sides.right {
-            renderer.line(
-                bounds.right(),
-                bounds.y,
-                bounds.right(),
-                bounds.bottom(),
-                color,
-                w,
-            );
-        }
+        // Draw borders on specified sides using stroke_rect_sides
+        // which draws borders inside the bounds (consistent with stroke_rect)
+        renderer.stroke_rect_sides(
+            bounds,
+            self.border_color,
+            self.border_width,
+            self.border_sides,
+        );
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {
