@@ -12,6 +12,47 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+// Use the correct Instant type for each platform (winit uses web_time on WASM)
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
+// ============================================================================
+// TickResult - Result type for tick_with_resources
+// ============================================================================
+
+/// Result of `tick_with_resources()` call.
+///
+/// This enum allows the application to communicate different outcomes to the framework:
+/// - `Idle`: No work done, framework can idle until next event
+/// - `NeedsRebuild`: Visual state changed, view needs to be rebuilt
+/// - `ContinueWork`: Background work done (e.g., preloading), keep ticking but no rebuild needed
+/// - `ScheduleTick`: Schedule another tick without redrawing (for polling async work)
+/// - `RequestIdleTimer`: Request an `Event::IdleTimer` after the specified duration of inactivity
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum TickResult {
+    /// No work done, framework can idle until next event
+    #[default]
+    Idle,
+    /// Visual state changed, view needs to be rebuilt and redrawn
+    NeedsRebuild,
+    /// Background work done (e.g., image preloading), keep ticking but no view rebuild needed
+    ContinueWork,
+    /// Schedule another tick without redrawing (for polling async work like web workers)
+    /// This avoids expensive UI redraws while still allowing the app to check for completed work
+    ScheduleTick,
+    /// Request an idle timer callback after the specified duration (in seconds).
+    ///
+    /// When no user activity occurs for this duration, an `Event::IdleTimer` will be fired.
+    /// Any user activity (mouse move, key press, etc.) resets the timer.
+    /// Common use case: showing tooltips after hovering without movement.
+    ///
+    /// Note: The timer is reset on each tick that returns this variant, so return it
+    /// continuously while you want the timer active.
+    RequestIdleTimer(f32),
+}
+
 #[cfg(target_arch = "wasm32")]
 use std::cell::RefCell;
 #[cfg(target_arch = "wasm32")]
@@ -191,9 +232,13 @@ pub trait Application: Sized {
 
     /// Called each frame before rendering with GPU resource access.
     /// Use this to update textures when data changes.
-    /// Returns true if the view needs to be rebuilt.
-    fn tick_with_resources(&mut self, _resources: &mut Resources) -> bool {
-        false
+    ///
+    /// Returns a `TickResult` indicating what action the framework should take:
+    /// - `TickResult::Idle`: No work done, framework can idle
+    /// - `TickResult::NeedsRebuild`: Visual state changed, rebuild view
+    /// - `TickResult::ContinueWork`: Background work done, keep ticking but no rebuild
+    fn tick_with_resources(&mut self, _resources: &mut Resources) -> TickResult {
+        TickResult::Idle
     }
 
     /// Handle raw events before they're sent to widgets.
@@ -241,6 +286,8 @@ struct AppState<A: Application> {
     needs_rebuild: bool,
     /// Whether a redraw was requested (by user interaction)
     redraw_requested: bool,
+    /// Whether another tick is scheduled (without redraw, for polling async work)
+    tick_scheduled: bool,
     /// Whether the current click was consumed by GlobalMousePress (e.g., closing an overlay).
     /// When true, the subsequent MousePress/MouseRelease from the same physical click are skipped.
     click_consumed: bool,
@@ -248,6 +295,9 @@ struct AppState<A: Application> {
     /// While true, view rebuilds are deferred to preserve widget state (e.g., button's Pressed state)
     /// between MousePress and MouseRelease events.
     mouse_button_pressed: bool,
+    /// Idle timer deadline - when to fire `Event::IdleTimer`.
+    /// Set by `TickResult::RequestIdleTimer`, reset by user activity.
+    idle_timer_deadline: Option<Instant>,
     /// Accumulated dropped file paths (native only).
     /// Files are accumulated here and then sent as a batch when the drop ends.
     #[cfg(not(target_arch = "wasm32"))]
@@ -297,8 +347,10 @@ impl<A: Application> AppState<A> {
             settings,
             needs_rebuild: true,    // Initial build needed
             redraw_requested: true, // Initial redraw needed
+            tick_scheduled: false,
             click_consumed: false,
             mouse_button_pressed: false,
+            idle_timer_deadline: None,
             #[cfg(not(target_arch = "wasm32"))]
             pending_dropped_files: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -343,8 +395,27 @@ impl<A: Application> AppState<A> {
         }
     }
 
+    /// Check if an event represents user activity that should reset the idle timer.
+    fn is_user_activity(event: &Event) -> bool {
+        matches!(
+            event,
+            Event::MouseMove { .. }
+                | Event::MousePress { .. }
+                | Event::MouseRelease { .. }
+                | Event::MouseScroll { .. }
+                | Event::KeyPress { .. }
+                | Event::KeyRelease { .. }
+                | Event::TextInput { .. }
+        )
+    }
+
     fn handle_event(&mut self, event: Event) -> bool {
         use crate::widget::EventResult;
+
+        // Reset idle timer on user activity
+        if Self::is_user_activity(&event) {
+            self.idle_timer_deadline = None;
+        }
 
         // Set overlay hint if the event position is within a registered overlay
         // This allows widgets to know if an event is meant for an overlay
@@ -396,6 +467,15 @@ impl<A: Application> AppState<A> {
                     self.redraw_requested = true;
                     return true;
                 }
+                EventResult::RedrawWithMessage(message) => {
+                    // Widget needs redraw AND has a message, but NO view rebuild.
+                    // Used for tooltip messages where we want to preserve widget state
+                    // (like button hover) while still processing the message.
+                    self.app.update(message);
+                    self.redraw_requested = true;
+                    // Note: needs_rebuild is NOT set, so widget tree is preserved
+                    return true;
+                }
             }
         }
         false
@@ -440,22 +520,56 @@ impl<A: Application> AppState<A> {
         self.app.tick();
 
         // Call tick_with_resources for GPU updates (e.g., texture updates)
-        // If it returns true, there's more work to do (e.g., preloading images)
-        let needs_more_ticks = {
+        // Handle the result to determine if view rebuild or continued ticking is needed
+        {
             let mut resources = Resources {
                 gpu_ctx: &self.gpu_ctx,
                 renderer: &mut self.renderer,
             };
-            let result = self.app.tick_with_resources(&mut resources);
-            if result {
-                self.needs_rebuild = true;
-                self.redraw_requested = true;
-            }
-            result
-        };
+            let tick_result = self.app.tick_with_resources(&mut resources);
 
-        // Keep requesting redraws if tick_with_resources indicated more work
-        self.redraw_requested = self.redraw_requested || needs_more_ticks;
+            match tick_result {
+                TickResult::Idle => {
+                    // No work done, clear any pending idle timer
+                    self.idle_timer_deadline = None;
+                }
+                TickResult::NeedsRebuild => {
+                    // Visual state changed, need to rebuild view
+                    self.needs_rebuild = true;
+                    self.redraw_requested = true;
+                }
+                TickResult::ContinueWork => {
+                    // Background work done (e.g., preloading), keep ticking but NO rebuild
+                    // This is the key fix: we request redraw to continue ticking,
+                    // but don't force a view rebuild which is expensive
+                    self.redraw_requested = true;
+                }
+                TickResult::ScheduleTick => {
+                    // Schedule another tick without redrawing
+                    // Used for polling async work (e.g., web worker results) without
+                    // incurring the cost of UI layout/render on every frame
+                    self.tick_scheduled = true;
+                }
+                TickResult::RequestIdleTimer(duration_secs) => {
+                    // Set deadline for idle timer if not already set
+                    // The timer fires when we reach the deadline without user activity
+                    let deadline =
+                        Instant::now() + std::time::Duration::from_secs_f32(duration_secs);
+                    self.idle_timer_deadline = Some(deadline);
+                }
+            }
+        }
+
+        // If only tick_scheduled (not redraw_requested), skip the expensive render
+        // This allows polling async work without UI overhead
+        if self.tick_scheduled && !self.redraw_requested {
+            self.tick_scheduled = false;
+            return Ok(());
+        }
+
+        // Reset flags for next frame
+        self.tick_scheduled = false;
+        self.redraw_requested = false;
 
         // Rebuild view if needed.
         // NOTE: We previously deferred rebuilds while mouse button was pressed to preserve
@@ -685,14 +799,35 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
         handle_window_event(state, event_loop, event, window.as_ref());
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Always request redraw if there's pending work
-        // FPS limiting is handled in RedrawRequested, not here
-        if let Some(state) = &self.state {
-            if state.redraw_requested {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(state) = &mut self.state else {
+            return;
+        };
+
+        // Check if idle timer has expired
+        if let Some(deadline) = state.idle_timer_deadline {
+            let now = Instant::now();
+            if now >= deadline {
+                // Timer expired - fire the event
+                state.idle_timer_deadline = None;
+                state.handle_event(Event::IdleTimer);
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
+            } else {
+                // Timer still pending - set WaitUntil to wake up at deadline
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            }
+        } else {
+            // No timer pending - use default Wait
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+
+        // Request redraw if there's pending work
+        // FPS limiting is handled in RedrawRequested, not here
+        if state.redraw_requested || state.tick_scheduled {
+            if let Some(window) = &self.window {
+                window.request_redraw();
             }
         }
     }
@@ -782,15 +917,36 @@ impl<A: Application + 'static> ApplicationHandler for WinitApp<A> {
         handle_window_event(state, event_loop, event, window.as_ref());
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Always request redraw if there's pending work
-        // FPS limiting is handled in RedrawRequested, not here
-        let state_ref = self.state.borrow();
-        if let Some(state) = state_ref.as_ref() {
-            if state.redraw_requested {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let mut state_ref = self.state.borrow_mut();
+        let Some(state) = state_ref.as_mut() else {
+            return;
+        };
+
+        // Check if idle timer has expired
+        if let Some(deadline) = state.idle_timer_deadline {
+            let now = Instant::now();
+            if now >= deadline {
+                // Timer expired - fire the event
+                state.idle_timer_deadline = None;
+                state.handle_event(Event::IdleTimer);
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
+            } else {
+                // Timer still pending - set WaitUntil to wake up at deadline
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            }
+        } else {
+            // No timer pending - use default Wait
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+
+        // Request redraw if there's pending work
+        // FPS limiting is handled in RedrawRequested, not here
+        if state.redraw_requested || state.tick_scheduled {
+            if let Some(window) = &self.window {
+                window.request_redraw();
             }
         }
     }

@@ -9,6 +9,7 @@ edition = "2024"
 license = "AGPL-3.0"
 authors = ["fjodborg <github.com/fjodborg>"]
 include = ["LICENSE", "**/*.rs", "Cargo.toml"]
+default-run = "hvat-native"
 
 [dependencies]
 hvat_ui = { path = "crates/hvat_ui" }
@@ -55,6 +56,18 @@ web-sys = { version = "0.3", features = [
     "Storage",
     # Performance API for timing
     "Performance",
+    # Canvas and ImageBitmap for async image preloading
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageBitmap",
+    "ImageData",
+    # Web Worker for async image decoding
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
+    "DedicatedWorkerGlobalScope",
+    "MessageEvent",
+    "console",
 ] }
 winit = "0.29"
 wgpu = "27"
@@ -73,12 +86,50 @@ version = "0.15"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Main application binary - this is the default when running `cargo run`
+# Named hvat-native to distinguish from the hvat library crate (used for WASM)
 [[bin]]
 name = "hvat-native"
 path = "src/main.rs"
 
+# Image decoder Web Worker - WASM only, used for background image decoding
+# On native, this binary just prints an error and exits (see image_decoder_worker.rs)
+[[bin]]
+name = "image-decoder-worker"
+path = "src/bin/image_decoder_worker.rs"
+
+# Production release: fully optimized, small binary (slowest to compile)
+# Build with: cargo build --release
 [profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+# Fast release build: good optimizations, faster compile times
+# Build with: cargo build --profile release-dev
+[profile.release-dev]
+inherits = "release"
 opt-level = 2
+lto = false
+codegen-units = 16
+strip = "symbols"
+panic = "unwind"
+
+# Release with debug symbols for profiling (function names in browser DevTools)
+# Build with: cargo build --profile release-debug
+[profile.release-debug]
+inherits = "release"
+opt-level = 2
+debug = true
+strip = "none"
+lto = false
+codegen-units = 16
+panic = "unwind"
+
+[profile.dev]
+# debug = true is already the default
 
 [profile.dev.package."*"]
 opt-level = 2

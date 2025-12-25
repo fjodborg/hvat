@@ -304,6 +304,7 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                 let is_hovered = self.state == ButtonState::Hovered;
 
                 // Handle tooltip messages on hover state change
+                // Use RedrawWithMessage to preserve button hover state (no view rebuild)
                 if let (Some((ref id, ref content)), Some(ref on_request), Some(ref on_clear)) = (
                     &self.tooltip_content,
                     &self.on_tooltip_request,
@@ -312,15 +313,15 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                     if !was_hovered && is_hovered {
                         // Just entered hover - emit tooltip request
                         let msg = on_request(id.clone(), content.clone(), button_bounds, *position);
-                        return EventResult::Message(msg);
+                        return EventResult::RedrawWithMessage(msg);
                     } else if was_hovered && !is_hovered {
                         // Just left hover - emit tooltip clear
                         let msg = on_clear(id.clone());
-                        return EventResult::Message(msg);
+                        return EventResult::RedrawWithMessage(msg);
                     } else if is_hovered {
                         // Still hovering - emit tooltip request with updated position
                         let msg = on_request(id.clone(), content.clone(), button_bounds, *position);
-                        return EventResult::Message(msg);
+                        return EventResult::RedrawWithMessage(msg);
                     }
                 }
 

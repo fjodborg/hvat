@@ -17,6 +17,12 @@ pub enum EventResult<M> {
     Redraw,
     /// Widget produced a message (implies redraw)
     Message(M),
+    /// Widget needs redraw AND has a message, but no view rebuild needed.
+    ///
+    /// Use this for messages that update external state (like tooltips) without
+    /// changing the widget tree. This preserves widget internal state (like button
+    /// hover) across the message handling.
+    RedrawWithMessage(M),
 }
 
 impl<M> EventResult<M> {
@@ -30,7 +36,7 @@ impl<M> EventResult<M> {
     #[inline]
     pub fn message(self) -> Option<M> {
         match self {
-            EventResult::Message(m) => Some(m),
+            EventResult::Message(m) | EventResult::RedrawWithMessage(m) => Some(m),
             _ => None,
         }
     }

@@ -5,8 +5,10 @@ target = "index.html"
 public_url = "/"
 # Whether to include hash values in the output file names
 filehash = true
-# Disable subresource integrity hashes - they conflict with Service Worker caching
-integrity = "none"
+# Disable subresource integrity (SRI) hashes - they conflict with Service Worker caching
+# SRI checks fail when serving cached files offline because the cached content
+# may not match the HTML's expected hash from a different build
+no_sri = true
 
 [watch]
 # Paths to watch for changes

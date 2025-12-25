@@ -40,6 +40,73 @@ pub struct HyperspectralGpuData {
 }
 
 impl HyperspectralGpuData {
+    /// Create from a pre-existing texture (for chunked upload workflow).
+    ///
+    /// # Arguments
+    /// * `ctx` - GPU context
+    /// * `texture` - Pre-created and uploaded texture array
+    /// * `width` - Image width in pixels
+    /// * `height` - Image height in pixels
+    /// * `num_bands` - Number of spectral bands
+    /// * `num_layers` - Number of texture array layers
+    /// * `bind_group_layout` - Layout from HyperspectralPipeline
+    pub fn from_texture(
+        ctx: &GpuContext,
+        texture: wgpu::Texture,
+        width: u32,
+        height: u32,
+        num_bands: usize,
+        num_layers: u32,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        // Create view for the entire texture array
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Hyperspectral Band Texture Array View"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+
+        // Create sampler with linear filtering
+        let config = TextureConfig::linear();
+        let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Band Sampler"),
+            address_mode_u: config.address_mode_u,
+            address_mode_v: config.address_mode_v,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: config.mag_filter,
+            min_filter: config.min_filter,
+            mipmap_filter: config.mipmap_filter,
+            ..Default::default()
+        });
+
+        // Create bind group
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Hyperspectral Band Bind Group"),
+            layout: bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: bindings::BAND_TEXTURE_ARRAY_BINDING,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: bindings::BAND_SAMPLER_BINDING,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        Self {
+            texture_array: texture,
+            texture_view,
+            sampler,
+            bind_group,
+            width,
+            height,
+            num_bands,
+            num_layers,
+        }
+    }
+
     /// Upload hyperspectral band data to GPU.
     ///
     /// # Arguments

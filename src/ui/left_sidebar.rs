@@ -37,8 +37,9 @@ fn tool_tooltip(tool: AnnotationTool, hotkey: &str) -> TooltipContent {
             "Polygon Tool",
             format!(
                 "Hotkey: {}\n\nDraw polygon annotations.\n\
-                Click to add points, click first point to close.\n\
-                Right-click or press Enter to finish.",
+                Left click to add points, click on first point to close or press Enter.\n\
+                If annotation is selected, left click on edge to add point and \n\
+                right-click on point to remove.",
                 hotkey
             ),
         ),

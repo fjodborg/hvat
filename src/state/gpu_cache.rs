@@ -10,6 +10,18 @@ use hvat_gpu::{GpuContext, HyperspectralGpuData};
 
 use crate::data::HyperspectralData;
 
+/// Calculate backward index with wraparound, avoiding underflow.
+///
+/// For a circular list of `len` items, starting at `current`, go back `offset` positions.
+/// The formula `(current + len - offset % len) % len` handles:
+/// - Normal case: current=5, offset=2, len=10 → (5+10-2)%10 = 13%10 = 3
+/// - Wraparound: current=1, offset=3, len=10 → (1+10-3)%10 = 8
+/// - Large offset: current=0, offset=15, len=5 → (0+5-0)%5 = 0 (offset%len=0)
+#[inline]
+fn wrap_backward(current: usize, offset: usize, len: usize) -> usize {
+    (current + len - (offset % len)) % len
+}
+
 /// Cached GPU texture data for a hyperspectral image.
 pub struct CachedGpuTexture {
     /// GPU data (band textures uploaded to GPU)
@@ -116,6 +128,55 @@ impl GpuTextureCache {
         );
     }
 
+    /// Insert a pre-uploaded texture into the cache (for chunked upload workflow).
+    ///
+    /// Creates the `HyperspectralGpuData` from an already-uploaded texture and caches it.
+    #[allow(dead_code)] // Used only in WASM builds
+    pub fn insert_from_texture(
+        &mut self,
+        gpu_ctx: &GpuContext,
+        path: PathBuf,
+        texture: wgpu::Texture,
+        width: u32,
+        height: u32,
+        num_bands: usize,
+        num_layers: u32,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) {
+        log::info!(
+            "Caching pre-uploaded GPU texture for: {:?} ({}x{}, {} bands, {} layers)",
+            path,
+            width,
+            height,
+            num_bands,
+            num_layers
+        );
+
+        let gpu_data = HyperspectralGpuData::from_texture(
+            gpu_ctx,
+            texture,
+            width,
+            height,
+            num_bands,
+            num_layers,
+            bind_group_layout,
+        );
+
+        let cached = CachedGpuTexture {
+            gpu_data,
+            width,
+            height,
+            num_bands,
+        };
+
+        self.insert(path.clone(), cached);
+        log::info!(
+            "Cached pre-uploaded GPU texture for {:?} (cache size: {})",
+            path,
+            self.entries.len()
+        );
+    }
+
     /// Clear the entire cache (e.g., when folder changes).
     pub fn clear(&mut self) {
         let count = self.entries.len();
@@ -163,12 +224,8 @@ impl GpuTextureCache {
                 to_preload.push(forward_path.clone());
             }
 
-            // Backward (previous images) with wrap-around
-            let backward_idx = if offset > current_index {
-                len - (offset - current_index)
-            } else {
-                current_index - offset
-            };
+            // Backward (previous images)
+            let backward_idx = wrap_backward(current_index, offset, len);
             let backward_path = &images[backward_idx];
             // Skip if it's the current image (wraparound case) or already cached
             if backward_path != current_path && !self.contains(backward_path) {
@@ -201,11 +258,7 @@ impl GpuTextureCache {
             keep.insert(images[forward_idx].clone());
 
             // Backward
-            let backward_idx = if offset > current_index {
-                len - (offset - current_index)
-            } else {
-                current_index - offset
-            };
+            let backward_idx = wrap_backward(current_index, offset, len);
             keep.insert(images[backward_idx].clone());
         }
 
@@ -257,5 +310,40 @@ mod tests {
 
         let to_preload = cache.paths_to_preload(&images, 2);
         assert!(to_preload.is_empty());
+    }
+
+    #[test]
+    fn test_single_image() {
+        // Test with single image - should not panic
+        let cache = GpuTextureCache::new(2);
+        let images: Vec<PathBuf> = vec![PathBuf::from("single.png")];
+
+        // paths_to_preload should return empty (current image excluded)
+        let to_preload = cache.paths_to_preload(&images, 0);
+        assert!(to_preload.is_empty());
+
+        // paths_to_keep should return just the current image
+        let to_keep = cache.paths_to_keep(&images, 0);
+        assert_eq!(to_keep.len(), 1);
+        assert!(to_keep.contains(&PathBuf::from("single.png")));
+    }
+
+    #[test]
+    fn test_preload_count_larger_than_images() {
+        // Test when preload count is larger than number of images
+        let cache = GpuTextureCache::new(10);
+        let images: Vec<PathBuf> = (0..3)
+            .map(|i| PathBuf::from(format!("img{}.png", i)))
+            .collect();
+
+        // Should not panic even with high preload count
+        let to_preload = cache.paths_to_preload(&images, 0);
+        // Should include img1 and img2 (not img0 which is current)
+        assert!(to_preload.contains(&PathBuf::from("img1.png")));
+        assert!(to_preload.contains(&PathBuf::from("img2.png")));
+
+        let to_keep = cache.paths_to_keep(&images, 0);
+        // Should keep all 3 images
+        assert_eq!(to_keep.len(), 3);
     }
 }

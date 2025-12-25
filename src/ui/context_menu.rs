@@ -34,13 +34,13 @@ impl HvatApp {
 
             for category in &self.categories {
                 let item_id = format!("category_{}", category.id);
-                let mut item = MenuItem::new(item_id, &category.name).with_color(category.color);
-
-                // Mark currently selected category
-                if category.id == self.selected_category {
-                    item.label = format!("● {}", category.name);
-                }
-
+                // Using ASCII symbols for cross-platform compatibility
+                let label = if category.id == self.selected_category {
+                    format!("* {}", category.name)
+                } else {
+                    format!("  {}", category.name)
+                };
+                let item = MenuItem::new(item_id, &label).with_color(category.color);
                 items.push(item);
             }
         }

@@ -246,6 +246,8 @@ pub enum Message {
     TooltipClear(String),
     /// Update mouse position for current tooltip (for tracking movement)
     TooltipMouseMove((f32, f32)),
+    /// Tooltip became visible (after idle timer expired)
+    TooltipBecameVisible,
 
     // Context Menu Events
     /// Open context menu at position (position, annotation_id if clicked on annotation)

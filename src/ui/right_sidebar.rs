@@ -92,8 +92,10 @@ impl HvatApp {
                         let count = category_counts.get(&cat_id).copied().unwrap_or(0);
                         let is_hidden = hidden_categories.contains(&cat_id);
 
-                        // Format: [vis] Name (count)
-                        let vis = if is_hidden { "○" } else { "●" };
+                        // Format: [checkbox] Name (count)
+                        // Using ASCII-compatible checkbox symbols for better font support
+                        // Use two spaces in empty checkbox to better match width of [x]
+                        let vis = if is_hidden { "[  ]" } else { "[x]" };
                         let label = format!("{} {} ({})", vis, cat_name, count);
 
                         // Convert RGB bytes to Color

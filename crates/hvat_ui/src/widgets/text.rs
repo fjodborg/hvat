@@ -156,15 +156,10 @@ impl<M> Widget<M> for Text {
         }
 
         // For non-wrapped text, manually calculate position based on alignment
-        let text_x = if self.text_align == Alignment::Center {
-            let actual_width = renderer.measure_text_width(&self.content, self.size);
-            let align_offset = self.text_align.align(bounds.width, actual_width);
-            // Clamp to prevent text starting before bounds
-            bounds.x + align_offset.max(0.0)
-        } else {
-            let content_size = self.measure();
-            bounds.x + self.text_align.align(bounds.width, content_size.width)
-        };
+        // Use the fast approximate measurement for all alignments
+        // (previously centered text used expensive measure_text_width)
+        let content_size = self.measure();
+        let text_x = bounds.x + self.text_align.align(bounds.width, content_size.width);
 
         log::trace!(
             "Text draw: '{}' at {:?}, text_x={}",

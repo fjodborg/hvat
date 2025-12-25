@@ -1344,6 +1344,27 @@ impl TooltipManager {
         self.current.as_ref().map(|c| c.is_visible).unwrap_or(false)
     }
 
+    /// Get the tooltip delay in seconds
+    pub fn delay(&self) -> f32 {
+        self.delay
+    }
+
+    /// Force the current pending tooltip to become visible immediately.
+    ///
+    /// Called when the idle timer fires, indicating the user has been
+    /// hovering without activity for the full delay duration.
+    pub fn force_show(&mut self) {
+        if let Some(ref mut current) = self.current {
+            if !current.is_visible {
+                current.is_visible = true;
+                log::debug!(
+                    "Tooltip '{}' force-shown via idle timer",
+                    current.request.id
+                );
+            }
+        }
+    }
+
     /// Get the current visible tooltip's content and position
     ///
     /// Returns (content, mouse_position) if a tooltip should be shown

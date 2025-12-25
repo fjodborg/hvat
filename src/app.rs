@@ -18,7 +18,8 @@ use std::sync::OnceLock;
 use hvat_gpu::{BandSelectionUniform, ImageAdjustments};
 use hvat_ui::prelude::*;
 use hvat_ui::{
-    Application, Column, Element, Event, FileTreeState, KeyCode, Resources, Row, TooltipManager,
+    Application, Column, Element, Event, FileTreeState, KeyCode, Resources, Row, TickResult,
+    TooltipManager,
 };
 
 use crate::constants::{
@@ -39,7 +40,7 @@ use crate::state::{
     SharedGpuPipeline,
 };
 #[cfg(target_arch = "wasm32")]
-use crate::state::{extract_images_from_zip_bytes, is_zip_file};
+use crate::state::{WasmPreloadState, extract_images_from_zip_bytes, is_zip_file};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{extract_images_from_zip_file, is_zip_path};
 use crate::test_image::generate_test_hyperspectral;
@@ -318,6 +319,9 @@ pub struct HvatApp {
     pending_image_load: bool,
     /// Flag indicating we should preload adjacent images
     pending_preload: bool,
+    /// Flag indicating the last preload step did GPU work (upload_and_cache)
+    /// Used to select between ContinueWork (did work, need redraw) and ScheduleTick (just polling)
+    preload_did_gpu_work: bool,
 
     // GPU preload settings
     /// Number of images to preload in each direction (before and after current)
@@ -446,11 +450,6 @@ pub struct HvatApp {
     pub(crate) tooltip_manager: TooltipManager,
     /// Current window size (for tooltip boundary detection)
     pub(crate) window_size: (f32, f32),
-    /// Last tick timestamp for delta time calculation
-    #[cfg(not(target_arch = "wasm32"))]
-    last_tick: Option<std::time::Instant>,
-    #[cfg(target_arch = "wasm32")]
-    last_tick: Option<f64>, // performance.now() value in ms
 
     // Context menu state
     /// Whether the context menu is open
@@ -459,6 +458,11 @@ pub struct HvatApp {
     pub(crate) context_menu_position: (f32, f32),
     /// Annotation ID that was right-clicked (if any)
     pub(crate) context_menu_annotation_id: Option<u32>,
+
+    // WASM preloading state (Web Worker + chunked uploads)
+    /// Groups all WASM-specific preloading fields
+    #[cfg(target_arch = "wasm32")]
+    wasm_preload: WasmPreloadState,
 }
 
 impl Default for HvatApp {
@@ -519,6 +523,7 @@ impl HvatApp {
 
             pending_image_load: false,
             pending_preload: false,
+            preload_did_gpu_work: false,
 
             gpu_preload_count,
             gpu_preload_slider: SliderState::new(gpu_preload_count as f32),
@@ -602,12 +607,15 @@ impl HvatApp {
             // Tooltip system
             tooltip_manager: TooltipManager::new(),
             window_size: (1920.0, 1080.0), // Default, updated on resize
-            last_tick: None,
 
             // Context menu
             context_menu_open: false,
             context_menu_position: (0.0, 0.0),
             context_menu_annotation_id: None,
+
+            // WASM preloading state
+            #[cfg(target_arch = "wasm32")]
+            wasm_preload: WasmPreloadState::new(),
         }
     }
 
@@ -709,6 +717,49 @@ impl HvatApp {
         self.blue_band_slider.set_value(blue_band);
 
         self.band_selection = (DEFAULT_RED_BAND, green_band as usize, blue_band as usize);
+    }
+
+    /// Update GPU cache: evict out-of-range entries and return list of paths to preload.
+    ///
+    /// This is the unified cache management method called by both WASM and native preloading.
+    fn update_gpu_cache_and_get_preload_list(&mut self) -> Vec<PathBuf> {
+        let Some(ref project) = self.project else {
+            return Vec::new();
+        };
+
+        // Evict out-of-range entries to free GPU memory
+        let to_keep = self
+            .gpu_cache
+            .paths_to_keep(&project.images, project.current_index);
+        self.gpu_cache.retain_only(&to_keep);
+
+        // Get paths that need to be preloaded (not cached, within range)
+        self.gpu_cache
+            .paths_to_preload(&project.images, project.current_index)
+    }
+
+    /// Evict out-of-range entries from GPU cache (without returning preload list).
+    fn evict_gpu_cache(&mut self) {
+        let Some(ref project) = self.project else {
+            return;
+        };
+
+        let to_keep = self
+            .gpu_cache
+            .paths_to_keep(&project.images, project.current_index);
+        self.gpu_cache.retain_only(&to_keep);
+    }
+
+    /// Get paths that need to be preloaded (not cached, within range).
+    /// Only used in WASM preloading (native uses update_gpu_cache_and_get_preload_list).
+    #[cfg(target_arch = "wasm32")]
+    fn get_preload_list(&self) -> Vec<PathBuf> {
+        let Some(ref project) = self.project else {
+            return Vec::new();
+        };
+
+        self.gpu_cache
+            .paths_to_preload(&project.images, project.current_index)
     }
 
     /// Check if any text input field is currently focused.
@@ -1401,13 +1452,7 @@ impl HvatApp {
         }
 
         // Evict out-of-range entries immediately to free GPU memory
-        // We need project info to know the new current index
-        if let Some(ref project) = self.project {
-            let to_keep = self
-                .gpu_cache
-                .paths_to_keep(&project.images, project.current_index);
-            self.gpu_cache.retain_only(&to_keep);
-        }
+        self.evict_gpu_cache();
 
         // Check if image is cached in GPU
         if let Some(cached) = self.gpu_cache.take(&path) {
@@ -1453,26 +1498,13 @@ impl HvatApp {
             return;
         }
 
-        // Not cached - load from disk/memory
-        let hyper_result = {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                HyperspectralData::from_image_file(&path)
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            {
-                if let Some(ref project) = self.project {
-                    project
-                        .loaded_images
-                        .iter()
-                        .find(|img| PathBuf::from(&img.name) == path)
-                        .ok_or_else(|| format!("Image data not found for {:?}", path))
-                        .and_then(|loaded_img| HyperspectralData::from_bytes(&loaded_img.data))
-                } else {
-                    Err("No project loaded".to_string())
-                }
-            }
+        // Not cached - load from disk/memory using unified API
+        let hyper_result = if let Some(ref project) = self.project {
+            project
+                .get_image_data(&path)
+                .and_then(|data| HyperspectralData::from_bytes(&data))
+        } else {
+            Err("No project loaded".to_string())
         };
 
         match hyper_result {
@@ -1505,32 +1537,217 @@ impl HvatApp {
         }
     }
 
-    /// Preload ONE adjacent image into the GPU cache.
+    /// Preload adjacent images into the GPU cache.
     ///
     /// Called each tick to progressively preload images without blocking the UI.
     /// Returns true if there are more images to preload.
+    ///
+    /// On WASM: Uses a Web Worker for async decoding, then chunked GPU uploads
+    /// to spread texture upload work across frames (one layer per tick).
+    /// On Native: Decodes synchronously (one image per tick).
+    #[cfg(target_arch = "wasm32")]
     fn do_preloading_step(&mut self, resources: &mut Resources<'_>) -> bool {
-        let Some(ref project) = self.project else {
-            return false;
-        };
-        let Some(ref pipeline) = self.shared_pipeline else {
-            return false;
-        };
+        use crate::state::WorkerResult;
 
-        if project.images.is_empty() || self.gpu_preload_count == 0 {
+        // Early return checks - avoid borrowing self.project across function
+        if self.project.is_none() || self.shared_pipeline.is_none() {
+            return false;
+        }
+        if self
+            .project
+            .as_ref()
+            .map(|p| p.images.is_empty())
+            .unwrap_or(true)
+            || self.gpu_preload_count == 0
+        {
             return false;
         }
 
-        // Evict out-of-range entries to free GPU memory (do this once per navigation)
-        let to_keep = self
-            .gpu_cache
-            .paths_to_keep(&project.images, project.current_index);
-        self.gpu_cache.retain_only(&to_keep);
+        // Try to use the Web Worker for async decoding
+        if self.wasm_preload.decoder_worker.is_none() {
+            // Fallback to sync if worker failed to spawn
+            return self.do_preloading_step_sync(resources);
+        }
 
-        // Get paths to preload (not cached, within range)
-        let to_preload = self
-            .gpu_cache
-            .paths_to_preload(&project.images, project.current_index);
+        // Flush any queued messages (worker may have just become ready)
+        if let Some(ref mut worker) = self.wasm_preload.decoder_worker {
+            worker.flush_queue();
+        }
+
+        // Evict out-of-range entries to free GPU memory
+        self.evict_gpu_cache();
+
+        let gpu_ctx = resources.gpu_context();
+        let mut did_gpu_work = false;
+
+        // Step 1: Process completed decodes from worker → queue for chunked upload
+        let worker_result = self
+            .wasm_preload
+            .decoder_worker
+            .as_mut()
+            .and_then(|w| w.take_one_result());
+        if let Some(result) = worker_result {
+            match result {
+                WorkerResult::Decoded(decoded) => {
+                    // Don't queue if already in cache or already queued
+                    if !self.gpu_cache.contains(&decoded.path)
+                        && !self
+                            .wasm_preload
+                            .chunked_upload_queue
+                            .is_queued(&decoded.path)
+                    {
+                        log::info!(
+                            "Worker decoded {:?} ({}x{}, {} layers pre-packed), queueing for GPU upload",
+                            decoded.path,
+                            decoded.width,
+                            decoded.height,
+                            decoded.layers.len()
+                        );
+                        // Use queue_prepacked since worker already did the RGBA packing
+                        self.wasm_preload.chunked_upload_queue.queue_prepacked(
+                            decoded.path,
+                            decoded.width,
+                            decoded.height,
+                            decoded.num_bands,
+                            decoded.num_layers,
+                            decoded.layers,
+                            &gpu_ctx.device,
+                        );
+                    }
+                }
+                WorkerResult::Error(err) => {
+                    log::warn!("Worker decode failed for {:?}: {}", err.path, err.error);
+                }
+            }
+        }
+
+        // Step 2: Process ONE texture layer from chunked queue (GPU work, ~1-2ms)
+        if self
+            .wasm_preload
+            .chunked_upload_queue
+            .process_one_layer(gpu_ctx)
+        {
+            did_gpu_work = true;
+        }
+
+        // Step 3: Move completed chunked uploads to GPU cache
+        let pipeline = self.shared_pipeline.as_ref().unwrap();
+        for completed in self.wasm_preload.chunked_upload_queue.take_completed() {
+            log::info!(
+                "Moving completed upload to cache: {:?} ({}x{}, {} bands)",
+                completed.path,
+                completed.width,
+                completed.height,
+                completed.num_bands
+            );
+            self.gpu_cache.insert_from_texture(
+                gpu_ctx,
+                completed.path,
+                completed.texture,
+                completed.width,
+                completed.height,
+                completed.num_bands,
+                completed.num_layers,
+                pipeline.band_texture_layout(),
+            );
+        }
+
+        // Get paths that still need to be preloaded
+        let to_preload = self.get_preload_list();
+
+        // Check if we're done: no paths to preload, no pending work anywhere
+        let chunked_pending = self.wasm_preload.chunked_upload_queue.has_pending()
+            || self.wasm_preload.chunked_upload_queue.has_completed();
+        let worker_pending = self
+            .wasm_preload
+            .decoder_worker
+            .as_ref()
+            .map(|w| w.pending_count() > 0 || w.has_results())
+            .unwrap_or(false);
+        if to_preload.is_empty() && !worker_pending && !chunked_pending {
+            log::debug!(
+                "Preloading complete: {} images in GPU cache",
+                self.gpu_cache.len()
+            );
+            self.preload_did_gpu_work = did_gpu_work;
+            return false;
+        }
+
+        // Request new decodes (limit in-flight to avoid memory pressure)
+        const MAX_IN_FLIGHT: usize = 3;
+        let project = self.project.as_ref().unwrap();
+        for path in &to_preload {
+            let pending_count = self
+                .wasm_preload
+                .decoder_worker
+                .as_ref()
+                .map(|w| w.pending_count())
+                .unwrap_or(MAX_IN_FLIGHT);
+            if pending_count >= MAX_IN_FLIGHT {
+                break;
+            }
+            // Skip if already cached, already pending in worker, or already in chunked queue
+            let is_pending = self
+                .wasm_preload
+                .decoder_worker
+                .as_ref()
+                .map(|w| w.is_pending(path))
+                .unwrap_or(false);
+            if self.gpu_cache.contains(path)
+                || is_pending
+                || self.wasm_preload.chunked_upload_queue.is_queued(path)
+            {
+                continue;
+            }
+            // Find image data and send to worker
+            if let Ok(data) = project.get_image_data(path) {
+                if let Some(ref mut worker) = self.wasm_preload.decoder_worker {
+                    log::debug!("Requesting worker decode for {:?}", path);
+                    worker.request_decode(path.clone(), data);
+                }
+            }
+        }
+
+        // Store whether we did GPU work this tick (for TickResult selection)
+        self.preload_did_gpu_work = did_gpu_work;
+
+        // Check if worker has pending work
+        let worker_has_work = self
+            .wasm_preload
+            .decoder_worker
+            .as_ref()
+            .map(|w| w.pending_count() > 0 || w.has_results())
+            .unwrap_or(false);
+
+        // Continue if work is pending anywhere in the pipeline
+        !to_preload.is_empty() || worker_has_work || chunked_pending
+    }
+
+    /// Native preloading: decode synchronously (one image per tick).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn do_preloading_step(&mut self, resources: &mut Resources<'_>) -> bool {
+        self.do_preloading_step_sync(resources)
+    }
+
+    /// Synchronous preloading fallback (used by native, and WASM if worker fails).
+    fn do_preloading_step_sync(&mut self, resources: &mut Resources<'_>) -> bool {
+        // Early return checks
+        if self.project.is_none() || self.shared_pipeline.is_none() {
+            return false;
+        }
+
+        if self
+            .project
+            .as_ref()
+            .map(|p| p.images.is_empty())
+            .unwrap_or(true)
+            || self.gpu_preload_count == 0
+        {
+            return false;
+        }
+
+        // Evict out-of-range entries and get paths to preload
+        let to_preload = self.update_gpu_cache_and_get_preload_list();
 
         if to_preload.is_empty() {
             log::debug!(
@@ -1541,30 +1758,22 @@ impl HvatApp {
         }
 
         // Preload just ONE image per tick to avoid blocking the UI
-        let path = &to_preload[0];
-        log::info!("Preloading (1 of {}): {:?}", to_preload.len(), path);
+        let path = to_preload[0].clone();
+        log::info!("Preloading sync (1 of {}): {:?}", to_preload.len(), path);
 
         let gpu_ctx = resources.gpu_context();
 
-        let hyper_result = {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                HyperspectralData::from_image_file(path)
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            {
-                project
-                    .loaded_images
-                    .iter()
-                    .find(|img| PathBuf::from(&img.name) == *path)
-                    .ok_or_else(|| format!("Image not found: {:?}", path))
-                    .and_then(|img| HyperspectralData::from_bytes(&img.data))
-            }
-        };
+        // Use unified API that works for both WASM (in-memory) and native (filesystem)
+        let hyper_result = self
+            .project
+            .as_ref()
+            .unwrap()
+            .get_image_data(&path)
+            .and_then(|data| HyperspectralData::from_bytes(&data));
 
         match hyper_result {
             Ok(hyper) => {
+                let pipeline = self.shared_pipeline.as_ref().unwrap();
                 self.gpu_cache.upload_and_cache(
                     gpu_ctx,
                     path.clone(),
@@ -1610,21 +1819,29 @@ impl HvatApp {
             }
 
             // Open context menu at the click position
-            // Try to find an annotation under the click
-            let annotation_id = self.find_annotation_at(x, y);
+            // Only use the selected annotation for category changes (matches sidebar behavior)
+            // Hovering an annotation does NOT make it the target - must be explicitly selected
+            let path = self.current_image_path();
+            let selected_annotation_id = self
+                .image_data_store
+                .get(&path)
+                .annotations
+                .iter()
+                .find(|a| a.selected)
+                .map(|a| a.id);
             let screen_pos = (event.screen_x, event.screen_y);
             log::info!(
-                "Right-click at image ({:.1}, {:.1}), screen ({:.0}, {:.0}), annotation_id={:?}",
+                "Right-click at image ({:.1}, {:.1}), screen ({:.0}, {:.0}), selected={:?}",
                 x,
                 y,
                 screen_pos.0,
                 screen_pos.1,
-                annotation_id
+                selected_annotation_id
             );
 
             self.context_menu_open = true;
             self.context_menu_position = screen_pos;
-            self.context_menu_annotation_id = annotation_id;
+            self.context_menu_annotation_id = selected_annotation_id;
             return;
         }
 
@@ -1984,6 +2201,7 @@ impl HvatApp {
 
     /// Find an annotation at the given image coordinates.
     /// Returns the annotation ID if found, None otherwise.
+    #[allow(dead_code)] // Kept for future hover/tooltip features
     fn find_annotation_at(&self, x: f32, y: f32) -> Option<u32> {
         let path = self.current_image_path();
         let image_data = self.image_data_store.get(&path);
@@ -2284,28 +2502,36 @@ impl HvatApp {
     /// Extract and store image dimensions from loaded image bytes.
     /// This ensures all images have dimensions available for export.
     ///
+    /// Uses `image::ImageReader::into_dimensions()` which reads only the image header
+    /// without decoding pixel data - much faster than full decode.
+    ///
     /// Used for:
     /// - WASM: Images loaded from browser file picker or drag-drop
     /// - Native: Images extracted from ZIP archives
     fn extract_dimensions_from_loaded_images(&mut self, project: &ProjectState) {
         log::info!(
-            "Extracting dimensions from {} loaded images",
+            "Extracting dimensions from {} loaded images (header-only)",
             project.loaded_images.len()
         );
 
         for loaded_img in &project.loaded_images {
             let path = PathBuf::from(&loaded_img.name);
 
-            // Try to decode image to get dimensions
-            match image::load_from_memory(&loaded_img.data) {
-                Ok(img) => {
-                    let dims = (img.width(), img.height());
+            // Use ImageReader to get dimensions from header only (no full decode)
+            let cursor = std::io::Cursor::new(&loaded_img.data);
+            let result = image::ImageReader::new(cursor)
+                .with_guessed_format()
+                .map_err(|e| e.to_string())
+                .and_then(|reader| reader.into_dimensions().map_err(|e| e.to_string()));
+
+            match result {
+                Ok((width, height)) => {
                     let image_data = self.image_data_store.get_or_create(&path);
-                    image_data.dimensions = Some(dims);
-                    log::debug!("Extracted dimensions for {:?}: {}x{}", path, dims.0, dims.1);
+                    image_data.dimensions = Some((width, height));
+                    log::debug!("Extracted dimensions for {:?}: {}x{}", path, width, height);
                 }
                 Err(e) => {
-                    log::warn!("Failed to decode image {:?} for dimensions: {}", path, e);
+                    log::warn!("Failed to read dimensions for {:?}: {}", path, e);
                 }
             }
         }
@@ -3398,6 +3624,10 @@ impl Application for HvatApp {
                     }
                 }
             }
+            Message::TooltipBecameVisible => {
+                // Tooltip became visible via idle timer - just trigger rebuild
+                log::debug!("Tooltip became visible via idle timer");
+            }
 
             // Context Menu Events
             Message::OpenContextMenu(position, annotation_id) => {
@@ -3456,38 +3686,12 @@ impl Application for HvatApp {
         }
     }
 
-    fn tick_with_resources(&mut self, resources: &mut Resources<'_>) -> bool {
+    fn tick_with_resources(&mut self, resources: &mut Resources<'_>) -> TickResult {
         let mut needs_rebuild = false;
 
-        // Calculate delta time for tooltip timing
-        #[cfg(not(target_arch = "wasm32"))]
-        let delta_seconds = {
-            let now = std::time::Instant::now();
-            let delta = self
-                .last_tick
-                .map(|last| now.duration_since(last).as_secs_f32())
-                .unwrap_or(0.016); // Default to ~60fps
-            self.last_tick = Some(now);
-            delta
-        };
-        #[cfg(target_arch = "wasm32")]
-        let delta_seconds = {
-            let now = web_sys::window()
-                .and_then(|w| w.performance())
-                .map(|p| p.now())
-                .unwrap_or(0.0);
-            let delta = self
-                .last_tick
-                .map(|last| ((now - last) / 1000.0) as f32) // Convert ms to seconds
-                .unwrap_or(0.016);
-            self.last_tick = Some(now);
-            delta
-        };
-
-        // Update tooltip manager timing
-        if self.tooltip_manager.tick(delta_seconds) {
-            needs_rebuild = true;
-        }
+        // Note: Tooltip timing is handled by the framework's idle timer.
+        // When a tooltip is pending, we return RequestIdleTimer and the framework
+        // fires Event::IdleTimer after the delay (if no user activity).
 
         // Check for async picker result (WASM only)
         #[cfg(target_arch = "wasm32")]
@@ -3534,8 +3738,14 @@ impl Application for HvatApp {
                 }
             }
             // Don't preload in the same tick - let the frame render first
-            // But return true if preloading is pending so the framework keeps calling us
-            return needs_rebuild || self.pending_preload;
+            // Return appropriate result based on what work was done
+            return if needs_rebuild {
+                TickResult::NeedsRebuild
+            } else if self.pending_preload {
+                TickResult::ContinueWork
+            } else {
+                TickResult::Idle
+            };
         }
 
         // Re-render to texture if band selection or adjustments changed
@@ -3544,7 +3754,11 @@ impl Application for HvatApp {
             self.needs_gpu_render = false;
             needs_rebuild = true;
             // Don't preload in the same tick as a render
-            return needs_rebuild;
+            return if needs_rebuild {
+                TickResult::NeedsRebuild
+            } else {
+                TickResult::Idle
+            };
         }
 
         // Handle progressive preloading of adjacent images (one per tick)
@@ -3553,10 +3767,15 @@ impl Application for HvatApp {
             // Preload one image per tick; keep pending_preload=true if more to do
             self.pending_preload = self.do_preloading_step(resources);
 
-            // Return true if there's more preloading to do, so the framework
-            // keeps calling tick_with_resources() without requiring user input
             if self.pending_preload {
-                return true;
+                // Choose tick result based on whether GPU work was done:
+                // - ContinueWork: Did GPU upload, framework should redraw
+                // - ScheduleTick: Just polling worker, skip expensive UI redraw
+                if self.preload_did_gpu_work {
+                    return TickResult::ContinueWork;
+                } else {
+                    return TickResult::ScheduleTick;
+                }
             }
         }
 
@@ -3566,7 +3785,16 @@ impl Application for HvatApp {
             self.do_auto_save();
         }
 
-        needs_rebuild
+        if needs_rebuild {
+            TickResult::NeedsRebuild
+        } else if self.tooltip_manager.current_id().is_some() && !self.tooltip_manager.is_visible()
+        {
+            // Tooltip is pending but not visible yet - request idle timer to show it
+            // The framework will fire Event::IdleTimer after this duration of inactivity
+            TickResult::RequestIdleTimer(self.tooltip_manager.delay())
+        } else {
+            TickResult::Idle
+        }
     }
 
     fn on_event(&mut self, event: &Event) -> Option<Self::Message> {
@@ -3598,9 +3826,11 @@ impl Application for HvatApp {
             }
             Event::MouseMove { position, .. } => {
                 // Track mouse movement for tooltip boundary checking
-                // This runs before widget event dispatch, so if mouse left the trigger
-                // bounds, the tooltip will be cleared even if no widget handles the move
-                if self.tooltip_manager.current_id().is_some() {
+                // Only intercept if tooltip is VISIBLE - if still pending, let widgets
+                // continue receiving events so they can update the tooltip request.
+                // This fixes the issue where tooltips wouldn't appear until mouse moved
+                // again after the initial hover.
+                if self.tooltip_manager.is_visible() {
                     return Some(Message::TooltipMouseMove(*position));
                 }
             }
@@ -3608,6 +3838,15 @@ impl Application for HvatApp {
                 // Clear tooltip when cursor leaves the window
                 if self.tooltip_manager.current_id().is_some() {
                     self.tooltip_manager.clear();
+                }
+            }
+            Event::IdleTimer => {
+                // Idle timer expired - make pending tooltip visible
+                if self.tooltip_manager.current_id().is_some() && !self.tooltip_manager.is_visible()
+                {
+                    // Force the tooltip to become visible by advancing time past the delay
+                    self.tooltip_manager.force_show();
+                    return Some(Message::TooltipBecameVisible);
                 }
             }
             _ => {}

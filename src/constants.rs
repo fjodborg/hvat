@@ -106,6 +106,27 @@ pub const DEFAULT_GPU_PRELOAD_COUNT: usize = 5;
 /// Maximum preload count (prevents excessive GPU memory usage)
 pub const MAX_GPU_PRELOAD_COUNT: usize = 10;
 
+/// Number of texture rows to upload per tick during chunked GPU upload.
+/// Higher values = faster uploads but more lag. Lower values = smoother but slower.
+/// For a 4096x4096 RGBA texture:
+///   - 64 rows = ~1MB per tick (~1ms blocking)
+///   - 128 rows = ~2MB per tick (~2ms blocking)
+///   - 256 rows = ~4MB per tick (~4ms blocking)
+/// Set to 0 to upload entire layers at once (old behavior).
+#[cfg(target_arch = "wasm32")]
+pub const GPU_UPLOAD_ROWS_PER_TICK: u32 = 128;
+
+/// Number of spectral bands packed into each RGBA texture layer.
+/// Each layer stores 4 bands in R, G, B, A channels.
+#[cfg(target_arch = "wasm32")]
+pub const BANDS_PER_LAYER: usize = 4;
+
+/// Minimum texture array layers for GPU textures.
+/// WebGL2 has a bug where single-layer texture arrays don't work correctly.
+/// This ensures at least 2 layers are always created as a workaround.
+#[cfg(target_arch = "wasm32")]
+pub const MIN_TEXTURE_LAYERS: u32 = 2;
+
 // =============================================================================
 // Right Sidebar Sections
 // =============================================================================

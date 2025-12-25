@@ -347,6 +347,13 @@ pub enum Event {
         /// Raw file data bytes
         data: Vec<u8>,
     },
+
+    /// Idle timer expired.
+    ///
+    /// Fired when no user activity has occurred for the requested duration.
+    /// Use `TickResult::RequestIdleTimer` to schedule this event.
+    /// Common use case: showing tooltips after hovering for a delay.
+    IdleTimer,
 }
 
 impl Event {

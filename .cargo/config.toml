@@ -1,0 +1,3 @@
+# Enable bulk memory operations for WASM (required for panic=unwind)
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+bulk-memory"]

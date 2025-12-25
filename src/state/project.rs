@@ -422,4 +422,41 @@ impl ProjectState {
 
         path.to_str().map(String::from)
     }
+
+    /// Get raw image data bytes for a given path.
+    ///
+    /// This provides a unified interface for image loading across platforms:
+    /// - WASM: Returns data from in-memory `loaded_images` storage
+    /// - Native: Falls back to filesystem read if not in `loaded_images` (e.g., ZIP imports)
+    ///
+    /// The in-memory storage is checked first on both platforms, allowing ZIP-extracted
+    /// images to work uniformly.
+    pub fn get_image_data(&self, path: &PathBuf) -> Result<Vec<u8>, String> {
+        // First, check in-memory storage (works for both WASM and native ZIP imports)
+        if let Some(img) = self.loaded_images.iter().find(|img| {
+            // Match by full path or just filename
+            PathBuf::from(&img.name) == *path
+                || path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| img.name.ends_with(n))
+                    .unwrap_or(false)
+        }) {
+            log::trace!("get_image_data: found {:?} in loaded_images", path);
+            return Ok(img.data.clone());
+        }
+
+        // Native: fall back to filesystem read
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            log::trace!("get_image_data: reading {:?} from filesystem", path);
+            std::fs::read(path).map_err(|e| format!("Failed to read {:?}: {}", path, e))
+        }
+
+        // WASM: no filesystem fallback, image must be in loaded_images
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err(format!("Image not found in loaded data: {:?}", path))
+        }
+    }
 }

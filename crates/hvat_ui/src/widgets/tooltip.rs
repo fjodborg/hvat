@@ -274,8 +274,11 @@ impl<M: 'static> Widget<M> for TooltipOverlay {
     }
 
     fn has_active_overlay(&self) -> bool {
-        // Tooltip is always an overlay when visible
-        true
+        // Tooltips are display-only overlays that don't capture events.
+        // Return false so clicks pass through to underlying widgets.
+        // This prevents the click-consumption logic from blocking clicks
+        // when a tooltip happens to be visible.
+        false
     }
 }
 

@@ -97,6 +97,7 @@ trunk serve --release  # Open the app under localhost:8080
 <details>
 <summary>Known Limitations</summary>
 
+- **Wasm gpu rendering** — There will sometimes be lag spikes when preloading many images at once, but it is worth.
 - **Native drag-and-drop not supported on Wayland** — Winit doesn't support drag-and-drop on Wayland. I use Wayland so i couldn't test it properly. 
 - **Only tested on Linux** — Windows and macOS support not verified.
 
