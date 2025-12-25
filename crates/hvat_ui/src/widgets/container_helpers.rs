@@ -35,9 +35,10 @@ pub fn dispatch_event_to_children<M: 'static>(
         for (child, bounds) in children.iter_mut().zip(child_bounds.iter()) {
             let absolute_bounds = translate_bounds(*bounds, container_bounds);
             let child_result = child.on_event(event, absolute_bounds);
-            // Keep any result that needs redraw (Message takes priority over Redraw)
+            // Keep any result that needs redraw (Message/RedrawWithMessage takes priority over Redraw)
             match (&result, &child_result) {
                 (_, EventResult::Message(_)) => result = child_result,
+                (_, EventResult::RedrawWithMessage(_)) => result = child_result,
                 (EventResult::None, EventResult::Redraw) => result = child_result,
                 _ => {}
             }
@@ -73,6 +74,7 @@ pub fn dispatch_event_to_children<M: 'static>(
             let child_result = child.on_event(event, absolute_bounds);
             match (&result, &child_result) {
                 (_, EventResult::Message(_)) => result = child_result,
+                (_, EventResult::RedrawWithMessage(_)) => result = child_result,
                 (EventResult::None, EventResult::Redraw) => result = child_result,
                 _ => {}
             }
@@ -204,9 +206,10 @@ pub fn dispatch_event_to_children<M: 'static>(
 
         if is_mouse_move {
             // For MouseMove, accumulate results but don't stop early
-            // Keep the most "important" result (Message > Redraw > None)
+            // Keep the most "important" result (Message/RedrawWithMessage > Redraw > None)
             match (&accumulated_result, &result) {
                 (_, EventResult::Message(_)) => accumulated_result = result,
+                (_, EventResult::RedrawWithMessage(_)) => accumulated_result = result,
                 (EventResult::None, EventResult::Redraw) => accumulated_result = result,
                 _ => {}
             }

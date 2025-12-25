@@ -223,16 +223,16 @@ impl HvatApp {
                                 .padding(BUTTON_PADDING_COMPACT)
                                 .on_click(Message::FinishEditingCategory);
                         } else {
-                            // Show category name as button with compact padding for consistent height
-                            // Using ASCII symbols for cross-platform compatibility
+                            // Show category name as button with selection indicator
                             let label = if is_selected {
                                 format!("* {}", cat_name)
                             } else {
-                                format!("  {}", cat_name)
+                                cat_name
                             };
                             r.button(label)
                                 .width(Length::Fill(1.0))
                                 .padding(BUTTON_PADDING_COMPACT)
+                                .text_align(Alignment::Left)
                                 .on_click(Message::CategorySelected(cat_id));
                             // Edit button
                             r.button("Edit")
@@ -277,16 +277,16 @@ impl HvatApp {
                     let is_selected = selected_tags.contains(tag);
 
                     c.row(|r| {
-                        // Tag name as selectable button (like categories)
-                        // Using ASCII symbols for cross-platform compatibility
+                        // Tag name as selectable button with selection indicator
                         let label = if is_selected {
                             format!("* {}", tag_clone)
                         } else {
-                            format!("  {}", tag_clone)
+                            tag_clone
                         };
                         r.button(label)
                             .width(Length::Fill(1.0))
                             .padding(BUTTON_PADDING_COMPACT)
+                            .text_align(Alignment::Left)
                             .on_click(Message::ToggleTag(tag_for_toggle));
                         // Remove button
                         r.button("x")

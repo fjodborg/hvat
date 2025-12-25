@@ -3980,7 +3980,6 @@ impl Application for HvatApp {
                 // Idle timer expired - make pending tooltip visible
                 if self.tooltip_manager.current_id().is_some() && !self.tooltip_manager.is_visible()
                 {
-                    // Force the tooltip to become visible by advancing time past the delay
                     self.tooltip_manager.force_show();
                     return Some(Message::TooltipBecameVisible);
                 }

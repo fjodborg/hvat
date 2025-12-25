@@ -530,8 +530,12 @@ impl<A: Application> AppState<A> {
 
             match tick_result {
                 TickResult::Idle => {
-                    // No work done, clear any pending idle timer
-                    self.idle_timer_deadline = None;
+                    // No work done, framework can idle.
+                    // Note: Do NOT clear idle_timer_deadline here - the timer should
+                    // persist until it fires or user activity resets it (handled in
+                    // is_user_activity check). Clearing here would break tooltips since
+                    // the timer gets set by RequestIdleTimer but then immediately
+                    // cleared on the next tick that returns Idle.
                 }
                 TickResult::NeedsRebuild => {
                     // Visual state changed, need to rebuild view
