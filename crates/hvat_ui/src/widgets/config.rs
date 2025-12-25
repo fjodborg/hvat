@@ -4,6 +4,7 @@
 //! across multiple widgets to reduce code duplication.
 
 use crate::renderer::Color;
+use crate::theme::current_theme;
 
 /// Base configuration for text input fields (shared by TextInput, NumberInput, Slider)
 ///
@@ -29,14 +30,15 @@ pub struct BaseInputConfig {
 
 impl Default for BaseInputConfig {
     fn default() -> Self {
+        let theme = current_theme();
         Self {
-            background_color: Color::rgb(0.15, 0.15, 0.17),
-            focused_background_color: Color::rgb(0.18, 0.18, 0.2),
-            border_color: Color::BORDER,
-            focused_border_color: Color::ACCENT,
-            text_color: Color::TEXT_PRIMARY,
-            cursor_color: Color::ACCENT,
-            selection_color: Color::rgba(0.4, 0.6, 1.0, 0.3),
+            background_color: theme.input_bg,
+            focused_background_color: theme.input_bg_focused,
+            border_color: theme.border,
+            focused_border_color: theme.border_focused,
+            text_color: theme.text_primary,
+            cursor_color: theme.cursor,
+            selection_color: theme.selection,
         }
     }
 }

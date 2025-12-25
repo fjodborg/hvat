@@ -373,18 +373,21 @@ pub fn content_bounds(bounds: Bounds, padding: &Padding) -> Bounds {
     )
 }
 
+/// Corner radius for input fields (modern SaaS style)
+const INPUT_CORNER_RADIUS: f32 = 4.0;
+
 /// Draw standard input field background and border
 ///
 /// Draws the background fill and border stroke based on focus state,
-/// using colors from the BaseInputConfig.
+/// using colors from the BaseInputConfig. Uses rounded corners for modern look.
 pub fn draw_input_background(
     renderer: &mut Renderer,
     bounds: Bounds,
     is_focused: bool,
     config: &BaseInputConfig,
 ) {
-    renderer.fill_rect(bounds, config.background(is_focused));
-    renderer.stroke_rect(bounds, config.border(is_focused), 1.0);
+    renderer.fill_rounded_rect(bounds, config.background(is_focused), INPUT_CORNER_RADIUS);
+    renderer.stroke_rounded_rect(bounds, config.border(is_focused), INPUT_CORNER_RADIUS, 1.0);
 }
 
 // =============================================================================

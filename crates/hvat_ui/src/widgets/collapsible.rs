@@ -2,15 +2,16 @@
 
 use crate::callback::Callback;
 use crate::constants::{
-    COLLAPSIBLE_CONTENT_PADDING, COLLAPSIBLE_HEADER_HEIGHT, COLLAPSIBLE_HEADER_PADDING_X,
-    COLLAPSIBLE_ICON_MARGIN, COLLAPSIBLE_ICON_SIZE, SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING,
-    SCROLLBAR_WIDTH_COMPACT, SCROLL_SPEED,
+    COLLAPSIBLE_CONTENT_PADDING, COLLAPSIBLE_CORNER_RADIUS, COLLAPSIBLE_HEADER_HEIGHT,
+    COLLAPSIBLE_HEADER_PADDING_X, COLLAPSIBLE_ICON_MARGIN, COLLAPSIBLE_ICON_SIZE,
+    SCROLLBAR_MIN_THUMB, SCROLLBAR_PADDING, SCROLLBAR_WIDTH_COMPACT, SCROLL_SPEED,
 };
 use crate::element::Element;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{CollapsibleState, ScrollState};
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 use crate::widgets::scrollable::ScrollDirection;
 use crate::widgets::scrollbar::{self, draw_simple_vertical_scrollbar, ScrollbarParams};
@@ -27,7 +28,7 @@ pub struct CollapsibleConfig {
     pub header_text_color: Color,
     /// Content background color
     pub content_bg: Color,
-    /// Border color
+    /// Border color (unused with modern rounded style)
     pub border_color: Color,
     /// Header font size
     pub header_font_size: f32,
@@ -37,20 +38,24 @@ pub struct CollapsibleConfig {
     pub max_content_height: Option<f32>,
     /// Content padding (ensures child borders are visible)
     pub content_padding: f32,
+    /// Corner radius for modern rounded style
+    pub corner_radius: f32,
 }
 
 impl Default for CollapsibleConfig {
     fn default() -> Self {
+        let theme = current_theme();
         Self {
-            header_bg: Color::rgba(0.15, 0.15, 0.18, 1.0),
-            header_hover: Color::rgba(0.2, 0.2, 0.24, 1.0),
-            header_text_color: Color::TEXT_PRIMARY,
-            content_bg: Color::rgba(0.12, 0.12, 0.14, 1.0),
-            border_color: Color::BORDER,
+            header_bg: theme.header_bg,
+            header_hover: theme.header_hover,
+            header_text_color: theme.text_primary,
+            content_bg: theme.content_bg,
+            border_color: theme.border,
             header_font_size: 14.0,
             header_height: COLLAPSIBLE_HEADER_HEIGHT,
             max_content_height: None,
             content_padding: COLLAPSIBLE_CONTENT_PADDING,
+            corner_radius: COLLAPSIBLE_CORNER_RADIUS,
         }
     }
 }
@@ -589,11 +594,16 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             self.config.header_bg
         };
 
-        renderer.fill_rect(header_bounds, header_bg);
-        renderer.stroke_rect(header_bounds, self.config.border_color, 1.0);
+        // Use rounded corners - round all corners when collapsed, only top when expanded
+        let radius = self.config.corner_radius;
+        renderer.fill_rounded_rect(header_bounds, header_bg, radius);
 
-        // Draw chevron icon (using ASCII for cross-platform compatibility)
-        let icon = if self.state.is_expanded { "-" } else { "+" };
+        // Draw chevron icon (Unicode triangles for modern look)
+        let icon = if self.state.is_expanded {
+            "\u{25BE}" // ▾ (down-pointing triangle)
+        } else {
+            "\u{25B8}" // ▸ (right-pointing triangle)
+        };
         let icon_x = header_bounds.x + COLLAPSIBLE_HEADER_PADDING_X;
         let icon_y = header_bounds.y + (self.config.header_height - COLLAPSIBLE_ICON_SIZE) / 2.0;
         renderer.text(
@@ -621,8 +631,12 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
             if let Some(content) = &self.content {
                 let viewport_bounds = self.calc_viewport_bounds(bounds);
 
-                // Draw content background
-                renderer.fill_rect(viewport_bounds, self.config.content_bg);
+                // Draw content background with rounded bottom corners
+                renderer.fill_rounded_rect(
+                    viewport_bounds,
+                    self.config.content_bg,
+                    self.config.corner_radius,
+                );
 
                 if self.needs_scrolling() {
                     // Clip content to viewport (excluding scrollbar area)

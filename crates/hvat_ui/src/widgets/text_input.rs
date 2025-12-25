@@ -6,6 +6,7 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::TextInputState;
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
@@ -21,9 +22,10 @@ pub struct TextInputConfig {
 
 impl Default for TextInputConfig {
     fn default() -> Self {
+        let theme = current_theme();
         Self {
             base: BaseInputConfig::default(),
-            placeholder_color: Color::TEXT_SECONDARY,
+            placeholder_color: theme.text_placeholder,
         }
     }
 }

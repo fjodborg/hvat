@@ -708,6 +708,377 @@ impl ColorPipeline {
         (SEGMENTS * 3) as u32
     }
 
+    /// Append vertices/indices for a rounded rectangle to existing vectors.
+    /// Uses quarter-circles for corners and rectangles for the body.
+    /// Works on both native and WASM (pure vertex-based, no special shaders).
+    pub fn append_rounded_rect(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius: f32,
+        color: [f32; 4],
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        // Clamp radius to half the smaller dimension
+        let max_radius = (width.min(height) / 2.0).max(0.0);
+        let r = radius.min(max_radius).max(0.0);
+
+        // If radius is effectively 0, just draw a regular rectangle
+        if r < 0.5 {
+            return Self::append_rect(
+                vertices,
+                indices,
+                x,
+                y,
+                width,
+                height,
+                color,
+                window_width,
+                window_height,
+            );
+        }
+
+        // More segments = smoother curves. 12 gives smooth appearance at typical UI scales
+        const CORNER_SEGMENTS: usize = 12;
+        let base_idx = vertices.len() as u16;
+
+        // Convert to NDC helper
+        let to_ndc_x = |px: f32| (px / window_width) * 2.0 - 1.0;
+        let to_ndc_y = |py: f32| 1.0 - (py / window_height) * 2.0;
+
+        // Corner centers (in pixel coords)
+        let corners = [
+            (x + r, y + r),                  // Top-left
+            (x + width - r, y + r),          // Top-right
+            (x + width - r, y + height - r), // Bottom-right
+            (x + r, y + height - r),         // Bottom-left
+        ];
+
+        // Start angles for each corner (in radians)
+        let start_angles = [
+            std::f32::consts::PI,        // Top-left: 180° to 270°
+            std::f32::consts::PI * 1.5,  // Top-right: 270° to 360°
+            0.0,                         // Bottom-right: 0° to 90°
+            std::f32::consts::FRAC_PI_2, // Bottom-left: 90° to 180°
+        ];
+
+        // Generate corner vertices
+        // Each corner has CORNER_SEGMENTS + 1 vertices (including the two endpoints)
+        for ((cx, cy), start_angle) in corners.iter().zip(start_angles.iter()) {
+            for seg in 0..=CORNER_SEGMENTS {
+                let angle = start_angle
+                    + (seg as f32 / CORNER_SEGMENTS as f32) * std::f32::consts::FRAC_PI_2;
+                let px = cx + r * angle.cos();
+                let py = cy + r * angle.sin();
+                vertices.push(ColorVertex {
+                    position: [to_ndc_x(px), to_ndc_y(py)],
+                    color,
+                });
+            }
+            // Also add the corner center for the triangle fan
+            vertices.push(ColorVertex {
+                position: [to_ndc_x(*cx), to_ndc_y(*cy)],
+                color,
+            });
+        }
+
+        // Generate corner indices (triangle fans from center)
+        let verts_per_corner = (CORNER_SEGMENTS + 1 + 1) as u16; // arc vertices + center
+        let mut index_count = 0u32;
+
+        for corner in 0..4 {
+            let corner_base = base_idx + corner * verts_per_corner;
+            let center_idx = corner_base + (CORNER_SEGMENTS + 1) as u16;
+
+            for seg in 0..CORNER_SEGMENTS {
+                indices.push(center_idx);
+                indices.push(corner_base + seg as u16);
+                indices.push(corner_base + seg as u16 + 1);
+                index_count += 3;
+            }
+        }
+
+        // Now add the three body rectangles
+        let body_base = vertices.len() as u16;
+
+        // Top rectangle (between top-left and top-right corners)
+        let top_left_x = x + r;
+        let top_right_x = x + width - r;
+        vertices.extend_from_slice(&[
+            ColorVertex {
+                position: [to_ndc_x(top_left_x), to_ndc_y(y)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(top_right_x), to_ndc_y(y)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(top_right_x), to_ndc_y(y + r)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(top_left_x), to_ndc_y(y + r)],
+                color,
+            },
+        ]);
+        indices.extend_from_slice(&[
+            body_base,
+            body_base + 1,
+            body_base + 2,
+            body_base,
+            body_base + 2,
+            body_base + 3,
+        ]);
+        index_count += 6;
+
+        // Middle rectangle (full width, between top and bottom rows)
+        let mid_base = body_base + 4;
+        vertices.extend_from_slice(&[
+            ColorVertex {
+                position: [to_ndc_x(x), to_ndc_y(y + r)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(x + width), to_ndc_y(y + r)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(x + width), to_ndc_y(y + height - r)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(x), to_ndc_y(y + height - r)],
+                color,
+            },
+        ]);
+        indices.extend_from_slice(&[
+            mid_base,
+            mid_base + 1,
+            mid_base + 2,
+            mid_base,
+            mid_base + 2,
+            mid_base + 3,
+        ]);
+        index_count += 6;
+
+        // Bottom rectangle (between bottom-left and bottom-right corners)
+        let bot_base = mid_base + 4;
+        vertices.extend_from_slice(&[
+            ColorVertex {
+                position: [to_ndc_x(top_left_x), to_ndc_y(y + height - r)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(top_right_x), to_ndc_y(y + height - r)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(top_right_x), to_ndc_y(y + height)],
+                color,
+            },
+            ColorVertex {
+                position: [to_ndc_x(top_left_x), to_ndc_y(y + height)],
+                color,
+            },
+        ]);
+        indices.extend_from_slice(&[
+            bot_base,
+            bot_base + 1,
+            bot_base + 2,
+            bot_base,
+            bot_base + 2,
+            bot_base + 3,
+        ]);
+        index_count += 6;
+
+        index_count
+    }
+
+    /// Append vertices/indices for a stroked rounded rectangle to existing vectors.
+    /// Creates an outline with rounded corners.
+    pub fn append_stroke_rounded_rect(
+        vertices: &mut Vec<ColorVertex>,
+        indices: &mut Vec<u16>,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius: f32,
+        color: [f32; 4],
+        thickness: f32,
+        window_width: f32,
+        window_height: f32,
+    ) -> u32 {
+        // Clamp radius to half the smaller dimension
+        let max_radius = (width.min(height) / 2.0).max(0.0);
+        let r = radius.min(max_radius).max(0.0);
+
+        // If radius is effectively 0, just draw a regular stroke rectangle
+        if r < 0.5 {
+            return Self::append_stroke_rect(
+                vertices,
+                indices,
+                x,
+                y,
+                width,
+                height,
+                color,
+                thickness,
+                window_width,
+                window_height,
+            );
+        }
+
+        // More segments = smoother curves. 12 gives smooth appearance at typical UI scales
+        const CORNER_SEGMENTS: usize = 12;
+        let base_idx = vertices.len() as u16;
+
+        let to_ndc_x = |px: f32| (px / window_width) * 2.0 - 1.0;
+        let to_ndc_y = |py: f32| 1.0 - (py / window_height) * 2.0;
+
+        let half_t = thickness / 2.0;
+        let r_inner = (r - half_t).max(0.0);
+        let r_outer = r + half_t;
+
+        // Corner centers
+        let corners = [
+            (x + r, y + r),
+            (x + width - r, y + r),
+            (x + width - r, y + height - r),
+            (x + r, y + height - r),
+        ];
+
+        let start_angles = [
+            std::f32::consts::PI,
+            std::f32::consts::PI * 1.5,
+            0.0,
+            std::f32::consts::FRAC_PI_2,
+        ];
+
+        // Generate inner and outer arc vertices for each corner
+        for ((cx, cy), start_angle) in corners.iter().zip(start_angles.iter()) {
+            for seg in 0..=CORNER_SEGMENTS {
+                let angle = start_angle
+                    + (seg as f32 / CORNER_SEGMENTS as f32) * std::f32::consts::FRAC_PI_2;
+                let cos_a = angle.cos();
+                let sin_a = angle.sin();
+
+                // Inner vertex
+                let px_inner = cx + r_inner * cos_a;
+                let py_inner = cy + r_inner * sin_a;
+                vertices.push(ColorVertex {
+                    position: [to_ndc_x(px_inner), to_ndc_y(py_inner)],
+                    color,
+                });
+
+                // Outer vertex
+                let px_outer = cx + r_outer * cos_a;
+                let py_outer = cy + r_outer * sin_a;
+                vertices.push(ColorVertex {
+                    position: [to_ndc_x(px_outer), to_ndc_y(py_outer)],
+                    color,
+                });
+            }
+        }
+
+        // Generate indices for corner arcs (quads between inner and outer)
+        let verts_per_corner = ((CORNER_SEGMENTS + 1) * 2) as u16;
+        let mut index_count = 0u32;
+
+        for corner in 0..4 {
+            let corner_base = base_idx + corner * verts_per_corner;
+            for seg in 0..CORNER_SEGMENTS {
+                let i0 = corner_base + (seg * 2) as u16;
+                let i1 = corner_base + (seg * 2 + 1) as u16;
+                let i2 = corner_base + (seg * 2 + 2) as u16;
+                let i3 = corner_base + (seg * 2 + 3) as u16;
+                indices.extend_from_slice(&[i0, i1, i3, i0, i3, i2]);
+                index_count += 6;
+            }
+        }
+
+        // Add the four straight edge segments
+
+        // Helper to get the last vertex of a corner's outer arc
+        let get_corner_end_outer = |corner: u16| -> u16 {
+            base_idx + corner * verts_per_corner + (CORNER_SEGMENTS * 2 + 1) as u16
+        };
+        let get_corner_end_inner = |corner: u16| -> u16 {
+            base_idx + corner * verts_per_corner + (CORNER_SEGMENTS * 2) as u16
+        };
+        let get_corner_start_outer =
+            |corner: u16| -> u16 { base_idx + corner * verts_per_corner + 1 };
+        let get_corner_start_inner = |corner: u16| -> u16 { base_idx + corner * verts_per_corner };
+
+        // Top edge (from top-left corner end to top-right corner start)
+        // Top-left corner ends at angle 270° (pointing up), top-right starts at 270°
+        let tl_end_inner = get_corner_end_inner(0);
+        let tl_end_outer = get_corner_end_outer(0);
+        let tr_start_inner = get_corner_start_inner(1);
+        let tr_start_outer = get_corner_start_outer(1);
+        indices.extend_from_slice(&[
+            tl_end_inner,
+            tl_end_outer,
+            tr_start_outer,
+            tl_end_inner,
+            tr_start_outer,
+            tr_start_inner,
+        ]);
+        index_count += 6;
+
+        // Right edge
+        let tr_end_inner = get_corner_end_inner(1);
+        let tr_end_outer = get_corner_end_outer(1);
+        let br_start_inner = get_corner_start_inner(2);
+        let br_start_outer = get_corner_start_outer(2);
+        indices.extend_from_slice(&[
+            tr_end_inner,
+            tr_end_outer,
+            br_start_outer,
+            tr_end_inner,
+            br_start_outer,
+            br_start_inner,
+        ]);
+        index_count += 6;
+
+        // Bottom edge
+        let br_end_inner = get_corner_end_inner(2);
+        let br_end_outer = get_corner_end_outer(2);
+        let bl_start_inner = get_corner_start_inner(3);
+        let bl_start_outer = get_corner_start_outer(3);
+        indices.extend_from_slice(&[
+            br_end_inner,
+            br_end_outer,
+            bl_start_outer,
+            br_end_inner,
+            bl_start_outer,
+            bl_start_inner,
+        ]);
+        index_count += 6;
+
+        // Left edge
+        let bl_end_inner = get_corner_end_inner(3);
+        let bl_end_outer = get_corner_end_outer(3);
+        let tl_start_inner = get_corner_start_inner(0);
+        let tl_start_outer = get_corner_start_outer(0);
+        indices.extend_from_slice(&[
+            bl_end_inner,
+            bl_end_outer,
+            tl_start_outer,
+            bl_end_inner,
+            tl_start_outer,
+            tl_start_inner,
+        ]);
+        index_count += 6;
+
+        index_count
+    }
+
     /// Append vertices/indices for a stroked circle to existing vectors.
     pub fn append_stroke_circle(
         vertices: &mut Vec<ColorVertex>,

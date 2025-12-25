@@ -5,6 +5,7 @@ use crate::event::{Event, MouseButton};
 use crate::layout::{Alignment, Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::TooltipContent;
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 
 /// Button visual style
@@ -183,6 +184,8 @@ impl<M> Button<M> {
 
     /// Get background color based on state and style
     fn get_background_color(&self) -> Option<Color> {
+        let theme = current_theme();
+
         // If custom background is set, use it with state variations
         if let Some(base) = self.custom_bg {
             return Some(match self.state {
@@ -194,16 +197,16 @@ impl<M> Button<M> {
 
         match self.style {
             ButtonStyle::Normal => Some(match self.state {
-                ButtonState::Normal => Color::BUTTON_BG,
-                ButtonState::Hovered => Color::BUTTON_HOVER,
-                ButtonState::Pressed => Color::BUTTON_ACTIVE,
+                ButtonState::Normal => theme.button_bg,
+                ButtonState::Hovered => theme.button_hover,
+                ButtonState::Pressed => theme.button_active,
             }),
             ButtonStyle::Text => {
                 // Text buttons have subtle hover/press feedback
                 match self.state {
                     ButtonState::Normal => None,
-                    ButtonState::Hovered => Some(Color::rgba(1.0, 1.0, 1.0, 0.05)),
-                    ButtonState::Pressed => Some(Color::rgba(1.0, 1.0, 1.0, 0.1)),
+                    ButtonState::Hovered => Some(Color::rgba(1.0, 1.0, 1.0, 0.08)),
+                    ButtonState::Pressed => Some(Color::rgba(1.0, 1.0, 1.0, 0.12)),
                 }
             }
         }
@@ -211,17 +214,28 @@ impl<M> Button<M> {
 
     /// Get text color based on state and style
     fn get_text_color(&self) -> Color {
+        let theme = current_theme();
+
         // If custom text color is set, use it
         if let Some(color) = self.custom_text {
             return color;
         }
 
         match self.style {
-            ButtonStyle::Normal => Color::TEXT_PRIMARY,
+            ButtonStyle::Normal => theme.text_primary,
             ButtonStyle::Text => match self.state {
-                ButtonState::Normal => Color::TEXT_SECONDARY,
-                ButtonState::Hovered | ButtonState::Pressed => Color::TEXT_PRIMARY,
+                ButtonState::Normal => theme.text_secondary,
+                ButtonState::Hovered | ButtonState::Pressed => theme.text_primary,
             },
+        }
+    }
+
+    /// Get border color based on state
+    fn get_border_color(&self) -> Color {
+        let theme = current_theme();
+        match self.state {
+            ButtonState::Normal => theme.border,
+            ButtonState::Hovered | ButtonState::Pressed => theme.border.lighten(0.1),
         }
     }
 }
@@ -250,31 +264,30 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         // Apply margin to get the actual button bounds
         let button_bounds = bounds.shrink(self.margin);
 
-        // Draw background (if any)
+        // Draw background
         if let Some(bg_color) = self.get_background_color() {
             renderer.fill_rect(button_bounds, bg_color);
         }
 
         // Draw border (only for Normal style)
         if self.style == ButtonStyle::Normal {
-            renderer.stroke_rect(button_bounds, Color::BORDER, 1.0);
+            renderer.stroke_rect(button_bounds, self.get_border_color(), 1.0);
         }
 
         // Calculate text position based on alignment
-        let content = self.content_size();
         let inner_width = button_bounds.width - self.padding.horizontal();
 
-        // Clamp text width to available inner space
-        let text_width = content.width.min(inner_width);
+        // Measure actual text width using the font system for accurate centering
+        let actual_text_width = renderer.measure_text_width(&self.label, self.font_size);
+        let text_width = actual_text_width.min(inner_width);
 
-        let text_x =
-            button_bounds.x + self.padding.left + self.text_align.align(inner_width, text_width);
+        let align_offset = self.text_align.align(inner_width, text_width);
+        let text_x = button_bounds.x + self.padding.left + align_offset;
 
-        // Center vertically using font size directly (not line_height)
-        // Text rendering positions from top, and the visual center of most fonts
-        // is slightly above the mathematical center due to descenders
-        // Using font_size gives better visual centering than line_height
-        let text_y = button_bounds.y + (button_bounds.height - self.font_size) / 2.0;
+        // Center vertically using line_height (which matches content_size calculation)
+        // The button height is based on line_height, so we must center using line_height too
+        let text_line_height = line_height(self.font_size);
+        let text_y = button_bounds.y + (button_bounds.height - text_line_height) / 2.0;
 
         renderer.text(
             &self.label,

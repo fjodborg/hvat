@@ -327,18 +327,18 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
         // Begin overlay rendering
         renderer.begin_overlay();
 
-        // Draw background with shadow effect
-        let shadow_bounds = Bounds::new(
-            overlay_bounds.x + 2.0,
-            overlay_bounds.y + 2.0,
-            overlay_bounds.width,
-            overlay_bounds.height,
-        );
-        renderer.fill_rect(shadow_bounds, Color::rgba(0.0, 0.0, 0.0, 0.3));
-        renderer.fill_rect(overlay_bounds, Color::DARK_BG);
-        renderer.stroke_rect(overlay_bounds, Color::BORDER, 1.0);
+        // Corner radii for modern look
+        const OVERLAY_RADIUS: f32 = 8.0;
+        const CELL_RADIUS: f32 = 4.0;
+        const PREVIEW_RADIUS: f32 = 4.0;
 
-        // Draw palette cells
+        // Draw shadow and background
+        let theme = crate::theme::current_theme();
+        renderer.draw_popup_shadow(overlay_bounds, OVERLAY_RADIUS);
+        renderer.fill_rounded_rect(overlay_bounds, theme.popup_bg, OVERLAY_RADIUS);
+        renderer.stroke_rounded_rect(overlay_bounds, theme.divider, OVERLAY_RADIUS, 1.0);
+
+        // Draw palette cells (rounded)
         for (i, color) in COLOR_PALETTE.iter().enumerate() {
             let col = i % GRID_COLS;
             let row = i / GRID_COLS;
@@ -352,18 +352,23 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                 color[2] as f32 / 255.0,
             );
 
-            renderer.fill_rect(cell_bounds, cell_color);
+            renderer.fill_rounded_rect(cell_bounds, cell_color, CELL_RADIUS);
 
             // Highlight hovered or matching current color
             let is_hovered = self.hovered_cell == Some(i);
             let is_current = *color == self.current_color;
 
             if is_current {
-                renderer.stroke_rect(cell_bounds, Color::WHITE, 2.0);
+                renderer.stroke_rounded_rect(cell_bounds, Color::WHITE, CELL_RADIUS, 2.0);
             } else if is_hovered {
-                renderer.stroke_rect(cell_bounds, Color::rgba(1.0, 1.0, 1.0, 0.5), 1.0);
+                renderer.stroke_rounded_rect(
+                    cell_bounds,
+                    Color::rgba(1.0, 1.0, 1.0, 0.5),
+                    CELL_RADIUS,
+                    1.0,
+                );
             } else {
-                renderer.stroke_rect(cell_bounds, Color::BORDER, 1.0);
+                renderer.stroke_rounded_rect(cell_bounds, theme.border, CELL_RADIUS, 1.0);
             }
         }
 
@@ -375,14 +380,14 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
             ("B", b, Color::rgb(0.3, 0.3, 1.0)),
         ];
 
-        // Draw color preview rectangle next to the labels
+        // Draw color preview rectangle next to the labels (rounded)
         let preview_x = pos.0 + PICKER_PADDING;
         let preview_y = Self::sliders_start_y(pos);
         let preview_height = 3.0 * SLIDER_ROW_HEIGHT - 4.0;
         let preview_bounds = Bounds::new(preview_x, preview_y, PREVIEW_WIDTH, preview_height);
         let preview_color = Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
-        renderer.fill_rect(preview_bounds, preview_color);
-        renderer.stroke_rect(preview_bounds, Color::BORDER, 1.0);
+        renderer.fill_rounded_rect(preview_bounds, preview_color, PREVIEW_RADIUS);
+        renderer.stroke_rounded_rect(preview_bounds, theme.border, PREVIEW_RADIUS, 1.0);
 
         for (i, (label, value, color)) in sliders.iter().enumerate() {
             let track = Self::slider_track_bounds(pos, i);
@@ -395,12 +400,12 @@ impl<M: Clone + 'static> Widget<M> for ColorPicker<M> {
                 label_x,
                 label_y,
                 DEFAULT_FONT_SIZE,
-                Color::TEXT_PRIMARY,
+                theme.text_primary,
             );
 
             // Draw track background
-            renderer.fill_rect(track, Color::rgba(0.2, 0.2, 0.2, 1.0));
-            renderer.stroke_rect(track, Color::BORDER, 1.0);
+            renderer.fill_rect(track, theme.slider_track);
+            renderer.stroke_rect(track, theme.border, 1.0);
 
             // Draw gradient on track
             let gradient = Bounds::new(

@@ -287,7 +287,9 @@ pub fn draw_simple_vertical_scrollbar(
         let thumb_y = track_bounds.y + scroll_ratio * available_travel;
 
         let thumb_bounds = Bounds::new(track_bounds.x, thumb_y, bar_width, thumb_height);
-        renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
+        // Use pill-shaped thumb (radius = half width) for modern look
+        let thumb_radius = bar_width / 2.0;
+        renderer.fill_rounded_rect(thumb_bounds, Color::SCROLLBAR_THUMB, thumb_radius);
     }
 }
 
@@ -317,7 +319,9 @@ pub fn draw_simple_horizontal_scrollbar(
         let thumb_x = track_bounds.x + scroll_ratio * available_travel;
 
         let thumb_bounds = Bounds::new(thumb_x, track_bounds.y, thumb_width, bar_height);
-        renderer.fill_rect(thumb_bounds, Color::SCROLLBAR_THUMB);
+        // Use pill-shaped thumb (radius = half height) for modern look
+        let thumb_radius = bar_height / 2.0;
+        renderer.fill_rounded_rect(thumb_bounds, Color::SCROLLBAR_THUMB, thumb_radius);
     }
 }
 

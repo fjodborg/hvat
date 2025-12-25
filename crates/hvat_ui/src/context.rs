@@ -191,6 +191,14 @@ impl<'a, M: 'static> TextDisplayBuilder<'a, M> {
         self
     }
 
+    /// Set the text color
+    pub fn color(mut self, color: crate::renderer::Color) -> Self {
+        if let Some(text) = self.text.take() {
+            self.text = Some(text.color(color));
+        }
+        self
+    }
+
     // No explicit build() needed - Drop handles adding to context
     // The builder is consumed when it goes out of scope
 }

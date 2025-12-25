@@ -68,6 +68,14 @@ impl BorderSides {
         }
     }
 
+    /// Border on bottom side only
+    pub fn bottom_only() -> Self {
+        Self {
+            bottom: true,
+            ..Self::NONE
+        }
+    }
+
     /// Border on left and top
     pub fn left_top() -> Self {
         Self {

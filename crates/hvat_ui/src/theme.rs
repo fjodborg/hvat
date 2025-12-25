@@ -112,108 +112,154 @@ pub struct Theme {
 
     /// Content background (collapsible content area)
     pub content_bg: Color,
+
+    // ==========================================================================
+    // Shadows & Elevation
+    // ==========================================================================
+    /// Small shadow (buttons, subtle depth)
+    pub shadow_sm: Color,
+
+    /// Medium shadow (panels, cards)
+    pub shadow_md: Color,
+
+    /// Large shadow (popups, modals)
+    pub shadow_lg: Color,
+
+    // ==========================================================================
+    // Additional UI Elements
+    // ==========================================================================
+    /// Subtle accent background (selected items)
+    pub accent_subtle: Color,
+
+    /// Divider lines between sections
+    pub divider: Color,
+
+    /// Elevated surface background (slightly lighter than surface)
+    pub elevated_bg: Color,
 }
 
 impl Theme {
     /// Create the default dark theme
+    /// Modern SaaS-style palette with richer colors and better contrast
     pub fn dark() -> Self {
         Self {
-            // Backgrounds
-            background: Color::rgb(0.12, 0.12, 0.14),
-            surface: Color::rgb(0.15, 0.15, 0.18),
-            input_bg: Color::rgb(0.15, 0.15, 0.17),
-            input_bg_focused: Color::rgb(0.18, 0.18, 0.2),
+            // Backgrounds - deeper, richer darks
+            background: Color::rgb(0.09, 0.09, 0.11),
+            surface: Color::rgb(0.13, 0.13, 0.16),
+            input_bg: Color::rgb(0.11, 0.11, 0.14),
+            input_bg_focused: Color::rgb(0.14, 0.14, 0.18),
 
-            // Borders
-            border: Color::rgb(0.3, 0.3, 0.35),
-            border_focused: Color::rgb(0.4, 0.6, 1.0),
+            // Borders - softer, less harsh
+            border: Color::rgb(0.20, 0.20, 0.26),
+            border_focused: Color::rgb(0.40, 0.58, 0.98),
 
-            // Text
-            text_primary: Color::rgb(0.9, 0.9, 0.92),
-            text_secondary: Color::rgb(0.6, 0.6, 0.65),
-            text_placeholder: Color::rgb(0.5, 0.5, 0.55),
+            // Text - crisper whites
+            text_primary: Color::rgb(0.95, 0.95, 0.97),
+            text_secondary: Color::rgb(0.58, 0.58, 0.65),
+            text_placeholder: Color::rgb(0.42, 0.42, 0.50),
 
-            // Interactive
-            button_bg: Color::rgb(0.2, 0.2, 0.24),
-            button_hover: Color::rgb(0.28, 0.28, 0.32),
-            button_active: Color::rgb(0.35, 0.35, 0.4),
+            // Interactive - cleaner buttons with better hover contrast
+            button_bg: Color::rgb(0.18, 0.18, 0.22),
+            button_hover: Color::rgb(0.26, 0.26, 0.32),
+            button_active: Color::rgb(0.32, 0.32, 0.40),
 
-            // Accent & Selection
-            accent: Color::rgb(0.4, 0.6, 1.0),
-            selection: Color::rgba(0.4, 0.6, 1.0, 0.3),
-            cursor: Color::rgb(0.4, 0.6, 1.0),
+            // Accent & Selection - slightly softer blue
+            accent: Color::rgb(0.40, 0.58, 0.98),
+            selection: Color::rgba(0.40, 0.58, 0.98, 0.25),
+            cursor: Color::rgb(0.40, 0.58, 0.98),
 
-            // Scrollbars
-            scrollbar_track: Color::rgba(0.15, 0.15, 0.18, 0.5),
-            scrollbar_thumb: Color::rgba(0.4, 0.4, 0.45, 0.8),
-            scrollbar_thumb_hover: Color::rgba(0.5, 0.5, 0.55, 0.9),
-            scrollbar_thumb_drag: Color::rgba(0.6, 0.6, 0.65, 1.0),
+            // Scrollbars - more subtle
+            scrollbar_track: Color::rgba(0.12, 0.12, 0.15, 0.3),
+            scrollbar_thumb: Color::rgba(0.35, 0.35, 0.42, 0.6),
+            scrollbar_thumb_hover: Color::rgba(0.45, 0.45, 0.52, 0.75),
+            scrollbar_thumb_drag: Color::rgba(0.55, 0.55, 0.62, 0.9),
 
-            // Slider
-            slider_track: Color::rgb(0.2, 0.2, 0.24),
-            slider_track_fill: Color::rgb(0.4, 0.6, 1.0),
-            slider_thumb: Color::rgb(0.9, 0.9, 0.92),
-            slider_thumb_hover: Color::rgb(1.0, 1.0, 1.0),
+            // Slider - darker track, vibrant fill
+            slider_track: Color::rgb(0.14, 0.14, 0.18),
+            slider_track_fill: Color::rgb(0.40, 0.58, 0.98),
+            slider_thumb: Color::rgb(1.0, 1.0, 1.0),
+            slider_thumb_hover: Color::rgb(0.40, 0.58, 0.98),
 
-            // Dropdown/Popup
-            popup_bg: Color::rgba(0.15, 0.15, 0.18, 0.98),
-            option_hover: Color::rgba(0.25, 0.25, 0.3, 1.0),
+            // Dropdown/Popup - darker for depth
+            popup_bg: Color::rgba(0.11, 0.11, 0.14, 0.98),
+            option_hover: Color::rgba(0.22, 0.22, 0.28, 1.0),
 
-            // Collapsible
-            header_bg: Color::rgba(0.15, 0.15, 0.18, 1.0),
-            header_hover: Color::rgba(0.2, 0.2, 0.24, 1.0),
-            content_bg: Color::rgba(0.12, 0.12, 0.14, 1.0),
+            // Collapsible - darker headers for hierarchy
+            header_bg: Color::rgba(0.11, 0.11, 0.14, 1.0),
+            header_hover: Color::rgba(0.16, 0.16, 0.21, 1.0),
+            content_bg: Color::rgba(0.09, 0.09, 0.11, 1.0),
+
+            // Shadows - for elevation and depth
+            shadow_sm: Color::rgba(0.0, 0.0, 0.0, 0.2),
+            shadow_md: Color::rgba(0.0, 0.0, 0.0, 0.35),
+            shadow_lg: Color::rgba(0.0, 0.0, 0.0, 0.5),
+
+            // Additional UI elements
+            accent_subtle: Color::rgba(0.40, 0.58, 0.98, 0.12),
+            divider: Color::rgba(1.0, 1.0, 1.0, 0.06),
+            elevated_bg: Color::rgb(0.15, 0.15, 0.19),
         }
     }
 
     /// Create a light theme
+    /// Modern SaaS-style palette matching the dark theme aesthetic
     pub fn light() -> Self {
         Self {
-            // Backgrounds
-            background: Color::rgb(0.96, 0.96, 0.97),
+            // Backgrounds - clean whites with subtle warmth
+            background: Color::rgb(0.97, 0.97, 0.98),
             surface: Color::rgb(1.0, 1.0, 1.0),
-            input_bg: Color::rgb(1.0, 1.0, 1.0),
-            input_bg_focused: Color::rgb(0.98, 0.98, 1.0),
+            input_bg: Color::rgb(0.99, 0.99, 1.0),
+            input_bg_focused: Color::rgb(1.0, 1.0, 1.0),
 
-            // Borders
-            border: Color::rgb(0.8, 0.8, 0.82),
-            border_focused: Color::rgb(0.3, 0.5, 0.9),
+            // Borders - soft grays
+            border: Color::rgb(0.82, 0.82, 0.86),
+            border_focused: Color::rgb(0.35, 0.52, 0.92),
 
-            // Text
-            text_primary: Color::rgb(0.1, 0.1, 0.12),
-            text_secondary: Color::rgb(0.4, 0.4, 0.45),
-            text_placeholder: Color::rgb(0.6, 0.6, 0.65),
+            // Text - rich blacks
+            text_primary: Color::rgb(0.12, 0.12, 0.15),
+            text_secondary: Color::rgb(0.45, 0.45, 0.52),
+            text_placeholder: Color::rgb(0.62, 0.62, 0.68),
 
-            // Interactive
-            button_bg: Color::rgb(0.92, 0.92, 0.94),
-            button_hover: Color::rgb(0.86, 0.86, 0.9),
-            button_active: Color::rgb(0.8, 0.8, 0.85),
+            // Interactive - subtle button backgrounds
+            button_bg: Color::rgb(0.94, 0.94, 0.96),
+            button_hover: Color::rgb(0.88, 0.88, 0.92),
+            button_active: Color::rgb(0.82, 0.82, 0.88),
 
-            // Accent & Selection
-            accent: Color::rgb(0.3, 0.5, 0.9),
-            selection: Color::rgba(0.3, 0.5, 0.9, 0.25),
-            cursor: Color::rgb(0.3, 0.5, 0.9),
+            // Accent & Selection - vibrant blue
+            accent: Color::rgb(0.35, 0.52, 0.92),
+            selection: Color::rgba(0.35, 0.52, 0.92, 0.2),
+            cursor: Color::rgb(0.35, 0.52, 0.92),
 
-            // Scrollbars
-            scrollbar_track: Color::rgba(0.9, 0.9, 0.92, 0.5),
-            scrollbar_thumb: Color::rgba(0.6, 0.6, 0.65, 0.6),
-            scrollbar_thumb_hover: Color::rgba(0.5, 0.5, 0.55, 0.7),
-            scrollbar_thumb_drag: Color::rgba(0.4, 0.4, 0.45, 0.8),
+            // Scrollbars - very subtle
+            scrollbar_track: Color::rgba(0.88, 0.88, 0.90, 0.3),
+            scrollbar_thumb: Color::rgba(0.55, 0.55, 0.60, 0.5),
+            scrollbar_thumb_hover: Color::rgba(0.45, 0.45, 0.52, 0.65),
+            scrollbar_thumb_drag: Color::rgba(0.38, 0.38, 0.45, 0.8),
 
-            // Slider
-            slider_track: Color::rgb(0.85, 0.85, 0.88),
-            slider_track_fill: Color::rgb(0.3, 0.5, 0.9),
+            // Slider - subtle track
+            slider_track: Color::rgb(0.88, 0.88, 0.90),
+            slider_track_fill: Color::rgb(0.35, 0.52, 0.92),
             slider_thumb: Color::rgb(1.0, 1.0, 1.0),
-            slider_thumb_hover: Color::rgb(0.95, 0.95, 0.98),
+            slider_thumb_hover: Color::rgb(0.35, 0.52, 0.92),
 
-            // Dropdown/Popup
+            // Dropdown/Popup - clean white with shadow effect implied by popup
             popup_bg: Color::rgba(1.0, 1.0, 1.0, 0.98),
-            option_hover: Color::rgba(0.9, 0.92, 0.96, 1.0),
+            option_hover: Color::rgba(0.92, 0.94, 0.98, 1.0),
 
-            // Collapsible
-            header_bg: Color::rgba(0.94, 0.94, 0.96, 1.0),
-            header_hover: Color::rgba(0.9, 0.9, 0.93, 1.0),
+            // Collapsible - subtle hierarchy
+            header_bg: Color::rgba(0.95, 0.95, 0.97, 1.0),
+            header_hover: Color::rgba(0.91, 0.91, 0.94, 1.0),
             content_bg: Color::rgba(0.98, 0.98, 0.99, 1.0),
+
+            // Shadows - lighter for light theme
+            shadow_sm: Color::rgba(0.0, 0.0, 0.0, 0.08),
+            shadow_md: Color::rgba(0.0, 0.0, 0.0, 0.15),
+            shadow_lg: Color::rgba(0.0, 0.0, 0.0, 0.25),
+
+            // Additional UI elements
+            accent_subtle: Color::rgba(0.35, 0.52, 0.92, 0.1),
+            divider: Color::rgba(0.0, 0.0, 0.0, 0.08),
+            elevated_bg: Color::rgb(1.0, 1.0, 1.0),
         }
     }
 }

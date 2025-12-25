@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use hvat_ui::Color;
-use hvat_ui::constants::FONT_SIZE_TINY;
 use hvat_ui::prelude::*;
+use hvat_ui::theme::current_theme;
 use hvat_ui::{
     Alignment, BorderSides, Collapsible, Column, Context, Element, Padding, Panel, ScrollDirection,
     Scrollable, ScrollbarVisibility,
@@ -73,6 +73,9 @@ impl HvatApp {
         // Minimal padding for compact buttons
         let chip_padding = Padding::new(2.0, 6.0, 2.0, 6.0);
 
+        let hidden_count = annotations.len() - visible_annotations.len();
+        let theme_for_annotations = current_theme();
+
         let collapsible_annotations = Collapsible::new("Annotations")
             .state(&annotations_state)
             .scroll_state(&annotations_scroll)
@@ -82,9 +85,26 @@ impl HvatApp {
             .on_scroll(Message::AnnotationsScrolled)
             .content(|c| {
                 if total_count == 0 {
-                    c.text("No annotations").size(FONT_SIZE_SMALL);
+                    c.text("No annotations yet")
+                        .size(FONT_SIZE_SECONDARY)
+                        .color(theme_for_annotations.text_secondary);
+                    c.text("Draw with the annotation tools")
+                        .size(FONT_SIZE_SMALL)
+                        .color(theme_for_annotations.text_placeholder);
                 } else {
-                    // Category filters - colored buttons
+                    // Summary header
+                    let summary = if hidden_count > 0 {
+                        format!("{} annotations ({} hidden)", total_count, hidden_count)
+                    } else {
+                        format!("{} annotations", total_count)
+                    };
+                    c.text(summary)
+                        .size(FONT_SIZE_SECONDARY)
+                        .color(theme_for_annotations.text_secondary);
+
+                    // Category filters section
+                    c.text("").size(4.0); // Small spacer
+
                     for cat in &categories_for_annotations {
                         let cat_id = cat.id;
                         let cat_color = cat.color;
@@ -93,9 +113,8 @@ impl HvatApp {
                         let is_hidden = hidden_categories.contains(&cat_id);
 
                         // Format: [checkbox] Name (count)
-                        // Using ASCII-compatible checkbox symbols for better font support
-                        // Use two spaces in empty checkbox to better match width of [x]
-                        let vis = if is_hidden { "[  ]" } else { "[x]" };
+                        // Use ASCII for cross-platform compatibility (WASM font support)
+                        let vis = if is_hidden { "[ ]" } else { "[x]" };
                         let label = format!("{} {} ({})", vis, cat_name, count);
 
                         // Convert RGB bytes to Color
@@ -110,12 +129,14 @@ impl HvatApp {
                             .on_click(Message::ToggleCategoryFilter(cat_id));
                     }
 
-                    // Divider
-                    c.text("---").size(FONT_SIZE_TINY).align(Alignment::Center);
+                    // Visual divider - empty text with small height acts as spacer
+                    c.text("").size(8.0);
 
-                    // Annotation list - colored buttons
+                    // Annotation list section
                     if visible_annotations.is_empty() {
-                        c.text("All hidden").size(FONT_SIZE_SMALL);
+                        c.text("All categories hidden")
+                            .size(FONT_SIZE_SMALL)
+                            .color(theme_for_annotations.text_secondary);
                     } else {
                         for ann in &visible_annotations {
                             let ann_id = ann.id;
@@ -128,24 +149,39 @@ impl HvatApp {
                             let cat_color = cat.map(|c| c.color).unwrap_or([128, 128, 128]);
                             let cat_name = cat.map(|c| c.name.as_str()).unwrap_or("?");
 
-                            // Size info
-                            let size_info = match &ann.shape {
-                                AnnotationShape::BoundingBox { width, height, .. } => {
-                                    format_area(width * height)
+                            // Shape info with center point (ASCII for WASM compatibility)
+                            let (shape_icon, size_info) = match &ann.shape {
+                                AnnotationShape::BoundingBox {
+                                    x,
+                                    y,
+                                    width,
+                                    height,
+                                } => {
+                                    let cx = x + width / 2.0;
+                                    let cy = y + height / 2.0;
+                                    ("Box", format!("({:.0},{:.0})", cx, cy))
                                 }
-                                AnnotationShape::Point { .. } => "pt".to_string(),
+                                AnnotationShape::Point { x, y } => {
+                                    ("Pt", format!("({:.0},{:.0})", x, y))
+                                }
                                 AnnotationShape::Polygon { vertices } => {
-                                    format!(
-                                        "{}v {}",
-                                        vertices.len(),
-                                        format_area(polygon_area(vertices))
-                                    )
+                                    // Calculate centroid
+                                    let (sum_x, sum_y): (f32, f32) = vertices
+                                        .iter()
+                                        .fold((0.0, 0.0), |(sx, sy), (vx, vy)| (sx + vx, sy + vy));
+                                    let n = vertices.len() as f32;
+                                    let cx = sum_x / n;
+                                    let cy = sum_y / n;
+                                    ("Poly", format!("{}v ({:.0},{:.0})", vertices.len(), cx, cy))
                                 }
                             };
 
-                            // Format: [sel] ID Category Size
-                            let sel = if is_selected { "▸" } else { " " };
-                            let label = format!("{}{} {} {}", sel, ann_id, cat_name, size_info);
+                            // Format: [sel] ShapeIcon ID Category Size
+                            let sel = if is_selected { ">" } else { " " };
+                            let label = format!(
+                                "{}{} {} {} {}",
+                                sel, shape_icon, ann_id, cat_name, size_info
+                            );
 
                             // Convert RGB bytes to Color
                             let bg_color =
@@ -448,40 +484,16 @@ impl HvatApp {
             .height(Length::Fill(1.0))
             .on_scroll(Message::RightScrolled);
 
-        // Wrap in panel with left and top borders
+        let theme = current_theme();
+
+        // Wrap in panel with left and top borders + distinct background
         let panel = Panel::new(Element::new(scrollable))
             .borders(BorderSides::left_top())
+            .border_color(theme.divider)
+            .background(theme.surface)
             .width(Length::Fixed(SIDEBAR_WIDTH))
             .height(Length::Fill(1.0));
 
         Element::new(panel)
-    }
-}
-
-/// Calculate the area of a polygon using the shoelace formula.
-fn polygon_area(vertices: &[(f32, f32)]) -> f32 {
-    if vertices.len() < 3 {
-        return 0.0;
-    }
-
-    let mut area = 0.0;
-    let n = vertices.len();
-    for i in 0..n {
-        let j = (i + 1) % n;
-        area += vertices[i].0 * vertices[j].1;
-        area -= vertices[j].0 * vertices[i].1;
-    }
-    (area / 2.0).abs()
-}
-
-/// Format area in a compact, human-readable format.
-/// Uses K for thousands, M for millions.
-fn format_area(area: f32) -> String {
-    if area >= 1_000_000.0 {
-        format!("{:.1}M", area / 1_000_000.0)
-    } else if area >= 1_000.0 {
-        format!("{:.1}K", area / 1_000.0)
-    } else {
-        format!("{:.0}", area)
     }
 }

@@ -9,10 +9,17 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::DropdownState;
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 use crate::widgets::scrollbar::draw_simple_vertical_scrollbar;
 
-const SEARCH_BOX_BG_COLOR: Color = Color::rgba(0.12, 0.12, 0.15, 1.0);
+/// Corner radius for dropdown button
+/// Using 0 for sharp corners - vertex-based rendering cannot anti-alias curves
+const DROPDOWN_CORNER_RADIUS: f32 = 0.0;
+/// Corner radius for dropdown popup
+const DROPDOWN_POPUP_CORNER_RADIUS: f32 = 0.0;
+
+const SEARCH_BOX_BG_COLOR: Color = Color::rgba(0.08, 0.08, 0.10, 1.0);
 
 /// Placeholder text for searchable dropdowns
 const SEARCH_PLACEHOLDER: &str = "Type to filter...";
@@ -44,14 +51,15 @@ pub struct DropdownConfig {
 
 impl Default for DropdownConfig {
     fn default() -> Self {
+        let theme = current_theme();
         Self {
-            button_bg: Color::BUTTON_BG,
-            button_hover: Color::BUTTON_HOVER,
-            text_color: Color::TEXT_PRIMARY,
-            popup_bg: Color::rgba(0.15, 0.15, 0.18, 0.98),
-            option_hover: Color::rgba(0.25, 0.25, 0.3, 1.0),
-            selected_bg: Color::ACCENT,
-            border_color: Color::BORDER,
+            button_bg: theme.button_bg,
+            button_hover: theme.button_hover,
+            text_color: theme.text_primary,
+            popup_bg: theme.popup_bg,
+            option_hover: theme.option_hover,
+            selected_bg: theme.accent,
+            border_color: theme.border,
             font_size: 14.0,
             option_height: 28.0,
             max_visible_options: 8,
@@ -451,8 +459,14 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
             self.config.button_bg
         };
 
-        renderer.fill_rect(button_bounds, button_bg);
-        renderer.stroke_rect(button_bounds, self.config.border_color, 1.0);
+        // Draw rounded button background and border
+        renderer.fill_rounded_rect(button_bounds, button_bg, DROPDOWN_CORNER_RADIUS);
+        renderer.stroke_rounded_rect(
+            button_bounds,
+            self.config.border_color,
+            DROPDOWN_CORNER_RADIUS,
+            1.0,
+        );
 
         // Draw selected text
         let (text_x, text_y) = self.text_position(button_bounds);
@@ -464,8 +478,12 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
             self.config.text_color,
         );
 
-        // Draw arrow indicator (using ASCII for cross-platform compatibility)
-        let arrow = if self.state.is_open { "^" } else { "v" };
+        // Draw arrow indicator (Unicode triangles for modern look)
+        let arrow = if self.state.is_open {
+            "\u{25B4}"
+        } else {
+            "\u{25BE}"
+        }; // ▴ and ▾
         let arrow_x = button_bounds.right() - DROPDOWN_ARROW_WIDTH;
         renderer.text(
             arrow,
@@ -723,9 +741,20 @@ impl<M: 'static> Dropdown<M> {
         // Start overlay rendering (on top of other content)
         renderer.begin_overlay();
 
-        // Draw popup background
-        renderer.fill_rect(popup_bounds, self.config.popup_bg);
-        renderer.stroke_rect(popup_bounds, self.config.border_color, 1.0);
+        // Draw shadow and background
+        let theme = current_theme();
+        renderer.draw_popup_shadow(popup_bounds, DROPDOWN_POPUP_CORNER_RADIUS);
+        renderer.fill_rounded_rect(
+            popup_bounds,
+            self.config.popup_bg,
+            DROPDOWN_POPUP_CORNER_RADIUS,
+        );
+        renderer.stroke_rounded_rect(
+            popup_bounds,
+            theme.divider,
+            DROPDOWN_POPUP_CORNER_RADIUS,
+            1.0,
+        );
 
         // Draw search box if searchable
         if self.searchable {

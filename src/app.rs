@@ -3814,9 +3814,11 @@ impl Application for HvatApp {
     fn tick_with_resources(&mut self, resources: &mut Resources<'_>) -> TickResult {
         let mut needs_rebuild = false;
 
-        // Note: Tooltip timing is handled by the framework's idle timer.
-        // When a tooltip is pending, we return RequestIdleTimer and the framework
-        // fires Event::IdleTimer after the delay (if no user activity).
+        // Check for pending tooltip FIRST - we need to return RequestIdleTimer
+        // even if preloading or other work is happening. The framework will set
+        // the timer and continue processing other work.
+        let tooltip_pending =
+            self.tooltip_manager.current_id().is_some() && !self.tooltip_manager.is_visible();
 
         // Check for async picker result (WASM only)
         #[cfg(target_arch = "wasm32")]
@@ -3864,7 +3866,10 @@ impl Application for HvatApp {
             }
             // Don't preload in the same tick - let the frame render first
             // Return appropriate result based on what work was done
-            return if needs_rebuild {
+            // Note: Tooltip timer takes priority if pending
+            return if tooltip_pending {
+                TickResult::RequestIdleTimer(self.tooltip_manager.delay())
+            } else if needs_rebuild {
                 TickResult::NeedsRebuild
             } else if self.pending_preload {
                 TickResult::ContinueWork
@@ -3879,7 +3884,10 @@ impl Application for HvatApp {
             self.needs_gpu_render = false;
             needs_rebuild = true;
             // Don't preload in the same tick as a render
-            return if needs_rebuild {
+            // Note: Tooltip timer takes priority if pending
+            return if tooltip_pending {
+                TickResult::RequestIdleTimer(self.tooltip_manager.delay())
+            } else if needs_rebuild {
                 TickResult::NeedsRebuild
             } else {
                 TickResult::Idle
@@ -3893,6 +3901,10 @@ impl Application for HvatApp {
             self.pending_preload = self.do_preloading_step(resources);
 
             if self.pending_preload {
+                // Note: Tooltip timer takes priority if pending
+                if tooltip_pending {
+                    return TickResult::RequestIdleTimer(self.tooltip_manager.delay());
+                }
                 // Choose tick result based on whether GPU work was done:
                 // - ContinueWork: Did GPU upload, framework should redraw
                 // - ScheduleTick: Just polling worker, skip expensive UI redraw
@@ -3912,8 +3924,7 @@ impl Application for HvatApp {
 
         if needs_rebuild {
             TickResult::NeedsRebuild
-        } else if self.tooltip_manager.current_id().is_some() && !self.tooltip_manager.is_visible()
-        {
+        } else if tooltip_pending {
             // Tooltip is pending but not visible yet - request idle timer to show it
             // The framework will fire Event::IdleTimer after this duration of inactivity
             TickResult::RequestIdleTimer(self.tooltip_manager.delay())

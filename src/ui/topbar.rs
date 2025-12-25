@@ -2,7 +2,8 @@
 
 use hvat_ui::constants::BUTTON_PADDING_COMPACT;
 use hvat_ui::prelude::*;
-use hvat_ui::{Context, Element, Row, Text};
+use hvat_ui::theme::current_theme;
+use hvat_ui::{BorderSides, Context, Element, Panel, Row, Text};
 
 use crate::app::HvatApp;
 use crate::message::Message;
@@ -58,11 +59,21 @@ impl HvatApp {
             r.text(format!("v{}", APP_VERSION)).size(FONT_SIZE_SMALL);
         });
 
+        let theme = current_theme();
+
         let row = Row::new(ctx.take())
             .width(Length::Fill(1.0))
             .height(Length::Fixed(40.0))
             .spacing(8.0);
 
-        Element::new(row)
+        // Wrap in panel with bottom border for visual separation
+        let panel = Panel::new(Element::new(row))
+            .borders(BorderSides::bottom_only())
+            .border_color(theme.divider)
+            .background(theme.surface)
+            .width(Length::Fill(1.0))
+            .height(Length::Fixed(40.0));
+
+        Element::new(panel)
     }
 }

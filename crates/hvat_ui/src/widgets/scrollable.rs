@@ -7,6 +7,7 @@ use crate::event::{Event, MouseButton};
 use crate::layout::{Bounds, Length, Padding, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::{ScrollDragExt, ScrollState};
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 use crate::widgets::scrollbar::{self, ScrollbarParams};
 
@@ -53,13 +54,14 @@ pub struct ScrollbarConfig {
 
 impl Default for ScrollbarConfig {
     fn default() -> Self {
+        let theme = current_theme();
         Self {
             width: SCROLLBAR_WIDTH,
             min_thumb_size: SCROLLBAR_MIN_THUMB,
-            track_color: Color::rgba(0.15, 0.15, 0.18, 0.5),
-            thumb_color: Color::rgba(0.4, 0.4, 0.45, 0.8),
-            thumb_hover_color: Color::rgba(0.5, 0.5, 0.55, 0.9),
-            thumb_drag_color: Color::rgba(0.6, 0.6, 0.65, 1.0),
+            track_color: theme.scrollbar_track,
+            thumb_color: theme.scrollbar_thumb,
+            thumb_hover_color: theme.scrollbar_thumb_hover,
+            thumb_drag_color: theme.scrollbar_thumb_drag,
         }
     }
 }
@@ -581,7 +583,9 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                     "Drawing V scrollbar thumb at y={:.1}, height={:.1}, track_bottom={:.1}, thumb_bottom={:.1}",
                     thumb.y, thumb.height, params.track_bounds.bottom(), thumb.y + thumb.height
                 );
-                renderer.fill_rect(thumb, color);
+                // Use pill-shaped thumb (radius = half width) for modern look
+                let thumb_radius = thumb.width / 2.0;
+                renderer.fill_rounded_rect(thumb, color, thumb_radius);
             }
         }
 
@@ -599,7 +603,9 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 } else {
                     self.scrollbar_config.thumb_color
                 };
-                renderer.fill_rect(thumb, color);
+                // Use pill-shaped thumb (radius = half height) for modern look
+                let thumb_radius = thumb.height / 2.0;
+                renderer.fill_rounded_rect(thumb, color, thumb_radius);
             }
         }
 

@@ -7,8 +7,13 @@ use crate::callback::Callback;
 use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Size};
 use crate::renderer::{Color, Renderer};
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 use crate::widgets::overlay::OverlayCloseHelper;
+
+/// Corner radius for context menu
+/// Using 0 for sharp corners - vertex-based rendering cannot anti-alias curves
+const MENU_CORNER_RADIUS: f32 = 0.0;
 
 /// A menu item in the context menu
 #[derive(Debug, Clone)]
@@ -316,18 +321,11 @@ impl<M: 'static> Widget<M> for ContextMenu<M> {
         // Start overlay rendering
         renderer.begin_overlay();
 
-        // Draw shadow
-        let shadow_bounds = Bounds::new(
-            menu_bounds.x + self.config.shadow_offset,
-            menu_bounds.y + self.config.shadow_offset,
-            menu_bounds.width,
-            menu_bounds.height,
-        );
-        renderer.fill_rect(shadow_bounds, self.config.shadow_color);
-
-        // Draw background
-        renderer.fill_rect(menu_bounds, self.config.bg_color);
-        renderer.stroke_rect(menu_bounds, self.config.border_color, 1.0);
+        // Draw shadow and background
+        let theme = current_theme();
+        renderer.draw_popup_shadow(menu_bounds, MENU_CORNER_RADIUS);
+        renderer.fill_rounded_rect(menu_bounds, theme.popup_bg, MENU_CORNER_RADIUS);
+        renderer.stroke_rounded_rect(menu_bounds, theme.divider, MENU_CORNER_RADIUS, 1.0);
 
         // Draw items
         let mut current_y = menu_bounds.y;

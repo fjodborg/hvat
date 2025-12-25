@@ -2,6 +2,7 @@
 
 use hvat_ui::constants::{BUTTON_PADDING_COMPACT, COLOR_PICKER_SWATCH_OFFSET, ROW_ITEM_HEIGHT};
 use hvat_ui::prelude::*;
+use hvat_ui::theme::current_theme;
 use hvat_ui::{
     BorderSides, Collapsible, ColorPicker, ColorSwatch, Column, Context, Element, FileTree, Panel,
     ScrollDirection, Scrollable, ScrollbarVisibility, TooltipContent,
@@ -326,9 +327,13 @@ impl HvatApp {
             .height(Length::Fill(1.0))
             .on_scroll(Message::LeftScrolled);
 
-        // Wrap in panel with right and top borders
+        let theme = current_theme();
+
+        // Wrap in panel with right and top borders + distinct background
         let panel = Panel::new(Element::new(scrollable))
             .borders(BorderSides::right_top())
+            .border_color(theme.divider)
+            .background(theme.surface)
             .width(Length::Fixed(SIDEBAR_WIDTH))
             .height(Length::Fill(1.0));
 

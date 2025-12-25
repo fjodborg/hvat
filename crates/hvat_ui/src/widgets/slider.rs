@@ -11,6 +11,7 @@ use crate::event::{Event, KeyCode, MouseButton};
 use crate::layout::{Bounds, Length, Size};
 use crate::renderer::{Color, Renderer};
 use crate::state::SliderState;
+use crate::theme::current_theme;
 use crate::widget::{EventResult, Widget};
 use crate::widgets::config::BaseInputConfig;
 use crate::widgets::text_core;
@@ -38,14 +39,15 @@ pub struct SliderConfig {
 
 impl Default for SliderConfig {
     fn default() -> Self {
+        let theme = current_theme();
         Self {
-            track_color: Color::rgb(0.2, 0.2, 0.24),
-            track_fill_color: Color::ACCENT,
-            thumb_color: Color::rgb(0.9, 0.9, 0.92),
-            thumb_hover_color: Color::rgb(1.0, 1.0, 1.0),
-            thumb_active_color: Color::ACCENT,
-            border_color: Color::BORDER,
-            label_color: Color::TEXT_SECONDARY,
+            track_color: theme.slider_track,
+            track_fill_color: theme.slider_track_fill,
+            thumb_color: theme.slider_thumb,
+            thumb_hover_color: theme.slider_thumb_hover,
+            thumb_active_color: theme.accent,
+            border_color: theme.border,
+            label_color: theme.text_secondary,
             input: BaseInputConfig::default(),
         }
     }
@@ -432,17 +434,16 @@ impl<M: Clone + 'static> Widget<M> for Slider<M> {
         let track = self.track_bounds(slider_bounds);
         let progress = self.value_to_progress();
 
-        // Draw track background
+        // Draw track background (flat rectangle for crisp edges)
         renderer.fill_rect(track, self.config.track_color);
 
-        // Draw filled portion
-        let filled = Bounds::new(track.x, track.y, track.width * progress, track.height);
-        renderer.fill_rect(filled, self.config.track_fill_color);
+        // Draw filled portion (flat, only if there's something to fill)
+        if progress > 0.01 {
+            let filled = Bounds::new(track.x, track.y, track.width * progress, track.height);
+            renderer.fill_rect(filled, self.config.track_fill_color);
+        }
 
-        // Draw track border
-        renderer.stroke_rect(track, self.config.border_color, 1.0);
-
-        // Draw thumb
+        // Draw thumb (flat style - no shadow)
         let thumb = self.thumb_bounds(slider_bounds);
         let thumb_color = if self.state.drag.is_dragging() {
             self.config.thumb_active_color

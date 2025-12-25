@@ -88,8 +88,18 @@ pub const BUTTON_PADDING_COMPACT: Padding = Padding {
 pub const ROW_ITEM_HEIGHT: f32 = DEFAULT_FONT_SIZE * LINE_HEIGHT_FACTOR + PADDING_COMPACT * 2.0;
 
 /// Default content padding inside collapsible sections
-/// This ensures borders of child elements are visible
-pub const COLLAPSIBLE_CONTENT_PADDING: f32 = 2.0;
+/// Provides breathing room for content (modern SaaS style)
+pub const COLLAPSIBLE_CONTENT_PADDING: f32 = 12.0;
+
+/// Gap between collapsible sections in sidebars
+pub const SECTION_GAP: f32 = 4.0;
+
+/// Corner radius for collapsible sections
+/// Using 0 for sharp corners - vertex-based rendering cannot anti-alias curves
+pub const COLLAPSIBLE_CORNER_RADIUS: f32 = 0.0;
+
+/// Inner padding for sidebar panels
+pub const PANEL_INNER_PADDING: f32 = 8.0;
 
 /// Offset to align color picker with swatch (compensates for content padding)
 pub const COLOR_PICKER_SWATCH_OFFSET: f32 = -COLLAPSIBLE_CONTENT_PADDING;

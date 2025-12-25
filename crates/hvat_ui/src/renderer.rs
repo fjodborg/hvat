@@ -593,6 +593,100 @@ impl Renderer {
         }
     }
 
+    /// Fill a rounded rectangle
+    /// Works on both native and WASM (pure vertex-based rendering)
+    pub fn fill_rounded_rect(&mut self, bounds: Bounds, color: Color, radius: f32) {
+        // If radius is 0, fall back to regular rect
+        if radius < 0.5 {
+            self.fill_rect(bounds, color);
+            return;
+        }
+
+        // Note: Rounded rects don't support CPU-side clipping well due to complex geometry.
+        // For most UI use cases (buttons, inputs), they're not clipped anyway.
+        // If clipping is needed, we fall back to a regular rect.
+        if self.clip_stack.last().is_some() {
+            // Check if we're completely outside the clip region
+            if let Some(clip) = self.clip_stack.last() {
+                if bounds.intersect(clip).is_none() {
+                    return;
+                }
+                // If partially clipped, just draw the full rounded rect
+                // (small visual imperfection but avoids complex corner clipping)
+            }
+        }
+
+        let (w, h) = self.window_size;
+        let (vertices, indices) = self.get_current_buffers();
+        ColorPipeline::append_rounded_rect(
+            vertices,
+            indices,
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height,
+            radius,
+            color.to_array(),
+            w as f32,
+            h as f32,
+        );
+    }
+
+    /// Stroke a rounded rectangle outline
+    /// Works on both native and WASM (pure vertex-based rendering)
+    pub fn stroke_rounded_rect(
+        &mut self,
+        bounds: Bounds,
+        color: Color,
+        radius: f32,
+        thickness: f32,
+    ) {
+        // If radius is 0, fall back to regular stroke rect
+        if radius < 0.5 {
+            self.stroke_rect(bounds, color, thickness);
+            return;
+        }
+
+        // Same clipping limitation as fill_rounded_rect
+        if let Some(clip) = self.clip_stack.last() {
+            if bounds.intersect(clip).is_none() {
+                return;
+            }
+        }
+
+        let (w, h) = self.window_size;
+        let (vertices, indices) = self.get_current_buffers();
+        ColorPipeline::append_stroke_rounded_rect(
+            vertices,
+            indices,
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height,
+            radius,
+            color.to_array(),
+            thickness,
+            w as f32,
+            h as f32,
+        );
+    }
+
+    /// Draw a multi-layer shadow for popup/overlay depth effect.
+    /// Creates 3 layers with decreasing alpha for a soft blur appearance.
+    pub fn draw_popup_shadow(&mut self, bounds: Bounds, radius: f32) {
+        for i in 0..3 {
+            let offset = 2.0 + i as f32 * 2.0;
+            let alpha = 0.25 - (i as f32 * 0.07);
+            let shadow_bounds = Bounds::new(
+                bounds.x + offset,
+                bounds.y + offset,
+                bounds.width,
+                bounds.height,
+            );
+            self.fill_rounded_rect(shadow_bounds, Color::rgba(0.0, 0.0, 0.0, alpha), radius);
+        }
+    }
+
     /// Internal fill_rect that doesn't apply clipping (for use by stroke_rect which pre-clips)
     fn fill_rect_no_clip(&mut self, bounds: Bounds, color: Color) {
         let (w, h) = self.window_size;
