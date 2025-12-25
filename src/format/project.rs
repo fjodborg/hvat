@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Annotation, AnnotationShape, Category};
+use crate::model::{Annotation, AnnotationShape, Category, Tag};
 use crate::state::ImageData;
 
 /// Complete project data for import/export.
@@ -41,12 +41,12 @@ pub struct ProjectData {
     /// List of images in the project with their annotations.
     pub images: Vec<ImageEntry>,
 
-    /// Category definitions.
+    /// Category definitions (for annotations).
     pub categories: Vec<CategoryEntry>,
 
-    /// Global tags available across all images.
+    /// Tag definitions (for images).
     #[serde(default)]
-    pub global_tags: Vec<String>,
+    pub tags: Vec<TagEntry>,
 
     /// Project metadata (creation date, tool version, etc.).
     #[serde(default)]
@@ -76,7 +76,7 @@ impl ProjectData {
             folder: PathBuf::new(),
             images: Vec::new(),
             categories: Vec::new(),
-            global_tags: Vec::new(),
+            tags: Vec::new(),
             metadata: ProjectMetadata::default(),
         }
     }
@@ -158,9 +158,9 @@ pub struct ImageEntry {
     /// Annotations on this image.
     pub annotations: Vec<AnnotationEntry>,
 
-    /// Tags selected for this image.
+    /// Tag IDs selected for this image.
     #[serde(default)]
-    pub tags: HashSet<String>,
+    pub tag_ids: HashSet<u32>,
 }
 
 impl ImageEntry {
@@ -177,7 +177,7 @@ impl ImageEntry {
             filename,
             dimensions: None,
             annotations: Vec::new(),
-            tags: HashSet::new(),
+            tag_ids: HashSet::new(),
         }
     }
 
@@ -384,6 +384,51 @@ impl CategoryEntry {
     }
 }
 
+/// Tag definition for export/import (image-level tags).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagEntry {
+    /// Unique identifier.
+    pub id: u32,
+
+    /// Display name.
+    pub name: String,
+
+    /// RGB color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+}
+
+impl TagEntry {
+    /// Create a new tag entry.
+    pub fn new(id: u32, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            color: None,
+        }
+    }
+
+    /// Create from an internal Tag.
+    pub fn from_tag(tag: &Tag) -> Self {
+        Self {
+            id: tag.id,
+            name: tag.name.clone(),
+            color: Some(tag.color),
+        }
+    }
+
+    /// Convert to an internal Tag.
+    pub fn to_tag(&self) -> Tag {
+        Tag::new(self.id, &self.name, self.color.unwrap_or([100, 140, 180]))
+    }
+
+    /// Set the color.
+    pub fn with_color(mut self, color: [u8; 3]) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
 /// Project metadata.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectMetadata {
@@ -489,20 +534,21 @@ fn is_leap_year(year: i32) -> bool {
 
 /// Conversion utilities for building ProjectData from app state.
 impl ProjectData {
-    /// Build project data from categories, global tags, and image data.
+    /// Build project data from categories, tags, and image data.
     pub fn from_app_state(
         folder: PathBuf,
         image_paths: &[PathBuf],
         categories: &[Category],
-        global_tags: &[String],
+        tags: &[Tag],
         get_image_data: impl Fn(&PathBuf) -> ImageData,
         get_dimensions: impl Fn(&PathBuf) -> Option<(u32, u32)>,
     ) -> Self {
         log::info!(
-            "ProjectData::from_app_state: folder={:?}, {} images, {} categories",
+            "ProjectData::from_app_state: folder={:?}, {} images, {} categories, {} tags",
             folder,
             image_paths.len(),
-            categories.len()
+            categories.len(),
+            tags.len()
         );
 
         let mut data = Self::new();
@@ -514,8 +560,8 @@ impl ProjectData {
             .map(CategoryEntry::from_category)
             .collect();
 
-        // Convert global tags
-        data.global_tags = global_tags.to_vec();
+        // Convert tags
+        data.tags = tags.iter().map(TagEntry::from_tag).collect();
 
         // Convert images and annotations
         for (idx, path) in image_paths.iter().enumerate() {
@@ -526,7 +572,7 @@ impl ProjectData {
                 entry = entry.with_dimensions(w, h);
             }
 
-            entry.tags = image_data.selected_tags;
+            entry.tag_ids = image_data.selected_tag_ids;
             entry.annotations = image_data
                 .annotations
                 .iter()

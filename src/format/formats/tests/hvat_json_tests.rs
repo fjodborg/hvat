@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::format::project::{
     AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry,
+    TagEntry,
 };
 
 /// Create a minimal test project with basic data.
@@ -29,18 +30,18 @@ fn create_full_project() -> ProjectData {
             .with_supercategory("structure"),
     );
 
-    // Global tags
-    data.global_tags = vec![
-        "reviewed".to_string(),
-        "difficult".to_string(),
-        "needs-check".to_string(),
+    // Tags
+    data.tags = vec![
+        TagEntry::new(1, "reviewed").with_color([100, 200, 100]),
+        TagEntry::new(2, "difficult").with_color([200, 100, 100]),
+        TagEntry::new(3, "needs-check").with_color([100, 100, 200]),
     ];
 
     // Image with various annotation types
     let mut image1 =
         ImageEntry::new(PathBuf::from("images/photo1.jpg")).with_dimensions(1920, 1080);
 
-    image1.tags.insert("reviewed".to_string());
+    image1.tag_ids.insert(1); // "reviewed"
 
     // Bounding box annotation
     image1.annotations.push(AnnotationEntry::new(
@@ -81,7 +82,7 @@ fn create_full_project() -> ProjectData {
     // Second image without annotations
     let mut image2 =
         ImageEntry::new(PathBuf::from("images/photo2.jpg")).with_dimensions(3840, 2160);
-    image2.tags.insert("difficult".to_string());
+    image2.tag_ids.insert(2); // "difficult"
     data.images.push(image2);
 
     data.metadata = ProjectMetadata::new();
@@ -95,7 +96,7 @@ fn test_project_data_new() {
     assert_eq!(data.version, ProjectData::CURRENT_VERSION);
     assert!(data.images.is_empty());
     assert!(data.categories.is_empty());
-    assert!(data.global_tags.is_empty());
+    assert!(data.tags.is_empty());
 }
 
 #[test]
@@ -171,15 +172,20 @@ fn test_full_serialization() {
         assert_eq!(orig.supercategory, load.supercategory);
     }
 
-    // Verify global tags
-    assert_eq!(original.global_tags, loaded.global_tags);
+    // Verify tags
+    assert_eq!(original.tags.len(), loaded.tags.len());
+    for (orig, load) in original.tags.iter().zip(loaded.tags.iter()) {
+        assert_eq!(orig.id, load.id);
+        assert_eq!(orig.name, load.name);
+        assert_eq!(orig.color, load.color);
+    }
 
     // Verify images
     assert_eq!(original.images.len(), loaded.images.len());
     for (orig, load) in original.images.iter().zip(loaded.images.iter()) {
         assert_eq!(orig.path, load.path);
         assert_eq!(orig.dimensions, load.dimensions);
-        assert_eq!(orig.tags, load.tags);
+        assert_eq!(orig.tag_ids, load.tag_ids);
         assert_eq!(orig.annotations.len(), load.annotations.len());
     }
 }
@@ -250,7 +256,7 @@ fn test_image_entry_builders() {
     assert_eq!(image.filename, "test.jpg");
     assert_eq!(image.dimensions, Some((1920, 1080)));
     assert!(image.annotations.is_empty());
-    assert!(image.tags.is_empty());
+    assert!(image.tag_ids.is_empty());
 }
 
 #[test]
@@ -289,7 +295,7 @@ fn test_deserialize_with_missing_optional_fields() {
     let data: ProjectData = serde_json::from_str(json).expect("Failed to deserialize");
 
     assert_eq!(data.version, "0.1.0");
-    assert!(data.global_tags.is_empty());
+    assert!(data.tags.is_empty());
     assert!(data.folder.as_os_str().is_empty());
 }
 

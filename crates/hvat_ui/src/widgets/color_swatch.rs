@@ -16,6 +16,8 @@ pub struct ColorSwatch<M> {
     height: Length,
     /// Whether the swatch is being hovered
     hovered: bool,
+    /// Whether to show filled color (true) or just border outline (false)
+    filled: bool,
     /// Callback when clicked
     on_click: Option<M>,
 }
@@ -28,6 +30,7 @@ impl<M> ColorSwatch<M> {
             width: Length::Fixed(20.0),
             height: Length::Fixed(20.0),
             hovered: false,
+            filled: true,
             on_click: None,
         }
     }
@@ -56,6 +59,15 @@ impl<M> ColorSwatch<M> {
         self
     }
 
+    /// Set whether the swatch shows filled color or just an outline
+    ///
+    /// When `filled` is true (default), the swatch displays the solid color.
+    /// When `filled` is false, only the border is drawn in the swatch color.
+    pub fn filled(mut self, filled: bool) -> Self {
+        self.filled = filled;
+        self
+    }
+
     /// Convert RGB bytes to Color
     fn to_render_color(&self) -> Color {
         Color::rgb(
@@ -76,16 +88,35 @@ impl<M: Clone + 'static> Widget<M> for ColorSwatch<M> {
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
-        // Draw the color fill
-        renderer.fill_rect(bounds, self.to_render_color());
+        let swatch_color = self.to_render_color();
+        log::trace!(
+            "ColorSwatch draw: filled={}, color={:?}, bounds={:?}",
+            self.filled,
+            self.color,
+            bounds
+        );
 
-        // Draw border (slightly darker when hovered)
-        let border_color = if self.hovered {
-            Color::rgb(0.8, 0.8, 0.85)
+        if self.filled {
+            // Draw the color fill
+            renderer.fill_rect(bounds, swatch_color);
+
+            // Draw border (slightly lighter when hovered)
+            let border_color = if self.hovered {
+                Color::rgb(0.8, 0.8, 0.85)
+            } else {
+                Color::BORDER
+            };
+            renderer.stroke_rect(bounds, border_color, 1.0);
         } else {
-            Color::BORDER
-        };
-        renderer.stroke_rect(bounds, border_color, 1.0);
+            // Outline mode: draw a visible border in the swatch color
+            // Use a thicker stroke (3px) so it's clearly visible
+            let border_color = if self.hovered {
+                swatch_color.lighten(0.2)
+            } else {
+                swatch_color
+            };
+            renderer.stroke_rect(bounds, border_color, 3.0);
+        }
     }
 
     fn on_event(&mut self, event: &Event, bounds: Bounds) -> EventResult<M> {

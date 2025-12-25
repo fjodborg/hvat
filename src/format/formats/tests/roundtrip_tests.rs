@@ -5,7 +5,9 @@
 
 use std::path::PathBuf;
 
-use crate::format::project::{AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ShapeEntry};
+use crate::format::project::{
+    AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ShapeEntry, TagEntry,
+};
 
 /// Create a project with all shape types for testing.
 fn create_comprehensive_project() -> ProjectData {
@@ -19,13 +21,16 @@ fn create_comprehensive_project() -> ProjectData {
     data.categories
         .push(CategoryEntry::new(3, "building").with_color([0, 0, 255]));
 
-    // Global tags
-    data.global_tags = vec!["verified".to_string(), "needs-review".to_string()];
+    // Tags
+    data.tags = vec![
+        TagEntry::new(1, "verified").with_color([100, 200, 100]),
+        TagEntry::new(2, "needs-review").with_color([200, 200, 100]),
+    ];
 
     // Image with all annotation types
     let mut image1 =
         ImageEntry::new(PathBuf::from("images/scene1.jpg")).with_dimensions(1920, 1080);
-    image1.tags.insert("verified".to_string());
+    image1.tag_ids.insert(1); // "verified"
 
     // Bounding boxes
     image1.annotations.push(AnnotationEntry::new(
@@ -107,7 +112,7 @@ fn test_hvat_json_roundtrip() {
     // Verify all data preserved
     assert_eq!(original.version, loaded.version);
     assert_eq!(original.categories.len(), loaded.categories.len());
-    assert_eq!(original.global_tags.len(), loaded.global_tags.len());
+    assert_eq!(original.tags.len(), loaded.tags.len());
     assert_eq!(original.images.len(), loaded.images.len());
     assert_eq!(original.total_annotations(), loaded.total_annotations());
 }
@@ -198,19 +203,19 @@ fn test_category_colors_preserved() {
 }
 
 #[test]
-fn test_image_tags_preserved() {
+fn test_image_tag_ids_preserved() {
     let mut original = ImageEntry::new(PathBuf::from("test.jpg"));
-    original.tags.insert("tag1".to_string());
-    original.tags.insert("tag2".to_string());
-    original.tags.insert("tag3".to_string());
+    original.tag_ids.insert(1);
+    original.tag_ids.insert(2);
+    original.tag_ids.insert(3);
 
     let json = serde_json::to_string(&original).unwrap();
     let loaded: ImageEntry = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(loaded.tags.len(), 3);
-    assert!(loaded.tags.contains("tag1"));
-    assert!(loaded.tags.contains("tag2"));
-    assert!(loaded.tags.contains("tag3"));
+    assert_eq!(loaded.tag_ids.len(), 3);
+    assert!(loaded.tag_ids.contains(&1));
+    assert!(loaded.tag_ids.contains(&2));
+    assert!(loaded.tag_ids.contains(&3));
 }
 
 #[test]
@@ -234,7 +239,7 @@ fn test_empty_project_roundtrip() {
     assert_eq!(original.version, loaded.version);
     assert!(loaded.images.is_empty());
     assert!(loaded.categories.is_empty());
-    assert!(loaded.global_tags.is_empty());
+    assert!(loaded.tags.is_empty());
 }
 
 #[test]
@@ -293,18 +298,21 @@ fn test_unicode_category_names_preserved() {
 }
 
 #[test]
-fn test_unicode_tags_preserved() {
-    let mut original = ImageEntry::new(PathBuf::from("test.jpg"));
-    original.tags.insert("已验证".to_string()); // Chinese for "verified"
-    original.tags.insert("élève".to_string()); // French
-    original.tags.insert("日本語".to_string()); // Japanese
+fn test_unicode_tag_names_preserved() {
+    // Test unicode tag names in TagEntry
+    let tags = vec![
+        TagEntry::new(1, "已验证"), // Chinese for "verified"
+        TagEntry::new(2, "élève"),  // French
+        TagEntry::new(3, "日本語"), // Japanese
+    ];
 
-    let json = serde_json::to_string(&original).unwrap();
-    let loaded: ImageEntry = serde_json::from_str(&json).unwrap();
+    let json = serde_json::to_string(&tags).unwrap();
+    let loaded: Vec<TagEntry> = serde_json::from_str(&json).unwrap();
 
-    assert!(loaded.tags.contains("已验证"));
-    assert!(loaded.tags.contains("élève"));
-    assert!(loaded.tags.contains("日本語"));
+    assert_eq!(loaded.len(), 3);
+    assert_eq!(loaded[0].name, "已验证");
+    assert_eq!(loaded[1].name, "élève");
+    assert_eq!(loaded[2].name, "日本語");
 }
 
 #[test]

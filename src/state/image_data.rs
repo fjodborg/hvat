@@ -10,8 +10,8 @@ use crate::model::{Annotation, AnnotationId, DrawingState, EditState};
 /// Data associated with a specific image (tags, annotations, etc.)
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ImageData {
-    /// Which global tags are selected/active for this image
-    pub selected_tags: HashSet<String>,
+    /// Which tag IDs are selected/active for this image
+    pub selected_tag_ids: HashSet<u32>,
     /// Annotations on this image
     pub annotations: Vec<Annotation>,
     /// Image dimensions (width, height) - stored when image is loaded
@@ -76,10 +76,29 @@ impl ImageDataStore {
             .or_insert_with(ImageData::default);
     }
 
-    /// Remove a tag from all images' selected tags
-    pub fn remove_tag_from_all(&mut self, tag: &str) {
+    /// Remove a tag from all images' selected tags by ID
+    pub fn remove_tag_from_all(&mut self, tag_id: u32) {
         for image_data in self.data.values_mut() {
-            image_data.selected_tags.remove(tag);
+            image_data.selected_tag_ids.remove(&tag_id);
         }
+    }
+
+    /// Remove all annotations with a specific category ID from all images.
+    /// Returns the total number of annotations removed.
+    pub fn remove_annotations_by_category(&mut self, category_id: u32) -> usize {
+        let mut total_removed = 0;
+        for image_data in self.data.values_mut() {
+            let before = image_data.annotations.len();
+            image_data
+                .annotations
+                .retain(|a| a.category_id != category_id);
+            total_removed += before - image_data.annotations.len();
+        }
+        total_removed
+    }
+
+    /// Iterate over all image data entries
+    pub fn iter(&self) -> impl Iterator<Item = (&PathBuf, &ImageData)> {
+        self.data.iter()
     }
 }

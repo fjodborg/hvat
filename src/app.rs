@@ -35,7 +35,7 @@ use crate::keybindings::{KeyBindings, KeybindTarget};
 use crate::message::Message;
 use crate::model::{
     Annotation, AnnotationShape, AnnotationTool, Category, DrawingState, EditState,
-    HANDLE_HIT_RADIUS, MIN_DRAG_DISTANCE, MIN_POLYGON_VERTICES, POLYGON_CLOSE_THRESHOLD,
+    HANDLE_HIT_RADIUS, MIN_DRAG_DISTANCE, MIN_POLYGON_VERTICES, POLYGON_CLOSE_THRESHOLD, Tag,
 };
 use crate::state::{
     AppSnapshot, GpuRenderState, GpuTextureCache, ImageDataStore, LoadedImage, ProjectState,
@@ -355,6 +355,10 @@ pub struct HvatApp {
     // Categories
     pub(crate) categories: Vec<Category>,
     pub(crate) selected_category: u32,
+    /// Category input text for adding new categories
+    pub(crate) category_input_text: String,
+    /// Category input state for adding new categories
+    pub(crate) category_input_state: TextInputState,
     /// Category currently being edited (for renaming)
     pub(crate) editing_category: Option<u32>,
     /// Text input for category name editing
@@ -368,11 +372,21 @@ pub struct HvatApp {
 
     // Per-image data (tags selection, annotations, etc.)
     pub(crate) image_data_store: ImageDataStore,
-    // Global tag registry (tags exist across all images)
-    pub(crate) global_tags: Vec<String>,
+    // Global tag registry (tags exist across all images, like categories but for images)
+    pub(crate) tags: Vec<Tag>,
+    /// Currently selected tag ID (for new tag assignments)
+    pub(crate) selected_tag: u32,
     // Tag input UI state (not per-image)
     pub(crate) tag_input_text: String,
     pub(crate) tag_input_state: TextInputState,
+    /// Tag currently being edited (by ID)
+    pub(crate) editing_tag: Option<u32>,
+    /// Text input for tag name editing
+    pub(crate) tag_name_input: String,
+    /// State for tag name text input
+    pub(crate) tag_name_input_state: TextInputState,
+    /// Tag ID with open color picker
+    pub(crate) color_picker_tag: Option<u32>,
 
     // Band sliders
     pub(crate) red_band_slider: SliderState,
@@ -553,6 +567,8 @@ impl HvatApp {
 
             categories: config.categories.into_iter().map(|c| c.into()).collect(),
             selected_category: 1,
+            category_input_text: String::new(),
+            category_input_state: TextInputState::default(),
             editing_category: None,
             category_name_input: String::new(),
             category_name_input_state: TextInputState::default(),
@@ -560,9 +576,14 @@ impl HvatApp {
             color_picker_state: ColorPickerState::default(),
 
             image_data_store: ImageDataStore::new(),
-            global_tags: Vec::new(),
+            tags: config.tags.into_iter().map(|t| t.into()).collect(),
+            selected_tag: 1, // Default to first tag
             tag_input_text: String::new(),
             tag_input_state: TextInputState::default(),
+            editing_tag: None,
+            tag_name_input: String::new(),
+            tag_name_input_state: TextInputState::default(),
+            color_picker_tag: None,
 
             red_band_slider: SliderState::new(0.0),
             green_band_slider: SliderState::new(1.0),
@@ -953,7 +974,9 @@ impl HvatApp {
 
     /// Build the current configuration from app state.
     fn build_config(&self) -> crate::config::AppConfig {
-        use crate::config::{AppConfig, CategoryConfig, KeyBindingsConfig, UserPreferences};
+        use crate::config::{
+            AppConfig, CategoryConfig, KeyBindingsConfig, TagConfig, UserPreferences,
+        };
 
         AppConfig {
             version: crate::config::CONFIG_VERSION,
@@ -967,6 +990,7 @@ impl HvatApp {
             },
             keybindings: KeyBindingsConfig::from(&self.keybindings),
             categories: self.categories.iter().map(CategoryConfig::from).collect(),
+            tags: self.tags.iter().map(TagConfig::from).collect(),
         }
     }
 
@@ -992,6 +1016,31 @@ impl HvatApp {
             } else {
                 log::debug!("Auto-saved configuration to localStorage");
             }
+        }
+    }
+
+    /// Delete a category and all annotations using it.
+    fn delete_category_internal(&mut self, id: u32, cat_name: &str) {
+        // Remove category from list
+        if let Some(pos) = self.categories.iter().position(|c| c.id == id) {
+            self.categories.remove(pos);
+
+            // Remove all annotations using this category from all images
+            let removed_count = self.image_data_store.remove_annotations_by_category(id);
+
+            // If the deleted category was selected, select the first available
+            if self.selected_category == id {
+                self.selected_category = self.categories.first().map(|c| c.id).unwrap_or(0);
+            }
+
+            self.auto_save.mark_dirty();
+            log::info!(
+                "Deleted category '{}' (id={}) and {} annotation(s)",
+                cat_name,
+                id,
+                removed_count
+            );
+            self.auto_save_config();
         }
     }
 
@@ -1313,6 +1362,9 @@ impl HvatApp {
                 // Apply categories
                 self.categories = config.categories.into_iter().map(|c| c.into()).collect();
 
+                // Apply tags
+                self.tags = config.tags.into_iter().map(|t| t.into()).collect();
+
                 // Ensure we have at least one category and a valid selection
                 if self.categories.is_empty() {
                     self.categories
@@ -1324,6 +1376,14 @@ impl HvatApp {
                     .any(|c| c.id == self.selected_category)
                 {
                     self.selected_category = self.categories[0].id;
+                }
+
+                // Ensure we have at least one tag and a valid selection
+                if self.tags.is_empty() {
+                    self.tags.push(Tag::new(1, "Default", [100, 140, 180]));
+                }
+                if !self.tags.iter().any(|t| t.id == self.selected_tag) {
+                    self.selected_tag = self.tags[0].id;
                 }
 
                 // Log state after applying
@@ -2581,17 +2641,18 @@ impl HvatApp {
             .unwrap_or_default();
 
         log::info!(
-            "to_project_data: folder={:?}, {} images, {} categories",
+            "to_project_data: folder={:?}, {} images, {} categories, {} tags",
             folder,
             image_paths.len(),
-            self.categories.len()
+            self.categories.len(),
+            self.tags.len()
         );
 
         let data = ProjectData::from_app_state(
             folder,
             &image_paths,
             &self.categories,
-            &self.global_tags,
+            &self.tags,
             |path| self.image_data_store.get(path),
             |path| self.get_image_dimensions(path),
         );
@@ -2672,7 +2733,7 @@ impl HvatApp {
         if !merge {
             // Clear existing data
             self.categories.clear();
-            self.global_tags.clear();
+            self.tags.clear();
             self.image_data_store = ImageDataStore::new();
         }
 
@@ -2684,10 +2745,11 @@ impl HvatApp {
             }
         }
 
-        // Apply global tags
-        for tag in &data.global_tags {
-            if !self.global_tags.contains(tag) {
-                self.global_tags.push(tag.clone());
+        // Apply tags
+        for tag_entry in &data.tags {
+            let exists = self.tags.iter().any(|t| t.id == tag_entry.id);
+            if !exists {
+                self.tags.push(tag_entry.to_tag());
             }
         }
 
@@ -2697,14 +2759,16 @@ impl HvatApp {
 
             if !merge {
                 image_data.annotations.clear();
-                image_data.selected_tags.clear();
+                image_data.selected_tag_ids.clear();
             }
 
             for ann_entry in &image_entry.annotations {
                 image_data.annotations.push(ann_entry.to_annotation());
             }
 
-            image_data.selected_tags.extend(image_entry.tags.clone());
+            image_data
+                .selected_tag_ids
+                .extend(image_entry.tag_ids.clone());
 
             // Update next_annotation_id
             if let Some(max_id) = image_data.annotations.iter().map(|a| a.id).max() {
@@ -2713,8 +2777,9 @@ impl HvatApp {
         }
 
         log::info!(
-            "Applied project data: {} categories, {} images, {} annotations",
+            "Applied project data: {} categories, {} tags, {} images, {} annotations",
             data.categories.len(),
+            data.tags.len(),
             data.images.len(),
             data.total_annotations()
         );
@@ -3015,16 +3080,28 @@ impl Application for HvatApp {
                     log::info!("Default category changed to: {}", id);
                 }
             }
+            Message::CategoryInputChanged(text, state) => {
+                self.category_input_text = text;
+                self.category_input_state = state;
+            }
             Message::AddCategory => {
-                let new_id = self.categories.iter().map(|c| c.id).max().unwrap_or(0) + 1;
-                self.categories.push(Category::new(
-                    new_id,
-                    &format!("Category {}", new_id),
-                    [200, 200, 100],
-                ));
-                self.auto_save.mark_dirty();
-                log::info!("Added new category: {}", new_id);
-                self.auto_save_config();
+                if !self.category_input_text.is_empty() {
+                    let new_id = self.categories.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+                    self.categories.push(Category::new(
+                        new_id,
+                        &self.category_input_text,
+                        [200, 200, 100],
+                    ));
+                    self.auto_save.mark_dirty();
+                    log::info!(
+                        "Added new category '{}': {}",
+                        self.category_input_text,
+                        new_id
+                    );
+                    self.auto_save_config();
+                    self.category_input_text.clear();
+                    self.category_input_state.cursor = 0;
+                }
             }
             Message::StartEditingCategory(id) => {
                 if let Some(cat) = self.categories.iter().find(|c| c.id == id) {
@@ -3102,10 +3179,77 @@ impl Application for HvatApp {
                 log::debug!("Color picker state changed: {:?}", state);
                 self.color_picker_state = state;
             }
+            Message::DeleteCategory(id) => {
+                // Find category name for confirmation message
+                if let Some(cat) = self.categories.iter().find(|c| c.id == id) {
+                    let cat_name = cat.name.clone();
+
+                    // Count annotations using this category
+                    let annotation_count: usize = self
+                        .image_data_store
+                        .iter()
+                        .map(|(_, data)| {
+                            data.annotations
+                                .iter()
+                                .filter(|a| a.category_id == id)
+                                .count()
+                        })
+                        .sum();
+
+                    let message = if annotation_count > 0 {
+                        format!(
+                            "Delete category '{}'?\n\nThis will also delete {} annotation(s) using this category.",
+                            cat_name, annotation_count
+                        )
+                    } else {
+                        format!("Delete category '{}'?", cat_name)
+                    };
+
+                    let confirmed;
+
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        // Use browser confirm dialog on WASM
+                        confirmed = web_sys::window()
+                            .and_then(|w| w.confirm_with_message(&message).ok())
+                            .unwrap_or(false);
+                    }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // On native, use rfd message dialog
+                        use rfd::MessageDialog;
+                        confirmed = MessageDialog::new()
+                            .set_title("Confirm Delete")
+                            .set_description(&message)
+                            .set_buttons(rfd::MessageButtons::YesNo)
+                            .show()
+                            == rfd::MessageDialogResult::Yes;
+                    }
+
+                    if confirmed {
+                        // Perform the deletion
+                        self.delete_category_internal(id, &cat_name);
+                    } else {
+                        log::info!("Category deletion cancelled by user");
+                    }
+                }
+            }
+            Message::ConfirmDeleteCategory(id) => {
+                // Direct deletion without confirmation (used internally)
+                if let Some(cat) = self.categories.iter().find(|c| c.id == id) {
+                    let cat_name = cat.name.clone();
+                    self.delete_category_internal(id, &cat_name);
+                }
+            }
 
             // Left Sidebar - Tags (global registry with per-image selection)
             Message::TagsToggled(state) => {
                 self.tags_collapsed = state;
+            }
+            Message::TagSelected(id) => {
+                self.selected_tag = id;
+                log::info!("Selected tag ID {}", id);
             }
             Message::TagInputChanged(text, state) => {
                 self.tag_input_text = text;
@@ -3113,42 +3257,125 @@ impl Application for HvatApp {
             }
             Message::AddTag => {
                 if !self.tag_input_text.is_empty() {
-                    let tag = self.tag_input_text.clone();
-                    // Add to global tag registry if not already present
-                    if !self.global_tags.contains(&tag) {
-                        self.global_tags.push(tag.clone());
-                        log::info!("Added tag '{}' to global registry", tag);
+                    let name = self.tag_input_text.trim().to_string();
+                    // Check if tag with same name already exists
+                    let exists = self.tags.iter().any(|t| t.name == name);
+                    if !exists {
+                        // Generate new ID
+                        let new_id = self.tags.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                        // Use a default color (blue-gray)
+                        let new_tag = Tag::new(new_id, &name, [100, 140, 180]);
+                        self.tags.push(new_tag);
+                        self.selected_tag = new_id;
+                        // Also apply it to the current image
+                        let path = self.current_image_path();
+                        let image_data = self.image_data_store.get_or_create(&path);
+                        image_data.selected_tag_ids.insert(new_id);
+                        self.auto_save.mark_dirty();
+                        log::info!("Added tag '{}' with ID {}", name, new_id);
                     }
-                    // Also select it for the current image
-                    let path = self.current_image_path();
-                    let image_data = self.image_data_store.get_or_create(&path);
-                    image_data.selected_tags.insert(tag.clone());
-                    self.auto_save.mark_dirty();
-                    log::info!("Selected tag '{}' for image {:?}", tag, path);
-
                     self.tag_input_text.clear();
                     self.tag_input_state.cursor = 0;
                 }
             }
-            Message::ToggleTag(tag) => {
+            Message::ToggleImageTag(tag_id) => {
                 let path = self.current_image_path();
                 let image_data = self.image_data_store.get_or_create(&path);
-                if image_data.selected_tags.contains(&tag) {
-                    image_data.selected_tags.remove(&tag);
-                    log::info!("Deselected tag '{}' on image {:?}", tag, path);
+                if image_data.selected_tag_ids.contains(&tag_id) {
+                    image_data.selected_tag_ids.remove(&tag_id);
+                    log::info!("Removed tag ID {} from image {:?}", tag_id, path);
                 } else {
-                    image_data.selected_tags.insert(tag.clone());
-                    log::info!("Selected tag '{}' on image {:?}", tag, path);
+                    image_data.selected_tag_ids.insert(tag_id);
+                    log::info!("Added tag ID {} to image {:?}", tag_id, path);
                 }
                 self.auto_save.mark_dirty();
             }
-            Message::RemoveTag(tag) => {
-                // Remove from global registry (affects all images)
-                self.global_tags.retain(|t| t != &tag);
-                // Also remove from all per-image selections
-                self.image_data_store.remove_tag_from_all(&tag);
-                self.auto_save.mark_dirty();
-                log::info!("Removed tag '{}' from global registry", tag);
+            Message::DeleteTag(tag_id) => {
+                // Remove from global registry
+                if let Some(pos) = self.tags.iter().position(|t| t.id == tag_id) {
+                    let tag_name = self.tags[pos].name.clone();
+                    self.tags.remove(pos);
+                    // Also remove from all per-image selections
+                    self.image_data_store.remove_tag_from_all(tag_id);
+                    // Update selected_tag if needed
+                    if self.selected_tag == tag_id {
+                        self.selected_tag = self.tags.first().map(|t| t.id).unwrap_or(0);
+                    }
+                    self.auto_save.mark_dirty();
+                    log::info!("Deleted tag '{}' (ID {})", tag_name, tag_id);
+                }
+            }
+            Message::StartEditingTag(tag_id) => {
+                if let Some(tag) = self.tags.iter().find(|t| t.id == tag_id) {
+                    self.editing_tag = Some(tag_id);
+                    self.tag_name_input = tag.name.clone();
+                    self.tag_name_input_state = TextInputState::default();
+                    self.tag_name_input_state.is_focused = true;
+                    log::info!("Started editing tag ID {}", tag_id);
+                }
+            }
+            Message::TagNameChanged(text, state) => {
+                self.tag_name_input = text;
+                self.tag_name_input_state = state;
+            }
+            Message::FinishEditingTag => {
+                if let Some(tag_id) = self.editing_tag.take() {
+                    let new_name = self.tag_name_input.trim().to_string();
+                    if !new_name.is_empty() {
+                        if let Some(tag) = self.tags.iter_mut().find(|t| t.id == tag_id) {
+                            let old_name = tag.name.clone();
+                            if new_name != old_name {
+                                tag.name = new_name.clone();
+                                self.auto_save.mark_dirty();
+                                log::info!(
+                                    "Renamed tag ID {} from '{}' to '{}'",
+                                    tag_id,
+                                    old_name,
+                                    new_name
+                                );
+                            }
+                        }
+                    }
+                }
+                self.tag_name_input.clear();
+                self.tag_name_input_state = TextInputState::default();
+            }
+            Message::CancelEditingTag => {
+                self.editing_tag = None;
+                self.tag_name_input.clear();
+                self.tag_name_input_state = TextInputState::default();
+                log::info!("Cancelled tag editing");
+            }
+            Message::ToggleTagColorPicker(tag_id) => {
+                if self.color_picker_tag == Some(tag_id) {
+                    self.color_picker_tag = None;
+                } else {
+                    self.color_picker_tag = Some(tag_id);
+                    // Close category color picker if open
+                    self.color_picker_category = None;
+                }
+            }
+            Message::CloseTagColorPicker => {
+                self.color_picker_tag = None;
+            }
+            Message::TagColorLiveUpdate(color) => {
+                // Live update the tag color while slider is being dragged
+                if let Some(tag_id) = self.color_picker_tag {
+                    if let Some(tag) = self.tags.iter_mut().find(|t| t.id == tag_id) {
+                        tag.color = color;
+                    }
+                }
+            }
+            Message::TagColorApply(color) => {
+                // Apply color and close picker
+                if let Some(tag_id) = self.color_picker_tag {
+                    if let Some(tag) = self.tags.iter_mut().find(|t| t.id == tag_id) {
+                        tag.color = color;
+                        self.auto_save.mark_dirty();
+                        log::info!("Applied color {:?} to tag ID {}", color, tag_id);
+                    }
+                    self.color_picker_tag = None;
+                }
             }
 
             // Left Sidebar Scroll

@@ -72,7 +72,9 @@ pub enum Message {
     CategoriesToggled(CollapsibleState),
     /// Category selected by ID
     CategorySelected(u32),
-    /// Add new category
+    /// Category input text changed (for adding new categories)
+    CategoryInputChanged(String, TextInputState),
+    /// Add new category from input
     AddCategory,
     /// Start editing a category name (by ID)
     StartEditingCategory(u32),
@@ -92,18 +94,40 @@ pub enum Message {
     CategoryColorApply([u8; 3]),
     /// Color picker state changed (drag state)
     ColorPickerStateChanged(ColorPickerState),
+    /// Request to delete a category (shows confirmation)
+    DeleteCategory(u32),
+    /// Confirmed deletion of a category (actually performs delete)
+    ConfirmDeleteCategory(u32),
 
     // Left Sidebar - Image Tags
     /// Tags section toggled
     TagsToggled(CollapsibleState),
+    /// Tag selected by ID
+    TagSelected(u32),
     /// Tag input text changed
     TagInputChanged(String, TextInputState),
     /// Add tag from input
     AddTag,
-    /// Toggle tag selection (on/off)
-    ToggleTag(String),
-    /// Remove tag by value
-    RemoveTag(String),
+    /// Toggle tag on current image (on/off) by ID
+    ToggleImageTag(u32),
+    /// Delete tag by ID
+    DeleteTag(u32),
+    /// Start editing a tag name (by ID)
+    StartEditingTag(u32),
+    /// Tag name edit input changed
+    TagNameChanged(String, TextInputState),
+    /// Finish editing tag name (submit)
+    FinishEditingTag,
+    /// Cancel editing tag name
+    CancelEditingTag,
+    /// Toggle color picker for a tag
+    ToggleTagColorPicker(u32),
+    /// Close tag color picker
+    CloseTagColorPicker,
+    /// Live color update from tag color picker
+    TagColorLiveUpdate([u8; 3]),
+    /// Apply color from tag palette selection
+    TagColorApply([u8; 3]),
 
     // Left Sidebar Scroll
     /// Left sidebar scrolled

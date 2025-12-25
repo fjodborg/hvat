@@ -34,7 +34,7 @@ mod traits;
 pub use auto_save::AutoSaveManager;
 pub use error::FormatError;
 pub use project::{
-    AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry,
+    AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry, TagEntry,
 };
 pub use registry::FormatRegistry;
 pub use traits::{

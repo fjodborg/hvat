@@ -59,7 +59,7 @@ impl LogLevel {
 }
 
 use crate::keybindings::{KeyBindings, MAX_CATEGORY_HOTKEYS};
-use crate::model::{Category, default_categories};
+use crate::model::{Category, Tag, default_categories, default_tags};
 
 /// Current configuration file format version.
 /// Increment this when making breaking changes to the config format.
@@ -81,8 +81,16 @@ pub struct AppConfig {
     /// Keybinding configuration
     pub keybindings: KeyBindingsConfig,
 
-    /// Category definitions
+    /// Category definitions (for annotations)
     pub categories: Vec<CategoryConfig>,
+
+    /// Tag definitions (for images)
+    #[serde(default = "default_tag_configs")]
+    pub tags: Vec<TagConfig>,
+}
+
+fn default_tag_configs() -> Vec<TagConfig> {
+    default_tags().iter().map(TagConfig::from).collect()
 }
 
 fn default_app_name() -> String {
@@ -241,6 +249,33 @@ impl From<CategoryConfig> for Category {
     }
 }
 
+/// Tag configuration for serialization (image-level tags).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagConfig {
+    /// Unique identifier for the tag
+    pub id: u32,
+    /// Display name of the tag
+    pub name: String,
+    /// RGB color for the tag
+    pub color: [u8; 3],
+}
+
+impl From<&Tag> for TagConfig {
+    fn from(tag: &Tag) -> Self {
+        Self {
+            id: tag.id,
+            name: tag.name.clone(),
+            color: tag.color,
+        }
+    }
+}
+
+impl From<TagConfig> for Tag {
+    fn from(config: TagConfig) -> Self {
+        Tag::new(config.id, &config.name, config.color)
+    }
+}
+
 impl AppConfig {
     /// Create a new configuration with default values.
     pub fn new() -> Self {
@@ -253,6 +288,7 @@ impl AppConfig {
                 .iter()
                 .map(CategoryConfig::from)
                 .collect(),
+            tags: default_tags().iter().map(TagConfig::from).collect(),
         }
     }
 
