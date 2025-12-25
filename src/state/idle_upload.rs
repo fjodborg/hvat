@@ -1,11 +1,11 @@
-//! Chunked GPU upload queue for WASM.
+//! Chunked GPU upload queue for background preloading.
 //!
 //! Queues texture layer uploads and processes them in small chunks during the main
 //! tick loop. This spreads GPU work across frames to avoid lag spikes during preloading.
 //!
 //! Architecture:
-//! 1. Worker decodes image AND packs into RGBA layers (off main thread)
-//! 2. Main thread receives pre-packed layers via postMessage
+//! 1. Background decoder (Worker on WASM, thread on native) decodes + packs into RGBA layers
+//! 2. Main thread receives pre-packed layers
 //! 3. Main thread creates GPU texture (allocation only, fast)
 //! 4. Each tick: upload CHUNK of rows to GPU (configurable blocking duration)
 //! 5. When all layers done: move texture to cache
@@ -17,15 +17,8 @@ use std::path::PathBuf;
 
 use hvat_gpu::GpuContext;
 
-use crate::constants::{BANDS_PER_LAYER, GPU_UPLOAD_ROWS_PER_TICK, MIN_TEXTURE_LAYERS};
-
-/// Calculate the number of texture layers needed for a given number of bands.
-///
-/// Packs bands into RGBA texture layers (4 bands per layer).
-/// Ensures at least `MIN_TEXTURE_LAYERS` for WebGL2 compatibility.
-pub fn calculate_num_layers(num_bands: usize) -> u32 {
-    ((num_bands + BANDS_PER_LAYER - 1) / BANDS_PER_LAYER).max(MIN_TEXTURE_LAYERS as usize) as u32
-}
+use super::preload_types::PackedLayer;
+use crate::constants::GPU_UPLOAD_ROWS_PER_TICK;
 
 /// Create a GPU texture for band data with the given dimensions and layers.
 ///
@@ -121,7 +114,7 @@ impl ChunkedUploadQueue {
         height: u32,
         num_bands: usize,
         num_layers: u32,
-        layers: Vec<super::preload_worker::PackedLayer>,
+        layers: Vec<PackedLayer>,
         device: &wgpu::Device,
     ) {
         log::info!(
@@ -142,86 +135,6 @@ impl ChunkedUploadQueue {
                 next_row: 0,
             })
             .collect();
-
-        // Create the texture upfront (fast, just allocation)
-        let texture = create_band_texture(device, width, height, num_layers);
-
-        self.uploads.push_back(ChunkedUpload {
-            path,
-            width,
-            height,
-            num_bands,
-            num_layers,
-            pending_layers,
-            texture,
-        });
-    }
-
-    /// Queue decoded image data for chunked upload (legacy - does RGBA packing on main thread).
-    ///
-    /// Pre-packs band data into RGBA layers immediately (CPU work).
-    /// Creates the GPU texture (allocation only).
-    /// Actual layer uploads happen via `process_one_layer`.
-    ///
-    /// NOTE: Prefer `queue_prepacked` when the worker has already done the RGBA packing.
-    #[allow(dead_code)]
-    pub fn queue_upload(
-        &mut self,
-        path: PathBuf,
-        bands: Vec<Vec<f32>>,
-        width: u32,
-        height: u32,
-        device: &wgpu::Device,
-    ) {
-        let num_bands = bands.len();
-        let num_layers = calculate_num_layers(num_bands);
-        let pixel_count = (width * height) as usize;
-
-        log::info!(
-            "Queueing chunked upload for {:?}: {}x{}, {} bands → {} layers",
-            path,
-            width,
-            height,
-            num_bands,
-            num_layers
-        );
-
-        // Pre-pack all layers into RGBA format (CPU work, done now)
-        let mut pending_layers = VecDeque::with_capacity(num_layers as usize);
-        for layer_idx in 0..num_layers {
-            let base_band = (layer_idx as usize) * BANDS_PER_LAYER;
-            let mut rgba_data = vec![0u8; pixel_count * 4];
-
-            // Pack up to BANDS_PER_LAYER bands into RGBA channels
-            for channel_idx in 0..BANDS_PER_LAYER {
-                let band_idx = base_band + channel_idx;
-                if band_idx >= num_bands {
-                    break;
-                }
-
-                let band = &bands[band_idx];
-                if band.len() != pixel_count {
-                    log::warn!(
-                        "Band {} has wrong size: {} vs expected {}",
-                        band_idx,
-                        band.len(),
-                        pixel_count
-                    );
-                    continue;
-                }
-
-                for (pixel_idx, &value) in band.iter().enumerate() {
-                    let byte_value = (value.clamp(0.0, 1.0) * 255.0) as u8;
-                    rgba_data[pixel_idx * 4 + channel_idx] = byte_value;
-                }
-            }
-
-            pending_layers.push_back(PendingLayer {
-                rgba_data,
-                layer_index: layer_idx,
-                next_row: 0,
-            });
-        }
 
         // Create the texture upfront (fast, just allocation)
         let texture = create_band_texture(device, width, height, num_layers);

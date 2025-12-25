@@ -13,45 +13,7 @@ use js_sys::{Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 
-/// Pre-packed RGBA layer data received from the worker, ready for GPU upload
-pub struct PackedLayer {
-    /// RGBA pixel data (width * height * 4 bytes)
-    pub rgba_data: Vec<u8>,
-    /// Layer index in the texture array
-    pub layer_index: u32,
-}
-
-/// Decoded and pre-packed image data received from the worker
-pub struct DecodedImage {
-    /// Path/name of the decoded image
-    pub path: PathBuf,
-    /// Image width in pixels
-    pub width: u32,
-    /// Image height in pixels
-    pub height: u32,
-    /// Number of spectral bands
-    pub num_bands: usize,
-    /// Number of texture layers
-    pub num_layers: u32,
-    /// Pre-packed RGBA layers ready for GPU upload
-    pub layers: Vec<PackedLayer>,
-}
-
-/// Error result from worker decode attempt
-pub struct DecodeError {
-    /// Path/name of the image that failed
-    pub path: PathBuf,
-    /// Error message describing the failure
-    pub error: String,
-}
-
-/// Result from the worker - either decoded data or an error
-pub enum WorkerResult {
-    /// Successfully decoded image
-    Decoded(DecodedImage),
-    /// Decode failed with error
-    Error(DecodeError),
-}
+use super::preload_types::{DecodeError, DecodeResult, DecodedImage, PackedLayer};
 
 /// Manages a Web Worker for async image decoding.
 ///
@@ -65,7 +27,7 @@ pub struct ImageDecoderWorker {
     /// Map from request ID to image path (for matching responses)
     pending: Rc<RefCell<HashMap<u32, PathBuf>>>,
     /// Completed results waiting to be processed by main thread
-    results: Rc<RefCell<Vec<WorkerResult>>>,
+    results: Rc<RefCell<Vec<DecodeResult>>>,
     /// Whether the worker has signaled it's ready
     ready: Rc<RefCell<bool>>,
     /// Messages queued before worker was ready
@@ -87,7 +49,7 @@ impl ImageDecoderWorker {
         let worker = Worker::new_with_options("./image-decoder-worker-wrapper.js", &options)
             .map_err(|e| format!("Failed to create worker: {:?}", e))?;
 
-        let results: Rc<RefCell<Vec<WorkerResult>>> = Rc::new(RefCell::new(Vec::new()));
+        let results: Rc<RefCell<Vec<DecodeResult>>> = Rc::new(RefCell::new(Vec::new()));
         let ready = Rc::new(RefCell::new(false));
         let pending: Rc<RefCell<HashMap<u32, PathBuf>>> = Rc::new(RefCell::new(HashMap::new()));
 
@@ -131,7 +93,7 @@ impl ImageDecoderWorker {
                     log::debug!("Worker decode error for {:?}: {}", path, error_str);
                     results_clone
                         .borrow_mut()
-                        .push(WorkerResult::Error(DecodeError {
+                        .push(DecodeResult::Error(DecodeError {
                             path,
                             error: error_str,
                         }));
@@ -188,7 +150,7 @@ impl ImageDecoderWorker {
 
             results_clone
                 .borrow_mut()
-                .push(WorkerResult::Decoded(DecodedImage {
+                .push(DecodeResult::Decoded(DecodedImage {
                     path,
                     width,
                     height,
@@ -279,7 +241,7 @@ impl ImageDecoderWorker {
     /// since the last call. The caller is responsible for processing these
     /// (e.g., uploading decoded data to GPU).
     #[allow(dead_code)]
-    pub fn take_results(&mut self) -> Vec<WorkerResult> {
+    pub fn take_results(&mut self) -> Vec<DecodeResult> {
         std::mem::take(&mut *self.results.borrow_mut())
     }
 
@@ -287,7 +249,7 @@ impl ImageDecoderWorker {
     ///
     /// Returns the oldest result, or None if no results are available.
     /// Use this to process one result per frame to avoid blocking.
-    pub fn take_one_result(&mut self) -> Option<WorkerResult> {
+    pub fn take_one_result(&mut self) -> Option<DecodeResult> {
         let mut results = self.results.borrow_mut();
         if results.is_empty() {
             None

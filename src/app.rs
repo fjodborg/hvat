@@ -22,6 +22,8 @@ use hvat_ui::{
     TooltipManager,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::constants::MAX_IN_FLIGHT_DECODES;
 use crate::constants::{
     DEFAULT_BRIGHTNESS, DEFAULT_CONTRAST, DEFAULT_GAMMA, DEFAULT_HUE, DEFAULT_RED_BAND,
     DEFAULT_TEST_BANDS, DEFAULT_TEST_HEIGHT, DEFAULT_TEST_WIDTH, MAX_GPU_PRELOAD_COUNT,
@@ -39,10 +41,10 @@ use crate::state::{
     AppSnapshot, GpuRenderState, GpuTextureCache, ImageDataStore, LoadedImage, ProjectState,
     SharedGpuPipeline,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::state::{DecodeResult, NativePreloadState, extract_images_from_zip_file, is_zip_path};
 #[cfg(target_arch = "wasm32")]
 use crate::state::{WasmPreloadState, extract_images_from_zip_bytes, is_zip_file};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::state::{extract_images_from_zip_file, is_zip_path};
 use crate::test_image::generate_test_hyperspectral;
 
 // ============================================================================
@@ -463,6 +465,11 @@ pub struct HvatApp {
     /// Groups all WASM-specific preloading fields
     #[cfg(target_arch = "wasm32")]
     wasm_preload: WasmPreloadState,
+
+    // Native preloading state (background thread + chunked uploads)
+    /// Groups all native-specific preloading fields
+    #[cfg(not(target_arch = "wasm32"))]
+    native_preload: Option<NativePreloadState>,
 }
 
 impl Default for HvatApp {
@@ -616,6 +623,10 @@ impl HvatApp {
             // WASM preloading state
             #[cfg(target_arch = "wasm32")]
             wasm_preload: WasmPreloadState::new(),
+
+            // Native preloading state
+            #[cfg(not(target_arch = "wasm32"))]
+            native_preload: NativePreloadState::new().ok(),
         }
     }
 
@@ -1547,7 +1558,7 @@ impl HvatApp {
     /// On Native: Decodes synchronously (one image per tick).
     #[cfg(target_arch = "wasm32")]
     fn do_preloading_step(&mut self, resources: &mut Resources<'_>) -> bool {
-        use crate::state::WorkerResult;
+        use crate::state::DecodeResult;
 
         // Early return checks - avoid borrowing self.project across function
         if self.project.is_none() || self.shared_pipeline.is_none() {
@@ -1588,7 +1599,7 @@ impl HvatApp {
             .and_then(|w| w.take_one_result());
         if let Some(result) = worker_result {
             match result {
-                WorkerResult::Decoded(decoded) => {
+                DecodeResult::Decoded(decoded) => {
                     // Don't queue if already in cache or already queued
                     if !self.gpu_cache.contains(&decoded.path)
                         && !self
@@ -1615,7 +1626,7 @@ impl HvatApp {
                         );
                     }
                 }
-                WorkerResult::Error(err) => {
+                DecodeResult::Error(err) => {
                     log::warn!("Worker decode failed for {:?}: {}", err.path, err.error);
                 }
             }
@@ -1723,13 +1734,127 @@ impl HvatApp {
         !to_preload.is_empty() || worker_has_work || chunked_pending
     }
 
-    /// Native preloading: decode synchronously (one image per tick).
+    /// Native preloading: async decode in background thread + chunked GPU upload.
+    ///
+    /// Uses the same three-stage pipeline as WASM:
+    /// 1. Background thread decodes + packs RGBA
+    /// 2. Chunked upload queue spreads GPU uploads across frames
+    /// 3. Cache insertion when complete
     #[cfg(not(target_arch = "wasm32"))]
     fn do_preloading_step(&mut self, resources: &mut Resources<'_>) -> bool {
-        self.do_preloading_step_sync(resources)
+        // Early return checks
+        if self.project.is_none() || self.shared_pipeline.is_none() {
+            return false;
+        }
+
+        if self
+            .project
+            .as_ref()
+            .map(|p| p.images.is_empty())
+            .unwrap_or(true)
+            || self.gpu_preload_count == 0
+        {
+            return false;
+        }
+
+        // If no native preload state, fall back to sync
+        let Some(ref mut native_preload) = self.native_preload else {
+            log::debug!("No native preload state, using sync fallback");
+            return self.do_preloading_step_sync(resources);
+        };
+
+        let gpu_ctx = resources.gpu_context();
+        let pipeline = self.shared_pipeline.as_ref().unwrap();
+
+        // Step 1: Process decoder results -> queue for chunked upload
+        if let Some(result) = native_preload.decoder.take_one_result() {
+            match result {
+                DecodeResult::Decoded(img) => {
+                    log::debug!(
+                        "Decoder finished {:?}: {}x{} with {} layers",
+                        img.path,
+                        img.width,
+                        img.height,
+                        img.num_layers
+                    );
+                    native_preload.chunked_upload_queue.queue_prepacked(
+                        img.path,
+                        img.width,
+                        img.height,
+                        img.num_bands,
+                        img.num_layers,
+                        img.layers,
+                        &gpu_ctx.device,
+                    );
+                }
+                DecodeResult::Error(err) => {
+                    log::warn!("Decode error for {:?}: {}", err.path, err.error);
+                }
+            }
+        }
+
+        // Step 2: Process one chunk of GPU upload
+        let did_gpu_work = native_preload
+            .chunked_upload_queue
+            .process_one_layer(gpu_ctx);
+        self.preload_did_gpu_work = did_gpu_work;
+
+        // Step 3: Move completed uploads to cache
+        for completed in native_preload.chunked_upload_queue.take_completed() {
+            self.gpu_cache.insert_from_texture(
+                gpu_ctx,
+                completed.path,
+                completed.texture,
+                completed.width,
+                completed.height,
+                completed.num_bands,
+                completed.num_layers,
+                pipeline.band_texture_layout(),
+            );
+        }
+
+        // Step 4: Request new decodes (limit in-flight)
+        let to_preload = self.update_gpu_cache_and_get_preload_list();
+
+        // Re-borrow native_preload after update_gpu_cache_and_get_preload_list
+        let Some(ref mut native_preload) = self.native_preload else {
+            return false;
+        };
+
+        for path in &to_preload {
+            let pending_count = native_preload.decoder.pending_count();
+            if pending_count >= MAX_IN_FLIGHT_DECODES {
+                break;
+            }
+
+            // Skip if already cached, being decoded, or queued for upload
+            if self.gpu_cache.contains(path)
+                || native_preload.decoder.is_pending(path)
+                || native_preload.chunked_upload_queue.is_queued(path)
+            {
+                continue;
+            }
+
+            // Load image data and send to decoder
+            if let Some(data) = self
+                .project
+                .as_ref()
+                .and_then(|p| p.get_image_data(path).ok())
+            {
+                log::debug!("Requesting decode for {:?}", path);
+                native_preload.decoder.request_decode(path.clone(), data);
+            }
+        }
+
+        // Check if there's more work to do
+        let chunked_pending = native_preload.chunked_upload_queue.has_pending()
+            || native_preload.chunked_upload_queue.has_completed();
+        let decoder_has_work = native_preload.decoder.pending_count() > 0;
+
+        !to_preload.is_empty() || decoder_has_work || chunked_pending
     }
 
-    /// Synchronous preloading fallback (used by native, and WASM if worker fails).
+    /// Synchronous preloading fallback (used if background thread/worker fails to spawn).
     fn do_preloading_step_sync(&mut self, resources: &mut Resources<'_>) -> bool {
         // Early return checks
         if self.project.is_none() || self.shared_pipeline.is_none() {

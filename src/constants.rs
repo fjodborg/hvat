@@ -113,19 +113,27 @@ pub const MAX_GPU_PRELOAD_COUNT: usize = 10;
 ///   - 128 rows = ~2MB per tick (~2ms blocking)
 ///   - 256 rows = ~4MB per tick (~4ms blocking)
 /// Set to 0 to upload entire layers at once (old behavior).
-#[cfg(target_arch = "wasm32")]
+/// Used by both WASM and native for consistent preloading behavior.
 pub const GPU_UPLOAD_ROWS_PER_TICK: u32 = 128;
 
 /// Number of spectral bands packed into each RGBA texture layer.
 /// Each layer stores 4 bands in R, G, B, A channels.
-#[cfg(target_arch = "wasm32")]
+/// Note: WASM worker binary has its own copy of this constant.
+#[cfg(not(target_arch = "wasm32"))]
 pub const BANDS_PER_LAYER: usize = 4;
 
 /// Minimum texture array layers for GPU textures.
 /// WebGL2 has a bug where single-layer texture arrays don't work correctly.
 /// This ensures at least 2 layers are always created as a workaround.
-#[cfg(target_arch = "wasm32")]
+/// Also applied on native for consistency.
+/// Note: WASM worker binary has its own copy of this constant.
+#[cfg(not(target_arch = "wasm32"))]
 pub const MIN_TEXTURE_LAYERS: u32 = 2;
+
+/// Maximum number of in-flight decode requests for background preloading.
+/// Limits memory usage by capping concurrent decodes.
+#[cfg(not(target_arch = "wasm32"))]
+pub const MAX_IN_FLIGHT_DECODES: usize = 3;
 
 // =============================================================================
 // Right Sidebar Sections
