@@ -478,12 +478,12 @@ impl<M: 'static> Widget<M> for Dropdown<M> {
             self.config.text_color,
         );
 
-        // Draw arrow indicator (Unicode triangles for modern look)
+        // Draw arrow indicator
         let arrow = if self.state.is_open {
-            "\u{25B4}"
+            "^" // open
         } else {
-            "\u{25BE}"
-        }; // ▴ and ▾
+            "v" // closed
+        };
         let arrow_x = button_bounds.right() - DROPDOWN_ARROW_WIDTH;
         renderer.text(
             arrow,

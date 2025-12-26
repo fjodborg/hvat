@@ -340,7 +340,7 @@ mod tests {
                     }
 
                     println!(
-                        "✓ Loaded {} - {}x{} with {} bands",
+                        "[OK] Loaded {} - {}x{} with {} bands",
                         path.display(),
                         hyperspectral.width,
                         hyperspectral.height,

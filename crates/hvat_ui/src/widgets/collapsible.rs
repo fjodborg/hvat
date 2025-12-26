@@ -598,11 +598,11 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
         let radius = self.config.corner_radius;
         renderer.fill_rounded_rect(header_bounds, header_bg, radius);
 
-        // Draw chevron icon (Unicode triangles for modern look)
+        // Draw chevron icon
         let icon = if self.state.is_expanded {
-            "\u{25BE}" // ▾ (down-pointing triangle)
+            "v" // expanded
         } else {
-            "\u{25B8}" // ▸ (right-pointing triangle)
+            ">" // collapsed
         };
         let icon_x = header_bounds.x + COLLAPSIBLE_HEADER_PADDING_X;
         let icon_y = header_bounds.y + (self.config.header_height - COLLAPSIBLE_ICON_SIZE) / 2.0;

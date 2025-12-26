@@ -223,21 +223,21 @@ impl UndoDemo {
 
             // Instructions
             c.text("How it works:").size(14.0);
-            c.text("• Global undo tracks entire demo state (counter + slider + text)")
+            c.text("- Global undo tracks entire demo state (counter + slider + text)")
                 .size(11.0);
-            c.text("• Counter changes are recorded immediately")
+            c.text("- Counter changes are recorded immediately")
                 .size(11.0);
-            c.text("• Slider snapshots are saved when drag/input starts")
+            c.text("- Slider snapshots are saved when drag/input starts")
                 .size(11.0);
-            c.text("• Text snapshots are saved when input gains focus")
+            c.text("- Text snapshots are saved when input gains focus")
                 .size(11.0);
-            c.text("• Undo/Redo restores the full state snapshot")
+            c.text("- Undo/Redo restores the full state snapshot")
                 .size(11.0);
             c.text("");
             c.text("Keyboard shortcuts:").size(14.0);
-            c.text("• Ctrl+Z = Undo").size(11.0);
-            c.text("• Ctrl+Y = Redo (Windows style)").size(11.0);
-            c.text("• Ctrl+Shift+Z = Redo (Mac style)").size(11.0);
+            c.text("- Ctrl+Z = Undo").size(11.0);
+            c.text("- Ctrl+Y = Redo (Windows style)").size(11.0);
+            c.text("- Ctrl+Shift+Z = Redo (Mac style)").size(11.0);
         })
     }
 

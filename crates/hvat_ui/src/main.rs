@@ -124,7 +124,7 @@ impl Application for UnifiedDemo {
                 r.text(format!("Current: {}", tab_name));
             });
 
-            c.text("────────────────────────────────────────");
+            c.text("----------------------------------------");
 
             // Active demo content
             let demo_content = match self.active_tab {

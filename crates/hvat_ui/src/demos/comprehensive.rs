@@ -689,7 +689,7 @@ impl ComprehensiveDemo {
         sidebar_ctx.text("");
 
         // Separator
-        sidebar_ctx.text("────────────────────");
+        sidebar_ctx.text("--------------------");
         sidebar_ctx.text("Demo Sliders").size(14.0);
         sidebar_ctx
             .text("(values stored, no image effect)")
@@ -763,7 +763,7 @@ impl ComprehensiveDemo {
             .on_click(wrap_reset(ComprehensiveMessage::ResetAdjustments));
 
         sidebar_ctx.text("");
-        sidebar_ctx.text("────────────────────");
+        sidebar_ctx.text("--------------------");
         sidebar_ctx.text("Keyboard shortcuts:").size(11.0);
         sidebar_ctx.text("0 - Zoom to 100%").size(10.0);
         sidebar_ctx.text("F - Fit to window").size(10.0);

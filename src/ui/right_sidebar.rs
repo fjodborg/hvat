@@ -278,7 +278,7 @@ impl HvatApp {
                     .on_undo_point(undo_ctx.callback_with_label("gamma"))
                     .build();
 
-                c.text(format!("Hue: {:.0}°", hue_slider.value))
+                c.text(format!("Hue: {:.0} deg", hue_slider.value))
                     .size(FONT_SIZE_BODY);
                 c.slider(HUE_MIN, HUE_MAX)
                     .state(&hue_slider)

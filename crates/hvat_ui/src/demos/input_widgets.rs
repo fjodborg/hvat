@@ -191,17 +191,17 @@ impl InputWidgetsDemo {
 
             // Instructions
             c.text("Controls:").size(14.0);
-            c.text("• Slider: Click/drag track or thumb, scroll wheel, arrow keys when hovered")
+            c.text("- Slider: Click/drag track or thumb, scroll wheel, arrow keys when hovered")
                 .size(11.0);
-            c.text("• Input field: Click to focus, type value, Enter/Escape to confirm")
+            c.text("- Input field: Click to focus, type value, Enter/Escape to confirm")
                 .size(11.0);
-            c.text("• Number input: Click +/- buttons, Up/Down arrows, scroll wheel")
+            c.text("- Number input: Click +/- buttons, Up/Down arrows, scroll wheel")
                 .size(11.0);
             c.text("");
             c.text("Focus behavior:").size(14.0);
-            c.text("• Click outside any input to blur (deselect) it")
+            c.text("- Click outside any input to blur (deselect) it")
                 .size(11.0);
-            c.text("• Clicking +/- buttons blurs the number input field")
+            c.text("- Clicking +/- buttons blurs the number input field")
                 .size(11.0);
         })
     }
