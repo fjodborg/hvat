@@ -3373,6 +3373,7 @@ impl Application for HvatApp {
             }
             Message::CloseTagColorPicker => {
                 self.color_picker_tag = None;
+                self.color_picker_state = ColorPickerState::default();
             }
             Message::TagColorLiveUpdate(color) => {
                 // Live update the tag color while slider is being dragged
@@ -3391,6 +3392,7 @@ impl Application for HvatApp {
                         log::info!("Applied color {:?} to tag ID {}", color, tag_id);
                     }
                     self.color_picker_tag = None;
+                    self.color_picker_state = ColorPickerState::default();
                 }
             }
 
@@ -4225,15 +4227,6 @@ impl Application for HvatApp {
                 {
                     self.tooltip_manager.force_show();
                     return Some(Message::TooltipBecameVisible);
-                }
-            }
-            Event::GlobalMousePress { .. } => {
-                // Close any open color pickers before widgets process the click.
-                // This allows clicking elsewhere to close, and clicking a swatch
-                // to close one picker and open another in a single click.
-                if self.color_picker_category.is_some() || self.color_picker_tag.is_some() {
-                    self.color_picker_category = None;
-                    self.color_picker_tag = None;
                 }
             }
             _ => {}
