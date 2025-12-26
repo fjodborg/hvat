@@ -29,6 +29,8 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo fmt --all -- --check
+          # TODO, This is a workdaround and should get a proper fix (Generates version file)
+          cargo build
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
           trunk build --release --public-url "/${REPO_NAME}/"
 
