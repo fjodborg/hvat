@@ -4,6 +4,10 @@
 
 **Hyperspectral Visualization and Annotation Tool** — A GPU-accelerated application for viewing and annotating hyperspectral and RGB images. Runs in both native and WASM environments.
 
+## Demo
+
+[Live demo](https://fjodborg.github.io/hvat/)
+
 ## Why another annotation tool?
 
 I built this out of frustration with existing tools that either only work with RGB images, don't match my workflow, or are so outdated that they lack GPU acceleration and multithreading support.
@@ -100,6 +104,7 @@ trunk serve --release  # Open the app under localhost:8080
 - **Wasm gpu rendering** — There will sometimes be lag spikes when preloading many images at once, but it is worth.
 - **Native drag-and-drop not supported on Wayland** — Winit doesn't support drag-and-drop on Wayland. I use Wayland so i couldn't test it properly. 
 - **Only tested on Linux** — Windows and macOS support not verified.
+- **Annotation import is still buggy** — Importing annotations is still buggy and needs some love.
 
 </details>
 
