@@ -3113,8 +3113,15 @@ impl Application for HvatApp {
                 }
             }
             Message::CategoryNameChanged(text, state) => {
-                self.category_name_input = text;
-                self.category_name_input_state = state;
+                // If focus was lost (clicked elsewhere), cancel editing
+                if self.category_name_input_state.is_focused && !state.is_focused {
+                    self.editing_category = None;
+                    self.category_name_input.clear();
+                    log::info!("Category editing cancelled (focus lost)");
+                } else {
+                    self.category_name_input = text;
+                    self.category_name_input_state = state;
+                }
             }
             Message::FinishEditingCategory => {
                 if let Some(id) = self.editing_category {
@@ -3141,6 +3148,8 @@ impl Application for HvatApp {
                     self.color_picker_category = None;
                     log::info!("Closed color picker for category: {}", id);
                 } else {
+                    // Close any other open picker (tag or different category)
+                    self.color_picker_tag = None;
                     self.color_picker_category = Some(id);
                     log::info!("Opened color picker for category: {}", id);
                 }
@@ -3315,8 +3324,15 @@ impl Application for HvatApp {
                 }
             }
             Message::TagNameChanged(text, state) => {
-                self.tag_name_input = text;
-                self.tag_name_input_state = state;
+                // If focus was lost (clicked elsewhere), cancel editing
+                if self.tag_name_input_state.is_focused && !state.is_focused {
+                    self.editing_tag = None;
+                    self.tag_name_input.clear();
+                    log::info!("Tag editing cancelled (focus lost)");
+                } else {
+                    self.tag_name_input = text;
+                    self.tag_name_input_state = state;
+                }
             }
             Message::FinishEditingTag => {
                 if let Some(tag_id) = self.editing_tag.take() {
@@ -4209,6 +4225,15 @@ impl Application for HvatApp {
                 {
                     self.tooltip_manager.force_show();
                     return Some(Message::TooltipBecameVisible);
+                }
+            }
+            Event::GlobalMousePress { .. } => {
+                // Close any open color pickers before widgets process the click.
+                // This allows clicking elsewhere to close, and clicking a swatch
+                // to close one picker and open another in a single click.
+                if self.color_picker_category.is_some() || self.color_picker_tag.is_some() {
+                    self.color_picker_category = None;
+                    self.color_picker_tag = None;
                 }
             }
             _ => {}

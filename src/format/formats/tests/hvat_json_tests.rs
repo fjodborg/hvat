@@ -3,8 +3,7 @@
 use std::path::PathBuf;
 
 use crate::format::project::{
-    AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry,
-    TagEntry,
+    AnnotationEntry, CategoryEntry, ImageEntry, ProjectData, ProjectMetadata, ShapeEntry, TagEntry,
 };
 
 /// Create a minimal test project with basic data.

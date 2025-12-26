@@ -82,7 +82,7 @@ fn build_item_row(
             .on_change(on_name_change)
             .on_submit(move |_| submit_msg.clone())
             .build();
-        // OK button to confirm
+        // OK button to confirm (same width as Edit button)
         r.button("OK")
             .width(Length::Fixed(ACTION_BUTTON_WIDTH))
             .padding(BUTTON_PADDING_COMPACT)
@@ -104,12 +104,13 @@ fn build_item_row(
             .width(Length::Fixed(ACTION_BUTTON_WIDTH))
             .padding(BUTTON_PADDING_COMPACT)
             .on_click(on_edit_click);
-        // Delete button
-        r.button("x")
-            .width(Length::Fixed(20.0))
-            .padding(BUTTON_PADDING_COMPACT)
-            .on_click(on_delete_click);
     }
+
+    // Delete button - always visible to keep layout consistent
+    r.button("x")
+        .width(Length::Fixed(20.0))
+        .padding(BUTTON_PADDING_COMPACT)
+        .on_click(on_delete_click);
 }
 
 /// Get tooltip content for an annotation tool
