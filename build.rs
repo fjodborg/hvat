@@ -126,9 +126,12 @@ pub fn license_summary() -> Vec<(&'static str, usize)> {
 
 /// Generate git commit hash and expose it as an environment variable
 fn generate_git_hash() {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+
     // Try to get the git commit hash
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short=7", "HEAD"])
+        .current_dir(&manifest_dir)
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -136,13 +139,14 @@ fn generate_git_hash() {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Check if there are uncommitted changes
+    // Check if there are uncommitted changes to tracked files only
+    // Using "git diff --quiet HEAD" which only looks at tracked files
+    // and ignores untracked files (unlike git status --porcelain)
     let is_dirty = Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| !o.stdout.is_empty())
+        .args(["diff", "--quiet", "HEAD"])
+        .current_dir(&manifest_dir)
+        .status()
+        .map(|s| !s.success()) // Non-zero exit = there are changes
         .unwrap_or(false);
 
     let git_hash = if is_dirty {
