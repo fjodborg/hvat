@@ -1,5 +1,7 @@
 //! Hyperspectral image data structure and loading.
 
+use crate::data::LoaderRegistry;
+
 /// CPU-side hyperspectral data, used for initial upload to GPU.
 pub struct HyperspectralData {
     /// Band data as flattened f32 arrays (one per band)
@@ -55,47 +57,34 @@ impl HyperspectralData {
     #[cfg(not(target_arch = "wasm32"))]
     #[allow(dead_code)] // Kept for direct native file loading use cases
     pub fn from_image_file(path: &std::path::Path) -> Result<Self, String> {
-        let img = image::open(path)
-            .map_err(|e| format!("Failed to open image: {}", e))?
-            .to_rgba8();
-
-        Self::from_rgba_image(img)
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read file: {}", e))?;
+        let filename = path.file_name().and_then(|n| n.to_str());
+        Self::from_bytes_with_hint(&data, filename)
     }
 
-    /// Load from raw image bytes (works on both WASM and native).
+    /// Load from raw bytes, auto-detecting the format.
     ///
-    /// This is the preferred method for cross-platform image loading.
+    /// This is the preferred method for cross-platform loading.
+    /// Uses the `LoaderRegistry` to detect and load various formats including:
+    /// - Standard images (PNG, JPEG, BMP, TIFF, WebP)
+    /// - NumPy arrays (.npy)
+    ///
     /// Use with `ProjectState::get_image_data()` for unified access.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        let img = image::load_from_memory(data)
-            .map_err(|e| format!("Failed to decode image: {}", e))?
-            .to_rgba8();
-
-        Self::from_rgba_image(img)
+        Self::from_bytes_with_hint(data, None)
     }
 
-    /// Convert an RGBA image to hyperspectral data.
-    /// Extracts RGB channels as 3 bands.
-    fn from_rgba_image(img: image::RgbaImage) -> Result<Self, String> {
-        let width = img.width();
-        let height = img.height();
-        let pixel_count = (width * height) as usize;
+    /// Load from raw bytes with an optional filename hint for format detection.
+    ///
+    /// The filename hint helps the loader registry choose the right loader
+    /// based on file extension before falling back to magic byte detection.
+    pub fn from_bytes_with_hint(data: &[u8], filename: Option<&str>) -> Result<Self, String> {
+        let registry = LoaderRegistry::new();
+        registry.load(data, filename).map_err(|e| e.to_string())
+    }
 
-        let mut r_band = Vec::with_capacity(pixel_count);
-        let mut g_band = Vec::with_capacity(pixel_count);
-        let mut b_band = Vec::with_capacity(pixel_count);
-
-        for pixel in img.pixels() {
-            r_band.push(pixel[0] as f32 / 255.0);
-            g_band.push(pixel[1] as f32 / 255.0);
-            b_band.push(pixel[2] as f32 / 255.0);
-        }
-
-        Ok(Self {
-            bands: vec![r_band, g_band, b_band],
-            width,
-            height,
-            labels: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
-        })
+    /// Get the number of bands.
+    pub fn num_bands(&self) -> usize {
+        self.bands.len()
     }
 }

@@ -25,8 +25,7 @@ const ACTION_BUTTON_WIDTH: f32 = 40.0;
 /// - `hotkey_str`: Hotkey indicator text (e.g., "1", "2")
 /// - `show_hotkey`: Whether to show the hotkey indicator
 /// - `color`: RGB color for the swatch
-/// - `filled`: Whether the swatch should be filled (true) or outline only (false)
-/// - `is_selected`: Whether this item is selected (adds * prefix to name)
+/// - `filled`: Whether the swatch should be filled and show star indicator
 /// - `is_editing`: Whether we're in edit mode for this item
 /// - `name`: The display name
 /// - `name_input`: Current text in the name input field (when editing)
@@ -44,7 +43,6 @@ fn build_item_row(
     show_hotkey: bool,
     color: [u8; 3],
     filled: bool,
-    is_selected: bool,
     is_editing: bool,
     name: &str,
     name_input: &str,
@@ -88,8 +86,10 @@ fn build_item_row(
             .padding(BUTTON_PADDING_COMPACT)
             .on_click(on_name_submit);
     } else {
-        // Show name as button with selection indicator
-        let label = if is_selected {
+        // Show name as button with star indicator when filled
+        // For categories: filled when selected (shows star)
+        // For tags: filled when applied to current image (shows star)
+        let label = if filled {
             format!("* {}", name)
         } else {
             name.to_string()
@@ -176,7 +176,6 @@ impl HvatApp {
         let color_picker_state = self.color_picker_state;
         // Global tags (persist across all images, like categories)
         let tags = self.tags.clone();
-        let selected_tag = self.selected_tag;
         // Per-image: which tag IDs are selected for the current image
         let current_image_data = self.image_data_store.get(&self.current_image_path());
         let selected_tag_ids = current_image_data.selected_tag_ids;
@@ -301,8 +300,7 @@ impl HvatApp {
                             &hotkey_str,
                             cat_index < 10,
                             cat_color,
-                            true, // Categories always filled
-                            is_selected,
+                            is_selected, // Categories: filled and starred when selected
                             is_editing,
                             &cat_name,
                             &category_name_input,
@@ -356,7 +354,6 @@ impl HvatApp {
             .on_toggle(Message::TagsToggled)
             .content(|c| {
                 for (tag_index, tag) in tags.iter().enumerate() {
-                    let is_selected = tag.id == selected_tag;
                     let is_on_image = selected_tag_ids.contains(&tag.id);
                     let is_editing = editing_tag == Some(tag.id);
                     let tag_id = tag.id;
@@ -370,8 +367,7 @@ impl HvatApp {
                             &hotkey_str,
                             tag_index < 10,
                             tag_color,
-                            is_on_image, // Tags: filled when applied to current image
-                            is_selected,
+                            is_on_image, // Tags: filled and starred when applied to current image
                             is_editing,
                             &tag_name,
                             &tag_name_input,

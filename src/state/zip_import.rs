@@ -12,7 +12,7 @@ use std::path::Path;
 use zip::ZipArchive;
 
 use super::LoadedImage;
-use super::project::IMAGE_EXTENSIONS;
+use super::project::is_supported_filename;
 
 /// Check if a filename has a ZIP extension.
 #[cfg(target_arch = "wasm32")]
@@ -29,16 +29,14 @@ pub fn is_zip_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Check if a filename has a supported image extension (for ZIP entry filtering).
-fn is_image_entry(name: &str) -> bool {
+/// Check if a filename has a supported extension (for ZIP entry filtering).
+fn is_supported_entry(name: &str) -> bool {
     let lower = name.to_lowercase();
     // Skip hidden files and macOS metadata
     if lower.contains("__macosx") || lower.contains("/.") || lower.starts_with('.') {
         return false;
     }
-    IMAGE_EXTENSIONS
-        .iter()
-        .any(|ext| lower.ends_with(&format!(".{}", ext)))
+    is_supported_filename(name)
 }
 
 /// Extract images from a ZIP archive reader.
@@ -71,8 +69,8 @@ fn extract_images_from_archive<R: Read + Seek>(
             continue;
         }
 
-        // Check if it's an image file
-        if !is_image_entry(&name) {
+        // Check if it's a supported file
+        if !is_supported_entry(&name) {
             log::trace!("Skipping non-image: {}", name);
             continue;
         }
@@ -167,13 +165,14 @@ mod tests {
     }
 
     #[test]
-    fn test_is_image_entry() {
-        assert!(is_image_entry("image.png"));
-        assert!(is_image_entry("folder/image.jpg"));
-        assert!(is_image_entry("deep/folder/image.JPEG"));
-        assert!(!is_image_entry("__MACOSX/._image.png"));
-        assert!(!is_image_entry(".hidden.png"));
-        assert!(!is_image_entry("folder/.hidden.jpg"));
-        assert!(!is_image_entry("document.txt"));
+    fn test_is_supported_entry() {
+        assert!(is_supported_entry("image.png"));
+        assert!(is_supported_entry("folder/image.jpg"));
+        assert!(is_supported_entry("deep/folder/image.JPEG"));
+        assert!(is_supported_entry("data.npy")); // NumPy files are now supported
+        assert!(!is_supported_entry("__MACOSX/._image.png"));
+        assert!(!is_supported_entry(".hidden.png"));
+        assert!(!is_supported_entry("folder/.hidden.jpg"));
+        assert!(!is_supported_entry("document.txt"));
     }
 }

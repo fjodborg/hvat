@@ -2,28 +2,38 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use hvat_ui::FileTreeNode;
 
-/// Supported image extensions
-pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp"];
+use crate::data::LoaderRegistry;
 
-/// Check if a filename (string) has a supported image extension.
-/// Works with both full paths and just filenames.
-#[cfg(target_arch = "wasm32")]
-pub fn is_image_filename(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    IMAGE_EXTENSIONS
-        .iter()
-        .any(|ext| lower.ends_with(&format!(".{}", ext)))
+/// Lazily initialized loader registry for format detection.
+static LOADER_REGISTRY: LazyLock<LoaderRegistry> = LazyLock::new(LoaderRegistry::new);
+
+/// Get the list of supported file extensions from the loader registry.
+pub fn supported_extensions() -> Vec<&'static str> {
+    LOADER_REGISTRY.supported_extensions()
 }
 
-/// Check if a path has a supported image extension
+/// Check if a filename (string) has a supported extension.
+/// Works with both full paths and just filenames.
+pub fn is_supported_filename(name: &str) -> bool {
+    LOADER_REGISTRY.is_supported_file(name)
+}
+
+/// Legacy alias for backwards compatibility.
+#[cfg(target_arch = "wasm32")]
+pub fn is_image_filename(name: &str) -> bool {
+    is_supported_filename(name)
+}
+
+/// Check if a path has a supported extension.
 #[cfg(not(target_arch = "wasm32"))]
-fn is_image_file(path: &PathBuf) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+fn is_supported_file(path: &PathBuf) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| is_supported_filename(name))
         .unwrap_or(false)
 }
 
@@ -57,7 +67,7 @@ impl ProjectState {
             .map_err(|e| format!("Failed to read folder: {}", e))?
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
-            .filter(|path| path.is_file() && is_image_file(path))
+            .filter(|path| path.is_file() && is_supported_file(path))
             .collect();
 
         if images.is_empty() {
@@ -112,7 +122,7 @@ impl ProjectState {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
 
-            if path.is_file() && is_image_file(&path) {
+            if path.is_file() && is_supported_file(&path) {
                 images.push(path);
             } else if path.is_dir() {
                 // Recursively scan subdirectory
@@ -137,7 +147,7 @@ impl ProjectState {
         let mut images: Vec<PathBuf> = Vec::new();
 
         for path in &paths {
-            if path.is_file() && is_image_file(path) {
+            if path.is_file() && is_supported_file(path) {
                 images.push(path.clone());
             } else if path.is_dir() {
                 if let Err(e) = Self::scan_folder_recursive(path, &mut images) {
