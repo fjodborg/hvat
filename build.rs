@@ -133,8 +133,16 @@ fn generate_version_js() {
          window.HVAT_VERSION = '{version}';\n"
     );
 
-    if let Err(e) = fs::write(&dest_path, js_content) {
-        eprintln!("cargo:warning=Failed to write generated-version.js: {}", e);
+    // Only write if content changed to avoid triggering unnecessary rebuilds
+    let should_write = match fs::read_to_string(&dest_path) {
+        Ok(existing) => existing != js_content,
+        Err(_) => true, // File doesn't exist, write it
+    };
+
+    if should_write {
+        if let Err(e) = fs::write(&dest_path, js_content) {
+            eprintln!("cargo:warning=Failed to write generated-version.js: {}", e);
+        }
     }
 
     // Rerun if Cargo.toml version changes or if the output file is deleted
