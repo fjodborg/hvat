@@ -7,7 +7,7 @@ use hvat_ui::{BorderSides, Context, Element, Panel, Row, Text};
 
 use crate::app::HvatApp;
 use crate::message::Message;
-use crate::ui::APP_VERSION;
+use crate::ui::{APP_VERSION, GIT_HASH};
 
 impl HvatApp {
     /// Build the top bar with navigation and control buttons.
@@ -56,7 +56,8 @@ impl HvatApp {
                 .on_click(Message::ToggleSettings);
             // Spacer to push version to the right
             r.add(Element::new(Text::new("").width(Length::Fill(1.0))));
-            r.text(format!("v{}", APP_VERSION)).size(FONT_SIZE_SMALL);
+            r.text(format!("v{} ({})", APP_VERSION, GIT_HASH))
+                .size(FONT_SIZE_SMALL);
         });
 
         let theme = current_theme();

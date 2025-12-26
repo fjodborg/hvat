@@ -19,6 +19,9 @@ use crate::model::AnnotationTool;
 /// Application version
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Git commit hash (short)
+pub const GIT_HASH: &str = env!("GIT_HASH");
+
 /// Application name
 const APP_NAME: &str = "HVAT - Hyperspectral Vision Annotation Tool";
 
@@ -73,7 +76,8 @@ impl HvatApp {
             r.text("Settings").size(FONT_SIZE_TITLE);
             // Spacer to push version to the right
             r.add(Element::new(Text::new("").width(Length::Fill(1.0))));
-            r.text(format!("v{}", APP_VERSION)).size(FONT_SIZE_SMALL);
+            r.text(format!("v{} ({})", APP_VERSION, GIT_HASH))
+                .size(FONT_SIZE_SMALL);
         });
 
         ctx.text("");

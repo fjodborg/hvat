@@ -11,5 +11,5 @@ mod right_sidebar;
 pub(crate) mod settings;
 mod topbar;
 
-// Re-export APP_VERSION for use in lib.rs and topbar
-pub(crate) use settings::APP_VERSION;
+// Re-export APP_VERSION and GIT_HASH for use in lib.rs and topbar
+pub(crate) use settings::{APP_VERSION, GIT_HASH};

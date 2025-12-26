@@ -9,6 +9,9 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    // Generate git commit hash for version display
+    generate_git_hash();
+
     // Generate version.js for service worker
     generate_version_js();
 
@@ -119,6 +122,41 @@ pub fn license_summary() -> Vec<(&'static str, usize)> {
     if let Err(e) = fs::write("src/licenses.rs", stub) {
         eprintln!("cargo:warning=Failed to write stub licenses.rs: {}", e);
     }
+}
+
+/// Generate git commit hash and expose it as an environment variable
+fn generate_git_hash() {
+    // Try to get the git commit hash
+    let git_hash = Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Check if there are uncommitted changes
+    let is_dirty = Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    let git_hash = if is_dirty {
+        format!("{}-dirty", git_hash)
+    } else {
+        git_hash
+    };
+
+    // Expose to Rust code via environment variable
+    println!("cargo:rustc-env=GIT_HASH={}", git_hash);
+
+    // Rerun if git HEAD changes (new commits)
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/index");
 }
 
 /// Generate a JavaScript file with the version from Cargo.toml
