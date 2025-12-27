@@ -303,7 +303,11 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
         let button_bounds = bounds.shrink(self.margin);
 
         match event {
-            Event::MouseMove { position, .. } => {
+            Event::MouseMove {
+                position,
+                screen_position,
+                ..
+            } => {
                 let inside = button_bounds.contains(position.0, position.1);
                 let old_state = self.state;
                 let was_hovered = old_state == ButtonState::Hovered;
@@ -323,9 +327,14 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                     &self.on_tooltip_request,
                     &self.on_tooltip_clear,
                 ) {
+                    // Use screen_position for tooltip if available (inside scrollable container),
+                    // otherwise fall back to position (for non-scrolled buttons)
+                    let tooltip_pos = screen_position.unwrap_or(*position);
+
                     if !was_hovered && is_hovered {
                         // Just entered hover - emit tooltip request
-                        let msg = on_request(id.clone(), content.clone(), button_bounds, *position);
+                        let msg =
+                            on_request(id.clone(), content.clone(), button_bounds, tooltip_pos);
                         return EventResult::RedrawWithMessage(msg);
                     } else if was_hovered && !is_hovered {
                         // Just left hover - emit tooltip clear
@@ -333,7 +342,8 @@ impl<M: Clone + 'static> Widget<M> for Button<M> {
                         return EventResult::RedrawWithMessage(msg);
                     } else if is_hovered {
                         // Still hovering - emit tooltip request with updated position
-                        let msg = on_request(id.clone(), content.clone(), button_bounds, *position);
+                        let msg =
+                            on_request(id.clone(), content.clone(), button_bounds, tooltip_pos);
                         return EventResult::RedrawWithMessage(msg);
                     }
                 }

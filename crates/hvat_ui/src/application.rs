@@ -1019,7 +1019,8 @@ fn handle_window_event<A: Application>(
             state.handle_event(Event::MouseMove {
                 position: state.cursor_position,
                 modifiers: state.modifiers,
-                overlay_hint: false, // Set by handle_event if needed
+                screen_position: None, // This is the original screen position
+                overlay_hint: false,   // Set by handle_event if needed
             });
             // Always request redraw on mouse move for hover effects and drag operations
             // Widgets may update internal state (e.g., scrollbar dragging) without producing messages

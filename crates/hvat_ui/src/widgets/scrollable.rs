@@ -896,6 +896,7 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                 Event::MouseMove {
                     position,
                     modifiers,
+                    screen_position,
                     overlay_hint,
                 } => {
                     // Allow if within viewport, if event is for an overlay, or if content has active drag
@@ -909,6 +910,8 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
                                 position.1 + self.state.offset.1,
                             ),
                             modifiers: *modifiers,
+                            // Preserve or set the original screen position
+                            screen_position: screen_position.or(Some(*position)),
                             overlay_hint: *overlay_hint,
                         })
                     } else {

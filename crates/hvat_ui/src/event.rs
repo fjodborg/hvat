@@ -268,6 +268,9 @@ pub enum Event {
     MouseMove {
         position: (f32, f32),
         modifiers: KeyModifiers,
+        /// Original screen position (before any transformations like scroll offset)
+        /// Used for positioning tooltips correctly in scrollable containers
+        screen_position: Option<(f32, f32)>,
         /// Hint that this position is within an overlay
         overlay_hint: bool,
     },
@@ -415,10 +418,12 @@ impl Event {
             Event::MouseMove {
                 position,
                 modifiers,
+                screen_position,
                 ..
             } => Event::MouseMove {
                 position,
                 modifiers,
+                screen_position,
                 overlay_hint: hint,
             },
             Event::MouseScroll {

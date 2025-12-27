@@ -853,6 +853,7 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
 
             Event::MouseMove {
                 position,
+                screen_position,
                 overlay_hint,
                 ..
             } => {
@@ -938,6 +939,8 @@ impl<M: 'static> Widget<M> for Collapsible<M> {
                             let adjusted_event = Event::MouseMove {
                                 position: adjusted_pos,
                                 modifiers: event.modifiers(),
+                                // Preserve or set the original screen position
+                                screen_position: screen_position.or(Some(*position)),
                                 overlay_hint: *overlay_hint,
                             };
 
