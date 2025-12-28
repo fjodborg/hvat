@@ -280,4 +280,10 @@ pub enum Message {
     CloseContextMenu,
     /// Context menu item selected (item id)
     ContextMenuSelect(String),
+
+    // Confirmation Dialog Events
+    /// Confirmation dialog confirmed (user clicked confirm button)
+    ConfirmDialogConfirm,
+    /// Confirmation dialog cancelled (user clicked cancel or pressed Escape)
+    ConfirmDialogCancel,
 }

@@ -48,6 +48,19 @@ use crate::state::{WasmPreloadState, extract_images_from_zip_bytes, is_zip_file}
 use crate::test_image::generate_test_hyperspectral;
 
 // ============================================================================
+// Confirmation Dialog Target
+// ============================================================================
+
+/// What item is being confirmed for deletion.
+#[derive(Debug, Clone)]
+pub enum ConfirmTarget {
+    /// Delete a category (id, name, annotation_count)
+    Category(u32, String, usize),
+    /// Delete a tag (id, name)
+    Tag(u32, String),
+}
+
+// ============================================================================
 // Async Picker State (for WASM file picker)
 // ============================================================================
 
@@ -475,6 +488,10 @@ pub struct HvatApp {
     /// Annotation ID that was right-clicked (if any)
     pub(crate) context_menu_annotation_id: Option<u32>,
 
+    // Confirmation dialog state
+    /// What is being confirmed (None = dialog closed)
+    pub(crate) confirm_dialog_target: Option<ConfirmTarget>,
+
     // WASM preloading state (Web Worker + chunked uploads)
     /// Groups all WASM-specific preloading fields
     #[cfg(target_arch = "wasm32")]
@@ -640,6 +657,9 @@ impl HvatApp {
             context_menu_open: false,
             context_menu_position: (0.0, 0.0),
             context_menu_annotation_id: None,
+
+            // Confirmation dialog
+            confirm_dialog_target: None,
 
             // WASM preloading state
             #[cfg(target_arch = "wasm32")]
@@ -1040,6 +1060,25 @@ impl HvatApp {
                 id,
                 removed_count
             );
+            self.auto_save_config();
+        }
+    }
+
+    fn delete_tag_internal(&mut self, id: u32, tag_name: &str) {
+        // Remove tag from list
+        if let Some(pos) = self.tags.iter().position(|t| t.id == id) {
+            self.tags.remove(pos);
+
+            // Remove from all per-image selections
+            self.image_data_store.remove_tag_from_all(id);
+
+            // If the deleted tag was selected, select the first available
+            if self.selected_tag == id {
+                self.selected_tag = self.tags.first().map(|t| t.id).unwrap_or(0);
+            }
+
+            self.auto_save.mark_dirty();
+            log::info!("Deleted tag '{}' (id={})", tag_name, id);
             self.auto_save_config();
         }
     }
@@ -2903,6 +2942,11 @@ impl Application for HvatApp {
             ));
         }
 
+        // Add confirmation dialog overlay if open (highest z-order)
+        if let Some(ref target) = self.confirm_dialog_target {
+            ctx.add(self.build_confirm_dialog(target));
+        }
+
         Element::new(Column::new(ctx.take()))
     }
 
@@ -3197,7 +3241,7 @@ impl Application for HvatApp {
                 self.color_picker_state = state;
             }
             Message::DeleteCategory(id) => {
-                // Find category name for confirmation message
+                // Find category and open confirmation dialog
                 if let Some(cat) = self.categories.iter().find(|c| c.id == id) {
                     let cat_name = cat.name.clone();
 
@@ -3213,43 +3257,18 @@ impl Application for HvatApp {
                         })
                         .sum();
 
-                    let message = if annotation_count > 0 {
-                        format!(
-                            "Delete category '{}'?\n\nThis will also delete {} annotation(s) using this category.",
-                            cat_name, annotation_count
-                        )
-                    } else {
-                        format!("Delete category '{}'?", cat_name)
-                    };
-
-                    let confirmed;
-
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        // Use browser confirm dialog on WASM
-                        confirmed = web_sys::window()
-                            .and_then(|w| w.confirm_with_message(&message).ok())
-                            .unwrap_or(false);
-                    }
-
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        // On native, use rfd message dialog
-                        use rfd::MessageDialog;
-                        confirmed = MessageDialog::new()
-                            .set_title("Confirm Delete")
-                            .set_description(&message)
-                            .set_buttons(rfd::MessageButtons::YesNo)
-                            .show()
-                            == rfd::MessageDialogResult::Yes;
-                    }
-
-                    if confirmed {
-                        // Perform the deletion
-                        self.delete_category_internal(id, &cat_name);
-                    } else {
-                        log::info!("Category deletion cancelled by user");
-                    }
+                    // Open the in-app confirmation dialog
+                    self.confirm_dialog_target = Some(ConfirmTarget::Category(
+                        id,
+                        cat_name.clone(),
+                        annotation_count,
+                    ));
+                    log::debug!(
+                        "Opening confirmation dialog for category '{}' (id={}, {} annotations)",
+                        cat_name,
+                        id,
+                        annotation_count
+                    );
                 }
             }
             Message::ConfirmDeleteCategory(id) => {
@@ -3308,18 +3327,17 @@ impl Application for HvatApp {
                 self.auto_save.mark_dirty();
             }
             Message::DeleteTag(tag_id) => {
-                // Remove from global registry
-                if let Some(pos) = self.tags.iter().position(|t| t.id == tag_id) {
-                    let tag_name = self.tags[pos].name.clone();
-                    self.tags.remove(pos);
-                    // Also remove from all per-image selections
-                    self.image_data_store.remove_tag_from_all(tag_id);
-                    // Update selected_tag if needed
-                    if self.selected_tag == tag_id {
-                        self.selected_tag = self.tags.first().map(|t| t.id).unwrap_or(0);
-                    }
-                    self.auto_save.mark_dirty();
-                    log::info!("Deleted tag '{}' (ID {})", tag_name, tag_id);
+                // Find tag and open confirmation dialog
+                if let Some(tag) = self.tags.iter().find(|t| t.id == tag_id) {
+                    let tag_name = tag.name.clone();
+
+                    // Open the in-app confirmation dialog
+                    self.confirm_dialog_target = Some(ConfirmTarget::Tag(tag_id, tag_name.clone()));
+                    log::debug!(
+                        "Opening confirmation dialog for tag '{}' (id={})",
+                        tag_name,
+                        tag_id
+                    );
                 }
             }
             Message::StartEditingTag(tag_id) => {
@@ -4060,6 +4078,34 @@ impl Application for HvatApp {
                 }
 
                 self.context_menu_annotation_id = None;
+            }
+
+            // Confirmation Dialog Events
+            Message::ConfirmDialogConfirm => {
+                if let Some(target) = self.confirm_dialog_target.take() {
+                    match target {
+                        ConfirmTarget::Category(id, name, _) => {
+                            log::info!("Confirmed deletion of category '{}' (ID {})", name, id);
+                            self.delete_category_internal(id, &name);
+                        }
+                        ConfirmTarget::Tag(id, name) => {
+                            log::info!("Confirmed deletion of tag '{}' (ID {})", name, id);
+                            self.delete_tag_internal(id, &name);
+                        }
+                    }
+                }
+            }
+            Message::ConfirmDialogCancel => {
+                if let Some(target) = self.confirm_dialog_target.take() {
+                    match target {
+                        ConfirmTarget::Category(_, name, _) => {
+                            log::info!("Cancelled deletion of category '{}'", name);
+                        }
+                        ConfirmTarget::Tag(_, name) => {
+                            log::info!("Cancelled deletion of tag '{}'", name);
+                        }
+                    }
+                }
             }
         }
     }

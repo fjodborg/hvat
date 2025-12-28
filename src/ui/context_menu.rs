@@ -1,10 +1,11 @@
 //! Context menu UI for HVAT application.
 //!
-//! Provides right-click context menu for annotation editing.
+//! Provides right-click context menu for annotation editing,
+//! and confirmation dialogs for delete operations.
 
-use hvat_ui::{ContextMenu, Element, MenuItem};
+use hvat_ui::{ConfirmDialog, ContextMenu, Element, MenuItem};
 
-use crate::app::HvatApp;
+use crate::app::{ConfirmTarget, HvatApp};
 use crate::message::Message;
 
 impl HvatApp {
@@ -62,6 +63,40 @@ impl HvatApp {
                 .items(items)
                 .on_select(Message::ContextMenuSelect)
                 .on_close(|_| Message::CloseContextMenu),
+        )
+    }
+
+    /// Build the confirmation dialog widget.
+    pub(crate) fn build_confirm_dialog(&self, target: &ConfirmTarget) -> Element<Message> {
+        let (title, description, confirm_label) = match target {
+            ConfirmTarget::Category(_, name, annotation_count) => {
+                let desc = if *annotation_count > 0 {
+                    format!(
+                        "This will also delete {} annotation(s) using this category.",
+                        annotation_count
+                    )
+                } else {
+                    "This action cannot be undone.".to_string()
+                };
+                (format!("Delete category '{}'?", name), desc, "Delete")
+            }
+            ConfirmTarget::Tag(_, name) => (
+                format!("Delete tag '{}'?", name),
+                "This action cannot be undone.".to_string(),
+                "Delete",
+            ),
+        };
+
+        Element::new(
+            ConfirmDialog::new()
+                .open(true)
+                .title(title)
+                .description(description)
+                .confirm_label(confirm_label)
+                .cancel_label("Cancel")
+                .viewport_size(self.window_size.0, self.window_size.1)
+                .on_confirm(|_| Message::ConfirmDialogConfirm)
+                .on_cancel(|_| Message::ConfirmDialogCancel),
         )
     }
 }
