@@ -2098,21 +2098,14 @@ impl HvatApp {
         if let Some((annotation_id, original_shape, handle)) = selected_handle {
             use crate::model::{AnnotationHandle, PolygonHandle};
 
-            // Special case: clicking on a polygon edge inserts a vertex and starts dragging it
-            if let AnnotationHandle::Polygon(PolygonHandle::Edge { index: edge_idx }) = handle {
-                log::info!(
-                    "Click on edge {} of polygon {} - inserting vertex at ({:.1}, {:.1}) and starting drag",
-                    edge_idx,
-                    annotation_id,
-                    x,
-                    y
-                );
-
+            // Determine the effective handle and shape for dragging
+            // Edge clicks insert a vertex first, then drag the new vertex
+            let (effective_handle, effective_shape) = if let AnnotationHandle::Polygon(
+                PolygonHandle::Edge { index: edge_idx },
+            ) = handle
+            {
                 if let Some(new_shape) = original_shape.insert_polygon_vertex(edge_idx, x, y) {
-                    // Push undo point before modifying
                     self.push_annotation_undo_point();
-
-                    // Find the annotation index and apply the change
                     let image_data = self.image_data_store.get_or_create(&path);
                     if let Some(ann) = image_data
                         .annotations
@@ -2121,44 +2114,59 @@ impl HvatApp {
                     {
                         ann.shape = new_shape.clone();
                         self.auto_save.mark_dirty();
-
-                        // The new vertex is at index edge_idx + 1 (inserted after edge_idx)
-                        let new_vertex_idx = edge_idx + 1;
-                        let new_handle =
-                            AnnotationHandle::Polygon(PolygonHandle::Vertex(new_vertex_idx));
-
-                        // Start dragging the new vertex immediately
-                        image_data.edit_state = EditState::DraggingHandle {
-                            annotation_id,
-                            handle: new_handle,
-                            start_x: x,
-                            start_y: y,
-                            original_shape: new_shape,
-                        };
-
-                        log::info!(
-                            "Inserted vertex at index {} and started dragging",
-                            new_vertex_idx
-                        );
                     }
+                    log::info!(
+                        "Inserted vertex at edge {} of polygon {}, now at index {}",
+                        edge_idx,
+                        annotation_id,
+                        edge_idx + 1
+                    );
+                    (
+                        AnnotationHandle::Polygon(PolygonHandle::Vertex(edge_idx + 1)),
+                        new_shape,
+                    )
+                } else {
+                    return;
                 }
-                return;
-            }
+            } else {
+                (handle, original_shape)
+            };
 
-            // Record potential drag - we don't start editing until there's actual movement
-            log::debug!(
-                "Potential drag on annotation {}, handle={:?}",
-                annotation_id,
-                handle
+            // Polygon vertices start dragging immediately (precise control needed)
+            // Other handles use PotentialDrag to differentiate click from drag
+            let immediate_drag = matches!(
+                effective_handle,
+                AnnotationHandle::Polygon(PolygonHandle::Vertex(_))
             );
 
-            let image_data = self.image_data_store.get_or_create(&path);
-            image_data.edit_state = EditState::PotentialDrag {
+            log::debug!(
+                "Handle interaction on annotation {}: {:?}, immediate={}",
                 annotation_id,
-                handle,
-                start_x: x,
-                start_y: y,
-                original_shape,
+                effective_handle,
+                immediate_drag
+            );
+
+            if immediate_drag {
+                self.push_annotation_undo_point();
+            }
+
+            let image_data = self.image_data_store.get_or_create(&path);
+            image_data.edit_state = if immediate_drag {
+                EditState::DraggingHandle {
+                    annotation_id,
+                    handle: effective_handle,
+                    start_x: x,
+                    start_y: y,
+                    original_shape: effective_shape,
+                }
+            } else {
+                EditState::PotentialDrag {
+                    annotation_id,
+                    handle: effective_handle,
+                    start_x: x,
+                    start_y: y,
+                    original_shape: effective_shape,
+                }
             };
             return;
         }
