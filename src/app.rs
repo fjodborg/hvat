@@ -2557,11 +2557,15 @@ impl HvatApp {
         );
 
         // Check if we should close an existing polygon
+        // Scale the close threshold by zoom: when zoomed in, require more precision
+        let zoom = self.viewer_state.zoom;
+        let close_threshold = POLYGON_CLOSE_THRESHOLD / zoom;
+
         if let DrawingState::Polygon { vertices } = &image_data.drawing_state {
             if vertices.len() >= MIN_POLYGON_VERTICES {
                 let (first_x, first_y) = vertices[0];
                 let dist = ((x - first_x).powi(2) + (y - first_y).powi(2)).sqrt();
-                if dist < POLYGON_CLOSE_THRESHOLD {
+                if dist < close_threshold {
                     self.finalize_polygon();
                     return;
                 }
@@ -3585,8 +3589,28 @@ impl Application for HvatApp {
             }
 
             // Global Undo/Redo
-            // Priority: annotation undo first, then slider/adjustment undo
+            // Priority: in-progress polygon undo (remove last vertex), then annotation undo, then slider/adjustment undo
             Message::Undo => {
+                // First check if we're drawing a polygon - undo should remove the last vertex
+                let path = self.current_image_path();
+                let image_data = self.image_data_store.get_or_create(&path);
+                if let DrawingState::Polygon { vertices } = &mut image_data.drawing_state {
+                    if vertices.len() > 1 {
+                        let removed = vertices.pop();
+                        log::info!(
+                            "Polygon: undo removed vertex at {:?}, {} vertices remaining",
+                            removed,
+                            vertices.len()
+                        );
+                        return;
+                    } else if vertices.len() == 1 {
+                        // Last vertex - cancel the polygon entirely
+                        image_data.drawing_state = DrawingState::Idle;
+                        log::info!("Polygon: undo cancelled polygon (removed last vertex)");
+                        return;
+                    }
+                }
+
                 // Unified undo - snapshots may contain slider state, annotation state, or both
                 let current = self.snapshot_with_annotations();
                 let prev = self.undo_stack.borrow_mut().undo(current);

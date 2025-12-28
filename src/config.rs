@@ -176,7 +176,7 @@ fn default_category_hotkeys() -> Vec<Option<KeyCode>> {
 impl Default for KeyBindingsConfig {
     fn default() -> Self {
         Self {
-            tool_select: KeyCode::G,
+            tool_select: KeyCode::S,
             tool_bbox: KeyCode::E,
             tool_polygon: KeyCode::R,
             tool_point: KeyCode::T,

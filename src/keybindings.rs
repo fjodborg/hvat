@@ -45,7 +45,7 @@ impl Default for KeyBindings {
     fn default() -> Self {
         Self {
             // Default tool hotkeys: G for Select, E for BBox, R for Polygon, T for Point
-            tool_select: KeyCode::G,
+            tool_select: KeyCode::S,
             tool_bbox: KeyCode::E,
             tool_polygon: KeyCode::R,
             tool_point: KeyCode::T,
