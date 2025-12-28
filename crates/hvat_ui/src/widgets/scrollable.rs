@@ -286,10 +286,13 @@ impl<M: 'static> Scrollable<M> {
         let show_v = self.show_vertical_scrollbar();
         let show_h = self.show_horizontal_scrollbar();
 
+        // Clamp to 0.0 to prevent negative dimensions when bounds are too small
         let width =
-            bounds.width - self.padding.horizontal() - if show_v { scrollbar_width } else { 0.0 };
+            (bounds.width - self.padding.horizontal() - if show_v { scrollbar_width } else { 0.0 })
+                .max(0.0);
         let height =
-            bounds.height - self.padding.vertical() - if show_h { scrollbar_width } else { 0.0 };
+            (bounds.height - self.padding.vertical() - if show_h { scrollbar_width } else { 0.0 })
+                .max(0.0);
 
         Bounds::new(
             bounds.x + self.padding.left,
@@ -304,15 +307,16 @@ impl<M: 'static> Scrollable<M> {
     #[inline]
     fn calc_viewport_size(&self, bounds: Bounds) -> Size {
         let scrollbar_width = self.scrollbar_config.width;
-        let base_width = bounds.width - self.padding.horizontal();
-        let base_height = bounds.height - self.padding.vertical();
+        let base_width = (bounds.width - self.padding.horizontal()).max(0.0);
+        let base_height = (bounds.height - self.padding.vertical()).max(0.0);
 
         // Check if scrollbars will be shown (using cached content_size)
         let needs_v = self.needs_vertical_scroll();
         let needs_h = self.needs_horizontal_scroll();
 
-        let width = base_width - if needs_v { scrollbar_width } else { 0.0 };
-        let height = base_height - if needs_h { scrollbar_width } else { 0.0 };
+        // Clamp to 0.0 to prevent negative dimensions when bounds are too small
+        let width = (base_width - if needs_v { scrollbar_width } else { 0.0 }).max(0.0);
+        let height = (base_height - if needs_h { scrollbar_width } else { 0.0 }).max(0.0);
 
         Size::new(width, height)
     }
@@ -450,9 +454,10 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
         let own_height = self.height.resolve(available.height, available.height);
 
         // Calculate viewport size (accounting for scrollbars)
+        // Clamp to 0.0 to prevent negative dimensions when bounds are too small
         let scrollbar_width = self.scrollbar_config.width;
-        let mut viewport_width = own_width - self.padding.horizontal();
-        let mut viewport_height = own_height - self.padding.vertical();
+        let mut viewport_width = (own_width - self.padding.horizontal()).max(0.0);
+        let mut viewport_height = (own_height - self.padding.vertical()).max(0.0);
 
         // First pass: layout content to determine if scrollbars are needed
         // Give content unlimited size in scroll direction
@@ -477,10 +482,10 @@ impl<M: 'static> Widget<M> for Scrollable<M> {
             ) && self.content_size.width > viewport_width;
 
             if needs_v {
-                viewport_width -= scrollbar_width;
+                viewport_width = (viewport_width - scrollbar_width).max(0.0);
             }
             if needs_h {
-                viewport_height -= scrollbar_width;
+                viewport_height = (viewport_height - scrollbar_width).max(0.0);
             }
 
             // Re-layout if viewport changed due to scrollbars
