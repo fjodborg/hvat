@@ -870,19 +870,83 @@ impl HvatApp {
     /// Load SAM2 models asynchronously (WASM only).
     /// Uses onnxruntime-web via JavaScript (sam2-onnx.js).
     #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
-    async fn load_sam2_models_wasm() {
-        use js_sys::Reflect;
-        use wasm_bindgen::JsCast;
+    async fn load_sam2_bridge_wasm(
+        window: &web_sys::Window,
+    ) -> Result<wasm_bindgen::JsValue, String> {
+        use js_sys::{Promise, Reflect};
+        use wasm_bindgen::{JsCast, JsValue, closure::Closure};
         use wasm_bindgen_futures::JsFuture;
 
-        log::info!("SAM2 WASM: Starting model loading via onnxruntime-web...");
+        let sam2_key = JsValue::from_str("sam2");
+        if let Ok(sam2) = Reflect::get(window, &sam2_key)
+            && !sam2.is_undefined()
+        {
+            return Ok(sam2);
+        }
+
+        let document = window
+            .document()
+            .ok_or_else(|| "No document object".to_string())?;
+        let body = document
+            .body()
+            .ok_or_else(|| "No document body".to_string())?;
+        let script = document
+            .create_element("script")
+            .map_err(|error| format!("Failed to create SAM2 script element: {error:?}"))?
+            .dyn_into::<web_sys::HtmlElement>()
+            .map_err(|_| "Failed to create SAM2 script element".to_string())?;
+
+        script
+            .set_attribute("src", "sam2-onnx.js?v=2")
+            .map_err(|error| format!("Failed to set SAM2 script source: {error:?}"))?;
+        script
+            .set_attribute("async", "")
+            .map_err(|error| format!("Failed to configure SAM2 script: {error:?}"))?;
+
+        let promise = Promise::new(&mut |resolve, reject| {
+            let on_load = Closure::once(move |_event: web_sys::Event| {
+                let _ = resolve.call0(&JsValue::NULL);
+            });
+            let on_error = Closure::once(move |_event: web_sys::Event| {
+                let _ = reject.call1(
+                    &JsValue::NULL,
+                    &JsValue::from_str("Failed to download the SAM2 runtime bridge"),
+                );
+            });
+
+            script.set_onload(Some(on_load.as_ref().unchecked_ref()));
+            script.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+            on_load.forget();
+            on_error.forget();
+        });
+
+        body.append_child(&script)
+            .map_err(|error| format!("Failed to start SAM2 runtime download: {error:?}"))?;
+        JsFuture::from(promise)
+            .await
+            .map_err(|error| format!("Failed to download SAM2 runtime bridge: {error:?}"))?;
+
+        let sam2 = Reflect::get(window, &sam2_key)
+            .map_err(|error| format!("Failed to access loaded SAM2 runtime: {error:?}"))?;
+        if sam2.is_undefined() {
+            return Err("SAM2 runtime bridge loaded without registering window.sam2".to_string());
+        }
+
+        Ok(sam2)
+    }
+
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    async fn load_sam2_models_wasm() {
+        use js_sys::Reflect;
+        use wasm_bindgen_futures::JsFuture;
+
+        log::info!("SAM2 WASM: Downloading runtime and models...");
 
         // Update progress
         if let Ok(mut state) = pending_sam2_state().lock() {
-            *state = Some(Sam2LoadResult::Progress(0.1));
+            *state = Some(Sam2LoadResult::Progress(0.05));
         }
 
-        // Call JavaScript sam2.loadModels() function
         let window = match web_sys::window() {
             Some(w) => w,
             None => {
@@ -894,19 +958,20 @@ impl HvatApp {
             }
         };
 
-        // Get sam2 namespace from window
-        let sam2 = match Reflect::get(&window, &wasm_bindgen::JsValue::from_str("sam2")) {
-            Ok(s) if !s.is_undefined() => s,
-            _ => {
-                log::error!("SAM2 WASM: sam2 JavaScript module not found");
+        let sam2 = match Self::load_sam2_bridge_wasm(&window).await {
+            Ok(sam2) => sam2,
+            Err(error) => {
+                log::error!("SAM2 WASM: Runtime loading failed: {}", error);
                 if let Ok(mut state) = pending_sam2_state().lock() {
-                    *state = Some(Sam2LoadResult::Error(
-                        "sam2 JavaScript module not loaded".to_string(),
-                    ));
+                    *state = Some(Sam2LoadResult::Error(error));
                 }
                 return;
             }
         };
+
+        if let Ok(mut state) = pending_sam2_state().lock() {
+            *state = Some(Sam2LoadResult::Progress(0.1));
+        }
 
         // Get loadModels function
         let load_models_fn =

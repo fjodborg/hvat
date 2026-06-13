@@ -7,6 +7,8 @@
 // =============================================================================
 
 const CONFIG = {
+  onnxRuntimeVersion: "1.22.0",
+
   // Model URLs (g-ronimo's optimized SAM2-tiny for browser)
   encoderUrl:
     "https://huggingface.co/g-ronimo/sam2-tiny/resolve/main/sam2_hiera_tiny_encoder.with_runtime_opt.ort",
@@ -22,10 +24,13 @@ const CONFIG = {
 
   // IndexedDB cache settings
   dbName: "sam2-model-cache",
-  dbVersion: 1,
+  dbVersion: 2,
   encoderStore: "encoder",
   decoderStore: "decoder",
 };
+
+const ONNX_RUNTIME_DIST_URL = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${CONFIG.onnxRuntimeVersion}/dist/`;
+const ONNX_RUNTIME_SCRIPT_URL = `${ONNX_RUNTIME_DIST_URL}ort.min.js`;
 
 // =============================================================================
 // Global State
@@ -65,12 +70,22 @@ function openModelCache() {
 async function getCachedModel(storeName, url) {
   try {
     const db = await openModelCache();
+    if (!db.objectStoreNames.contains(storeName)) {
+      db.close();
+      return null;
+    }
     return new Promise((resolve) => {
       const tx = db.transaction(storeName, "readonly");
       const store = tx.objectStore(storeName);
       const request = store.get(url);
-      request.onerror = () => resolve(null);
-      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => {
+        db.close();
+        resolve(null);
+      };
+      request.onsuccess = () => {
+        db.close();
+        resolve(request.result);
+      };
     });
   } catch (e) {
     console.warn("[SAM2] IndexedDB not available:", e);
@@ -81,12 +96,22 @@ async function getCachedModel(storeName, url) {
 async function cacheModel(storeName, url, data) {
   try {
     const db = await openModelCache();
+    if (!db.objectStoreNames.contains(storeName)) {
+      db.close();
+      return false;
+    }
     return new Promise((resolve) => {
       const tx = db.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
       const request = store.put(data, url);
-      request.onerror = () => resolve(false);
-      request.onsuccess = () => resolve(true);
+      request.onerror = () => {
+        db.close();
+        resolve(false);
+      };
+      request.onsuccess = () => {
+        db.close();
+        resolve(true);
+      };
     });
   } catch (e) {
     console.warn("[SAM2] Failed to cache model:", e);
@@ -102,7 +127,7 @@ async function initOrt() {
   if (window.ort) return;
 
   const script = document.createElement("script");
-  script.src = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js";
+  script.src = ONNX_RUNTIME_SCRIPT_URL;
   script.async = true;
 
   await new Promise((resolve, reject) => {
@@ -111,8 +136,8 @@ async function initOrt() {
     document.head.appendChild(script);
   });
 
-  // Configure for best performance
-  ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
+  ort.env.wasm.wasmPaths = ONNX_RUNTIME_DIST_URL;
+  ort.env.wasm.numThreads = 1;
   ort.env.wasm.simd = true;
 
   console.log(
@@ -176,7 +201,10 @@ const STD = ${JSON.stringify(CONFIG.std)};
 // IndexedDB helpers (duplicated because workers can't share code)
 const DB_NAME = '${CONFIG.dbName}';
 const DB_VERSION = ${CONFIG.dbVersion};
-const STORE_NAME = '${CONFIG.encoderStore}';
+const ENCODER_STORE = '${CONFIG.encoderStore}';
+const DECODER_STORE = '${CONFIG.decoderStore}';
+const ONNX_RUNTIME_DIST_URL = ${JSON.stringify(ONNX_RUNTIME_DIST_URL)};
+const ONNX_RUNTIME_SCRIPT_URL = ${JSON.stringify(ONNX_RUNTIME_SCRIPT_URL)};
 
 function openDB() {
     return new Promise((resolve, reject) => {
@@ -185,8 +213,11 @@ function openDB() {
         req.onsuccess = () => resolve(req.result);
         req.onupgradeneeded = (e) => {
             const db = e.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME);
+            if (!db.objectStoreNames.contains(ENCODER_STORE)) {
+                db.createObjectStore(ENCODER_STORE);
+            }
+            if (!db.objectStoreNames.contains(DECODER_STORE)) {
+                db.createObjectStore(DECODER_STORE);
             }
         };
     });
@@ -195,11 +226,21 @@ function openDB() {
 async function getFromCache(url) {
     try {
         const db = await openDB();
+        if (!db.objectStoreNames.contains(ENCODER_STORE)) {
+            db.close();
+            return null;
+        }
         return new Promise((resolve) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const req = tx.objectStore(STORE_NAME).get(url);
-            req.onerror = () => resolve(null);
-            req.onsuccess = () => resolve(req.result);
+            const tx = db.transaction(ENCODER_STORE, 'readonly');
+            const req = tx.objectStore(ENCODER_STORE).get(url);
+            req.onerror = () => {
+                db.close();
+                resolve(null);
+            };
+            req.onsuccess = () => {
+                db.close();
+                resolve(req.result);
+            };
         });
     } catch { return null; }
 }
@@ -207,11 +248,21 @@ async function getFromCache(url) {
 async function saveToCache(url, data) {
     try {
         const db = await openDB();
+        if (!db.objectStoreNames.contains(ENCODER_STORE)) {
+            db.close();
+            return false;
+        }
         return new Promise((resolve) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const req = tx.objectStore(STORE_NAME).put(data, url);
-            req.onerror = () => resolve(false);
-            req.onsuccess = () => resolve(true);
+            const tx = db.transaction(ENCODER_STORE, 'readwrite');
+            const req = tx.objectStore(ENCODER_STORE).put(data, url);
+            req.onerror = () => {
+                db.close();
+                resolve(false);
+            };
+            req.onsuccess = () => {
+                db.close();
+                resolve(true);
+            };
         });
     } catch { return false; }
 }
@@ -259,8 +310,9 @@ self.onmessage = async function(e) {
         try {
             // Load ONNX Runtime
             if (typeof ort === 'undefined') {
-                importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js');
-                ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
+                importScripts(ONNX_RUNTIME_SCRIPT_URL);
+                ort.env.wasm.wasmPaths = ONNX_RUNTIME_DIST_URL;
+                ort.env.wasm.numThreads = 1;
                 ort.env.wasm.simd = true;
                 console.log('[SAM2 Worker] ORT loaded, threads=%d', ort.env.wasm.numThreads);
             }

@@ -106,6 +106,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (url.pathname.endsWith('/sam2-onnx.js')) {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' })
+        .then((response) => {
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseClone);
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
   // For WASM and JS files with content hashes in filenames:
   // Use cache-first strategy. Files have unique hashes (e.g., hvat-7283580183dda6a8.js),
   // so a cache hit means we have the exact file we need - saves bandwidth.

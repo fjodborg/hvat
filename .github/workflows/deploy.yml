@@ -32,7 +32,7 @@ jobs:
           # TODO, This is a workdaround and should get a proper fix (Generates version file)
           cargo build
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          trunk build --release --public-url "/${REPO_NAME}/"
+          trunk build --release --features sam2 --public-url "/${REPO_NAME}/"
 
       - name: Fix PWA paths
         run: |
