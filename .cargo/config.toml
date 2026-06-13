@@ -1,3 +1,7 @@
+# Avoid using all my resources when doing other things at the same time
+[build]
+jobs = 8
+
 # Enable bulk memory operations for WASM (required for panic=unwind)
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+bulk-memory"]

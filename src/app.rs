@@ -89,6 +89,66 @@ fn pending_config_state() -> &'static std::sync::Mutex<Option<String>> {
 }
 
 // ============================================================================
+// WASM SAM2 Model Loading
+// ============================================================================
+
+/// Result of async SAM2 model loading (WASM only).
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+pub enum Sam2LoadResult {
+    /// Models loaded successfully
+    Success(crate::sam2::SAM2Encoder, crate::sam2::SAM2Decoder),
+    /// Loading failed with error message
+    Error(String),
+    /// Progress update (0.0 - 1.0)
+    Progress(f32),
+}
+
+// Global shared state for receiving SAM2 model loading results (WASM only)
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+static PENDING_SAM2_RESULT: OnceLock<std::sync::Mutex<Option<Sam2LoadResult>>> = OnceLock::new();
+
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+fn pending_sam2_state() -> &'static std::sync::Mutex<Option<Sam2LoadResult>> {
+    PENDING_SAM2_RESULT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Result of async SAM2 encoding (WASM only).
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+pub enum Sam2EncodeResult {
+    /// Encoding completed successfully
+    Success(std::sync::Arc<crate::sam2::ImageEmbeddings>),
+    /// Encoding failed with error message
+    Error(String),
+}
+
+// Global shared state for receiving SAM2 encoding results (WASM only)
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+static PENDING_SAM2_ENCODE: OnceLock<std::sync::Mutex<Option<Sam2EncodeResult>>> = OnceLock::new();
+
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+fn pending_sam2_encode_state() -> &'static std::sync::Mutex<Option<Sam2EncodeResult>> {
+    PENDING_SAM2_ENCODE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Result of async SAM2 decoding (WASM only).
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+pub enum Sam2DecodeResult {
+    /// Decoding completed successfully
+    Success(crate::sam2::SAM2Mask),
+    /// Decoding failed with error message
+    Error(String),
+}
+
+// Global shared state for receiving SAM2 decoding results (WASM only)
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+static PENDING_SAM2_DECODE: OnceLock<std::sync::Mutex<Option<Sam2DecodeResult>>> = OnceLock::new();
+
+#[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+fn pending_sam2_decode_state() -> &'static std::sync::Mutex<Option<Sam2DecodeResult>> {
+    PENDING_SAM2_DECODE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+// ============================================================================
 // WASM Folder Picker using File System Access API
 // ============================================================================
 
@@ -491,6 +551,49 @@ pub struct HvatApp {
     // Confirmation dialog state
     /// What is being confirmed (None = dialog closed)
     pub(crate) confirm_dialog_target: Option<ConfirmTarget>,
+    // SAM2 AI-Assisted Segmentation (feature-gated)
+    /// Whether SAM2 is enabled by user preference
+    #[cfg(feature = "sam2")]
+    pub(crate) sam2_enabled: bool,
+    /// Current SAM2 state machine
+    #[cfg(feature = "sam2")]
+    pub(crate) sam2_state: crate::sam2::SAM2State,
+    /// SAM2 decoder for mask generation (native only for now)
+    #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+    pub(crate) sam2_decoder: Option<crate::sam2::SAM2Decoder>,
+    /// SAM2 encoder for computing image embeddings (native only for now)
+    #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+    pub(crate) sam2_encoder: Option<crate::sam2::SAM2Encoder>,
+    /// Channel for background model loading (sender, receiver)
+    #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+    sam2_model_channel: (
+        std::sync::mpsc::Sender<
+            Result<(crate::sam2::SAM2Encoder, crate::sam2::SAM2Decoder), String>,
+        >,
+        std::sync::mpsc::Receiver<
+            Result<(crate::sam2::SAM2Encoder, crate::sam2::SAM2Decoder), String>,
+        >,
+    ),
+    /// Channel for background encoding results
+    #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+    sam2_encoding_channel: (
+        std::sync::mpsc::Sender<Result<std::sync::Arc<crate::sam2::ImageEmbeddings>, String>>,
+        std::sync::mpsc::Receiver<Result<std::sync::Arc<crate::sam2::ImageEmbeddings>, String>>,
+    ),
+    /// Pending first point to add after encoding completes (is_negative, x, y)
+    #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+    sam2_pending_first_point: Option<(bool, f32, f32)>,
+
+    // WASM SAM2 fields
+    /// SAM2 decoder for mask generation (WASM)
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    pub(crate) sam2_decoder: Option<crate::sam2::SAM2Decoder>,
+    /// SAM2 encoder for computing image embeddings (WASM)
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    pub(crate) sam2_encoder: Option<crate::sam2::SAM2Encoder>,
+    /// Whether SAM2 models are currently being loaded (WASM async)
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    sam2_loading_in_progress: bool,
 
     // WASM preloading state (Web Worker + chunked uploads)
     /// Groups all WASM-specific preloading fields
@@ -660,6 +763,28 @@ impl HvatApp {
 
             // Confirmation dialog
             confirm_dialog_target: None,
+            // SAM2 AI-Assisted Segmentation (feature-gated)
+            #[cfg(feature = "sam2")]
+            sam2_enabled: false,
+            #[cfg(feature = "sam2")]
+            sam2_state: crate::sam2::SAM2State::default(),
+            #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+            sam2_decoder: None, // Loaded on demand when SAM2 is enabled
+            #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+            sam2_encoder: None, // Loaded on demand when SAM2 is enabled
+            #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+            sam2_model_channel: std::sync::mpsc::channel(),
+            #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+            sam2_encoding_channel: std::sync::mpsc::channel(),
+            #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+            sam2_pending_first_point: None,
+            // WASM SAM2 fields
+            #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+            sam2_decoder: None,
+            #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+            sam2_encoder: None,
+            #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+            sam2_loading_in_progress: false,
 
             // WASM preloading state
             #[cfg(target_arch = "wasm32")]
@@ -740,6 +865,180 @@ impl HvatApp {
             .as_ref()
             .and_then(|p| p.current_image().cloned())
             .unwrap_or_else(|| PathBuf::from("__test_image__"))
+    }
+
+    /// Load SAM2 models asynchronously (WASM only).
+    /// Uses onnxruntime-web via JavaScript (sam2-onnx.js).
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    async fn load_sam2_models_wasm() {
+        use js_sys::Reflect;
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::JsFuture;
+
+        log::info!("SAM2 WASM: Starting model loading via onnxruntime-web...");
+
+        // Update progress
+        if let Ok(mut state) = pending_sam2_state().lock() {
+            *state = Some(Sam2LoadResult::Progress(0.1));
+        }
+
+        // Call JavaScript sam2.loadModels() function
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => {
+                log::error!("SAM2 WASM: No window object");
+                if let Ok(mut state) = pending_sam2_state().lock() {
+                    *state = Some(Sam2LoadResult::Error("No window object".to_string()));
+                }
+                return;
+            }
+        };
+
+        // Get sam2 namespace from window
+        let sam2 = match Reflect::get(&window, &wasm_bindgen::JsValue::from_str("sam2")) {
+            Ok(s) if !s.is_undefined() => s,
+            _ => {
+                log::error!("SAM2 WASM: sam2 JavaScript module not found");
+                if let Ok(mut state) = pending_sam2_state().lock() {
+                    *state = Some(Sam2LoadResult::Error(
+                        "sam2 JavaScript module not loaded".to_string(),
+                    ));
+                }
+                return;
+            }
+        };
+
+        // Get loadModels function
+        let load_models_fn =
+            match Reflect::get(&sam2, &wasm_bindgen::JsValue::from_str("loadModels")) {
+                Ok(f) if f.is_function() => js_sys::Function::from(f),
+                _ => {
+                    log::error!("SAM2 WASM: sam2.loadModels function not found");
+                    if let Ok(mut state) = pending_sam2_state().lock() {
+                        *state = Some(Sam2LoadResult::Error(
+                            "sam2.loadModels function not found".to_string(),
+                        ));
+                    }
+                    return;
+                }
+            };
+
+        // Call loadModels() - returns a Promise
+        let promise = match load_models_fn.call0(&sam2) {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("SAM2 WASM: Failed to call loadModels: {:?}", e);
+                if let Ok(mut state) = pending_sam2_state().lock() {
+                    *state = Some(Sam2LoadResult::Error(format!(
+                        "Failed to call loadModels: {:?}",
+                        e
+                    )));
+                }
+                return;
+            }
+        };
+
+        // Await the promise
+        let result = match JsFuture::from(js_sys::Promise::from(promise)).await {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("SAM2 WASM: loadModels promise rejected: {:?}", e);
+                if let Ok(mut state) = pending_sam2_state().lock() {
+                    *state = Some(Sam2LoadResult::Error(format!(
+                        "loadModels promise rejected: {:?}",
+                        e
+                    )));
+                }
+                return;
+            }
+        };
+
+        // Parse the result {success: boolean, error?: string}
+        let success = Reflect::get(&result, &wasm_bindgen::JsValue::from_str("success"))
+            .ok()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if !success {
+            let error = Reflect::get(&result, &wasm_bindgen::JsValue::from_str("error"))
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_else(|| "Unknown error".to_string());
+            log::error!("SAM2 WASM: Model loading failed: {}", error);
+            if let Ok(mut state) = pending_sam2_state().lock() {
+                *state = Some(Sam2LoadResult::Error(error));
+            }
+            return;
+        }
+
+        // Models loaded successfully - create wrapper structs
+        let encoder = crate::sam2::SAM2Encoder::new();
+        let decoder = crate::sam2::SAM2Decoder::new();
+
+        log::info!("SAM2 WASM: Models loaded successfully via onnxruntime-web!");
+
+        if let Ok(mut state) = pending_sam2_state().lock() {
+            *state = Some(Sam2LoadResult::Success(encoder, decoder));
+        }
+    }
+
+    /// Run SAM2 encoder asynchronously (WASM only).
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    async fn run_wasm_encoder(rgb_data: Vec<u8>, width: u32, height: u32) {
+        log::info!("SAM2 WASM: Starting async encoder...");
+
+        let encoder = crate::sam2::SAM2Encoder::new();
+        match encoder.encode_async(&rgb_data, width, height).await {
+            Ok(embeddings) => {
+                log::info!("SAM2 WASM: Encoding complete, shape {:?}", embeddings.shape);
+                let embeddings = std::sync::Arc::new(embeddings);
+                if let Ok(mut state) = pending_sam2_encode_state().lock() {
+                    *state = Some(Sam2EncodeResult::Success(embeddings));
+                }
+            }
+            Err(e) => {
+                log::error!("SAM2 WASM: Encoding failed: {}", e);
+                if let Ok(mut state) = pending_sam2_encode_state().lock() {
+                    *state = Some(Sam2EncodeResult::Error(format!("{}", e)));
+                }
+            }
+        }
+    }
+
+    /// Run SAM2 decoder asynchronously (WASM only).
+    #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+    async fn run_wasm_decoder(
+        embeddings: std::sync::Arc<crate::sam2::ImageEmbeddings>,
+        positive_points: Vec<(f32, f32)>,
+        negative_points: Vec<(f32, f32)>,
+        bounding_box: Option<(f32, f32, f32, f32)>,
+    ) {
+        log::info!("SAM2 WASM: Starting async decoder...");
+
+        let decoder = crate::sam2::SAM2Decoder::new();
+        match decoder
+            .decode_async(
+                &embeddings,
+                &positive_points,
+                &negative_points,
+                bounding_box,
+                None,
+            )
+            .await
+        {
+            Ok(mask) => {
+                log::info!("SAM2 WASM: Decoding complete, score={:.2}", mask.score);
+                if let Ok(mut state) = pending_sam2_decode_state().lock() {
+                    *state = Some(Sam2DecodeResult::Success(mask));
+                }
+            }
+            Err(e) => {
+                log::error!("SAM2 WASM: Decoding failed: {}", e);
+                if let Ok(mut state) = pending_sam2_decode_state().lock() {
+                    *state = Some(Sam2DecodeResult::Error(format!("{}", e)));
+                }
+            }
+        }
     }
 
     /// Push an undo point with annotation state to the unified undo stack.
@@ -853,6 +1152,47 @@ impl HvatApp {
                 }
                 // All other keys go to the text input
                 return None;
+            }
+
+            // SAM2-specific key handling when session is active
+            #[cfg(feature = "sam2")]
+            if let crate::sam2::SAM2State::Active { session } = &self.sam2_state {
+                // Ctrl+Z/Y for SAM2 prompt undo/redo
+                if modifiers.ctrl {
+                    match key {
+                        KeyCode::Z if modifiers.shift => {
+                            if session.can_redo_prompts() {
+                                return Some(Message::SAM2(crate::sam2::SAM2Message::RedoPrompts));
+                            }
+                        }
+                        KeyCode::Z => {
+                            if session.can_undo_prompts() {
+                                return Some(Message::SAM2(crate::sam2::SAM2Message::UndoPrompts));
+                            }
+                        }
+                        KeyCode::Y => {
+                            if session.can_redo_prompts() {
+                                return Some(Message::SAM2(crate::sam2::SAM2Message::RedoPrompts));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Enter accepts mask, Escape cancels session
+                match key {
+                    KeyCode::Enter => {
+                        if session.mask.is_some() {
+                            return Some(Message::SAM2(crate::sam2::SAM2Message::AcceptMask));
+                        }
+                    }
+                    KeyCode::Escape => {
+                        if session.has_prompts() {
+                            return Some(Message::SAM2(crate::sam2::SAM2Message::CancelSession));
+                        }
+                    }
+                    _ => {}
+                }
             }
 
             // Ctrl+key shortcuts (hardcoded, not customizable)
@@ -1549,6 +1889,23 @@ impl HvatApp {
             return;
         }
 
+        // Reset SAM2 state when switching images - embeddings are image-specific
+        #[cfg(feature = "sam2")]
+        {
+            use crate::sam2::SAM2State;
+            // Only reset if we're switching to a different image
+            let current_path = self.current_image_path();
+            if current_path != path {
+                if matches!(
+                    self.sam2_state,
+                    SAM2State::Active { .. } | SAM2State::Encoding { .. }
+                ) {
+                    log::info!("SAM2: Resetting session for new image");
+                    self.sam2_state = SAM2State::Ready;
+                }
+            }
+        }
+
         // Return current GPU state to cache before loading new image
         // This preserves the GPU textures for instant switching back
         if let (Some(old_state), Some(old_path)) =
@@ -1600,6 +1957,10 @@ impl HvatApp {
                         self.image_size.1,
                         self.num_bands
                     );
+
+                    // Auto-trigger SAM2 encoding if enabled and ready
+                    #[cfg(feature = "sam2")]
+                    self.maybe_start_sam2_encoding();
                 }
                 Err(e) => {
                     log::error!("Failed to create state from cache: {:?}", e);
@@ -1640,11 +2001,35 @@ impl HvatApp {
                     self.image_size.1,
                     self.num_bands
                 );
+
+                // Auto-trigger SAM2 encoding if enabled and ready
+                #[cfg(feature = "sam2")]
+                self.maybe_start_sam2_encoding();
             }
             Err(e) => {
                 log::error!("Failed to load image {:?}: {}", path, e);
             }
         }
+    }
+
+    /// Check if SAM2 encoding should be auto-started for the current image.
+    /// This is called after image load to pre-compute embeddings in the background.
+    #[cfg(feature = "sam2")]
+    fn maybe_start_sam2_encoding(&mut self) {
+        use crate::sam2::SAM2State;
+
+        // Only encode if SAM2 is enabled and models are ready
+        if !self.sam2_enabled {
+            return;
+        }
+
+        // Only encode if we're in Ready state (not already encoding or active)
+        if !matches!(self.sam2_state, SAM2State::Ready) {
+            return;
+        }
+
+        log::info!("SAM2: Auto-starting encoding for current image");
+        self.handle_sam2_message_impl(crate::sam2::SAM2Message::StartEncoding);
     }
 
     /// Preload adjacent images into the GPU cache.
@@ -2084,6 +2469,69 @@ impl HvatApp {
                 if event.kind == PointerEventKind::DragStart {
                     self.create_point_annotation(x, y);
                 }
+            }
+            #[cfg(feature = "sam2")]
+            AnnotationTool::SAM2Segment => {
+                self.handle_sam2_tool(x, y, event.kind, event.modifiers);
+            }
+        }
+    }
+
+    /// Handle SAM2 segmentation tool interactions.
+    #[cfg(feature = "sam2")]
+    fn handle_sam2_tool(
+        &mut self,
+        x: f32,
+        y: f32,
+        kind: hvat_ui::PointerEventKind,
+        modifiers: hvat_ui::KeyModifiers,
+    ) {
+        use crate::sam2::{SAM2Message, SAM2State};
+        use hvat_ui::PointerEventKind;
+
+        match kind {
+            PointerEventKind::DragStart => {
+                match &self.sam2_state {
+                    SAM2State::Active { .. } => {
+                        // Already active - add points normally
+                        if modifiers.shift {
+                            log::debug!("SAM2: Adding negative point at ({}, {})", x, y);
+                            self.handle_sam2_message_impl(SAM2Message::AddNegativePoint(x, y));
+                        } else {
+                            log::debug!("SAM2: Adding positive point at ({}, {})", x, y);
+                            self.handle_sam2_message_impl(SAM2Message::AddPositivePoint(x, y));
+                        }
+                    }
+                    SAM2State::Ready => {
+                        // First click when Ready - run encoder to get real embeddings
+                        log::info!("SAM2: First click at ({}, {}) - starting encoder", x, y);
+
+                        // Trigger encoding and add the first point via message handler
+                        if modifiers.shift {
+                            self.handle_sam2_message_impl(SAM2Message::AddNegativePoint(x, y));
+                        } else {
+                            self.handle_sam2_message_impl(SAM2Message::AddPositivePoint(x, y));
+                        }
+                    }
+                    SAM2State::Encoding { .. } => {
+                        log::debug!("SAM2: Click ignored - encoding in progress");
+                    }
+                    _ => {
+                        log::debug!(
+                            "SAM2: Click ignored - state is {:?}",
+                            std::mem::discriminant(&self.sam2_state)
+                        );
+                    }
+                }
+            }
+            PointerEventKind::DragMove => {
+                // Could be used for bbox drawing in the future
+            }
+            PointerEventKind::DragEnd => {
+                // Could finalize bbox in the future
+            }
+            PointerEventKind::Click => {
+                // Handled via DragStart
             }
         }
     }
@@ -2869,6 +3317,758 @@ impl HvatApp {
             }
         }
     }
+
+    /// Handle SAM2-specific messages.
+    #[cfg(feature = "sam2")]
+    fn handle_sam2_message_impl(&mut self, message: crate::sam2::SAM2Message) {
+        use crate::sam2::{SAM2Message, SAM2State};
+
+        match message {
+            SAM2Message::ToggleEnabled(enabled) => {
+                log::info!("SAM2 enabled: {}", enabled);
+                self.sam2_enabled = enabled;
+
+                if enabled {
+                    // Check if models are already loaded
+                    if self.sam2_encoder.is_some() && self.sam2_decoder.is_some() {
+                        // Models already loaded, go directly to Ready
+                        self.sam2_state = SAM2State::Ready;
+                        log::info!("SAM2 state: Ready (models already loaded)");
+
+                        // Auto-start encoding for current image if one is loaded
+                        if self.project.is_some() && self.hyperspectral.is_some() {
+                            log::info!("SAM2: Auto-starting encoding after enable");
+                            self.handle_sam2_message_impl(SAM2Message::StartEncoding);
+                        }
+                    } else {
+                        // Need to load models - do it in a background thread
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            // Set state to loading
+                            self.sam2_state = SAM2State::Encoding {
+                                image_path: std::path::PathBuf::from("__loading_models__"),
+                            };
+                            log::info!("SAM2: Loading models in background...");
+
+                            // Spawn background thread to load models
+                            let sender = self.sam2_model_channel.0.clone();
+                            std::thread::spawn(move || {
+                                // Model paths - expected to be in models/sam2/ directory
+                                let models_dir = std::path::PathBuf::from("models/sam2");
+                                let encoder_path = models_dir.join("sam2_hiera_tiny.encoder.onnx");
+                                let decoder_path = models_dir.join("sam2_hiera_tiny.decoder.onnx");
+
+                                // Check if models exist
+                                if !encoder_path.exists() {
+                                    log::error!("SAM2 encoder not found at {:?}", encoder_path);
+                                    let _ = sender.send(Err(format!(
+                                        "Encoder not found at {:?}. Download from https://huggingface.co/shubham0204/sam2-onnx-models",
+                                        encoder_path
+                                    )));
+                                    return;
+                                }
+                                if !decoder_path.exists() {
+                                    log::error!("SAM2 decoder not found at {:?}", decoder_path);
+                                    let _ = sender.send(Err(format!(
+                                        "Decoder not found at {:?}. Download from https://huggingface.co/shubham0204/sam2-onnx-models",
+                                        decoder_path
+                                    )));
+                                    return;
+                                }
+
+                                // Load encoder
+                                log::info!(
+                                    "SAM2 background: Loading encoder from {:?}...",
+                                    encoder_path
+                                );
+                                let encoder = match crate::sam2::SAM2Encoder::load(&encoder_path) {
+                                    Ok(e) => e,
+                                    Err(e) => {
+                                        log::error!("Failed to load SAM2 encoder: {}", e);
+                                        let _ = sender.send(Err(format!("Encoder: {}", e)));
+                                        return;
+                                    }
+                                };
+                                log::info!("SAM2 background: Encoder loaded");
+
+                                // Load decoder
+                                log::info!(
+                                    "SAM2 background: Loading decoder from {:?}...",
+                                    decoder_path
+                                );
+                                let decoder = match crate::sam2::SAM2Decoder::load(&decoder_path) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        log::error!("Failed to load SAM2 decoder: {}", e);
+                                        let _ = sender.send(Err(format!("Decoder: {}", e)));
+                                        return;
+                                    }
+                                };
+                                log::info!("SAM2 background: Decoder loaded");
+
+                                // Send loaded models back to main thread
+                                let _ = sender.send(Ok((encoder, decoder)));
+                            });
+                        }
+
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            // Check if models are already loaded
+                            if self.sam2_encoder.is_some() && self.sam2_decoder.is_some() {
+                                self.sam2_state = SAM2State::Ready;
+                                return;
+                            }
+
+                            // Check if already loading
+                            if self.sam2_loading_in_progress {
+                                log::info!("SAM2: Model loading already in progress");
+                                return;
+                            }
+
+                            self.sam2_loading_in_progress = true;
+                            self.sam2_state = SAM2State::DownloadingModels { progress: 0.0 };
+                            log::info!("SAM2: Starting model download (WASM)...");
+
+                            // Spawn async task to load models
+                            wasm_bindgen_futures::spawn_local(Self::load_sam2_models_wasm());
+                        }
+                    }
+                } else {
+                    // When disabled, go back to Disabled state
+                    self.sam2_state = SAM2State::Disabled;
+
+                    // If SAM2Segment tool was selected, switch back to Select
+                    if self.selected_tool == crate::model::AnnotationTool::SAM2Segment {
+                        self.selected_tool = crate::model::AnnotationTool::Select;
+                    }
+                }
+            }
+
+            SAM2Message::WorkerDownloadProgress(progress) => {
+                self.sam2_state = SAM2State::DownloadingWorker { progress };
+            }
+
+            SAM2Message::ModelDownloadProgress(progress) => {
+                self.sam2_state = SAM2State::DownloadingModels { progress };
+            }
+
+            SAM2Message::ModelsLoaded => {
+                self.sam2_state = SAM2State::Ready;
+                log::info!("SAM2 models loaded successfully");
+
+                // Auto-start encoding for current image if one is loaded
+                if self.project.is_some() && self.hyperspectral.is_some() {
+                    log::info!("SAM2: Auto-starting encoding after model load");
+                    self.handle_sam2_message_impl(SAM2Message::StartEncoding);
+                }
+            }
+
+            SAM2Message::LoadError(error) => {
+                log::error!("SAM2 load error: {}", error);
+                self.sam2_state = SAM2State::Error {
+                    message: error.clone(),
+                };
+            }
+
+            SAM2Message::StartEncoding => {
+                let path = self.current_image_path();
+                log::info!("SAM2 starting encoding for: {:?}", path);
+                self.sam2_state = SAM2State::Encoding {
+                    image_path: path.clone(),
+                };
+
+                // Run encoder on native platform in background thread
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    // Take encoder temporarily (will be returned via channel)
+                    let mut encoder = match self.sam2_encoder.take() {
+                        Some(enc) => enc,
+                        None => {
+                            log::error!("SAM2 encoder not loaded");
+                            self.sam2_state = SAM2State::Error {
+                                message: "Encoder not loaded".to_string(),
+                            };
+                            return;
+                        }
+                    };
+
+                    // Reload hyperspectral data fresh from project to ensure we have
+                    // the correct image data (GPU cache path may have skipped updating
+                    // self.hyperspectral when switching images)
+                    let hyper = if let Some(ref project) = self.project {
+                        match project
+                            .get_image_data(&path)
+                            .and_then(|data| HyperspectralData::from_bytes(&data))
+                        {
+                            Ok(h) => h,
+                            Err(e) => {
+                                log::error!("Failed to load image data for SAM2: {}", e);
+                                // Return encoder before erroring
+                                self.sam2_encoder = Some(encoder);
+                                self.sam2_state = SAM2State::Error {
+                                    message: format!("Failed to load image: {}", e),
+                                };
+                                return;
+                            }
+                        }
+                    } else {
+                        // No project - use existing hyperspectral data (test image case)
+                        match self.hyperspectral.clone() {
+                            Some(h) => h,
+                            None => {
+                                log::error!("No hyperspectral data loaded for SAM2 encoding");
+                                // Return encoder before erroring
+                                self.sam2_encoder = Some(encoder);
+                                self.sam2_state = SAM2State::Error {
+                                    message: "No image data loaded".to_string(),
+                                };
+                                return;
+                            }
+                        }
+                    };
+
+                    // Get RGB data from the freshly loaded hyperspectral data
+                    // using the currently selected bands (do this on main thread - fast)
+                    let (rgb_data, width, height) = {
+                        let (r_idx, g_idx, b_idx) = self.band_selection;
+                        let width = hyper.width;
+                        let height = hyper.height;
+                        let pixel_count = (width * height) as usize;
+
+                        // Build RGB array from selected bands
+                        let mut rgb = Vec::with_capacity(pixel_count * 3);
+                        for i in 0..pixel_count {
+                            // Get band values (f32 in 0.0-1.0 range)
+                            let r = hyper.bands.get(r_idx).map(|b| b[i]).unwrap_or(0.0);
+                            let g = hyper.bands.get(g_idx).map(|b| b[i]).unwrap_or(0.0);
+                            let b = hyper.bands.get(b_idx).map(|b| b[i]).unwrap_or(0.0);
+
+                            // Convert to u8
+                            rgb.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+                            rgb.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+                            rgb.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+                        }
+                        (rgb, width, height)
+                    };
+
+                    log::info!(
+                        "SAM2 encoding {}x{} image from bands ({}, {}, {}) - starting background thread",
+                        width,
+                        height,
+                        self.band_selection.0,
+                        self.band_selection.1,
+                        self.band_selection.2
+                    );
+
+                    // Spawn background thread for encoding
+                    let sender = self.sam2_encoding_channel.0.clone();
+                    std::thread::spawn(move || {
+                        log::info!("SAM2 background: Starting encoder inference...");
+                        let result = encoder.encode(&rgb_data, width, height);
+                        match result {
+                            Ok(embeddings) => {
+                                log::info!(
+                                    "SAM2 background: Encoding complete, shape {:?}",
+                                    embeddings.shape
+                                );
+                                let embeddings = std::sync::Arc::new(embeddings);
+                                let _ = sender.send(Ok(embeddings));
+                            }
+                            Err(e) => {
+                                log::error!("SAM2 background: Encoding failed: {}", e);
+                                let _ = sender.send(Err(format!("Encoding failed: {}", e)));
+                            }
+                        }
+                        // Note: encoder is dropped here, will need to be recreated
+                        // for subsequent encodings. This is acceptable since encoding
+                        // creates a new session anyway, and we reload the encoder.
+                    });
+                }
+
+                // WASM: Run encoder asynchronously via JavaScript onnxruntime-web
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // Check if encoder is loaded
+                    if self.sam2_encoder.is_none() {
+                        log::error!("SAM2 encoder not loaded");
+                        self.sam2_state = SAM2State::Error {
+                            message: "Encoder not loaded".to_string(),
+                        };
+                        return;
+                    }
+
+                    // Reload hyperspectral data fresh from project
+                    let hyper = if let Some(ref project) = self.project {
+                        match project
+                            .get_image_data(&path)
+                            .and_then(|data| HyperspectralData::from_bytes(&data))
+                        {
+                            Ok(h) => h,
+                            Err(e) => {
+                                log::error!("Failed to load image data for SAM2: {}", e);
+                                self.sam2_state = SAM2State::Error {
+                                    message: format!("Failed to load image: {}", e),
+                                };
+                                return;
+                            }
+                        }
+                    } else {
+                        match self.hyperspectral.clone() {
+                            Some(h) => h,
+                            None => {
+                                log::error!("No hyperspectral data loaded for SAM2 encoding");
+                                self.sam2_state = SAM2State::Error {
+                                    message: "No image data loaded".to_string(),
+                                };
+                                return;
+                            }
+                        }
+                    };
+
+                    // Get RGB data from the hyperspectral data
+                    let (rgb_data, width, height) = {
+                        let (r_idx, g_idx, b_idx) = self.band_selection;
+                        let width = hyper.width;
+                        let height = hyper.height;
+                        let pixel_count = (width * height) as usize;
+
+                        let mut rgb = Vec::with_capacity(pixel_count * 3);
+                        for i in 0..pixel_count {
+                            let r = hyper.bands.get(r_idx).map(|b| b[i]).unwrap_or(0.0);
+                            let g = hyper.bands.get(g_idx).map(|b| b[i]).unwrap_or(0.0);
+                            let b = hyper.bands.get(b_idx).map(|b| b[i]).unwrap_or(0.0);
+
+                            rgb.push((r.clamp(0.0, 1.0) * 255.0) as u8);
+                            rgb.push((g.clamp(0.0, 1.0) * 255.0) as u8);
+                            rgb.push((b.clamp(0.0, 1.0) * 255.0) as u8);
+                        }
+                        (rgb, width, height)
+                    };
+
+                    log::info!(
+                        "SAM2 WASM: encoding {}x{} image from bands ({}, {}, {})",
+                        width,
+                        height,
+                        self.band_selection.0,
+                        self.band_selection.1,
+                        self.band_selection.2
+                    );
+
+                    // Spawn async encoding task
+                    wasm_bindgen_futures::spawn_local(Self::run_wasm_encoder(
+                        rgb_data, width, height,
+                    ));
+                }
+            }
+
+            SAM2Message::EncodingComplete(embeddings) => {
+                let path = self.current_image_path();
+                let image_size = self.image_size;
+                log::info!("SAM2 encoding complete for: {:?}", path);
+
+                self.sam2_state = SAM2State::Active {
+                    session: crate::sam2::SAM2Session::new(path, embeddings, image_size),
+                };
+            }
+
+            SAM2Message::EncodingFailed(error) => {
+                log::error!("SAM2 encoding failed: {}", error);
+                self.sam2_state = SAM2State::Error { message: error };
+            }
+
+            SAM2Message::AddPositivePoint(x, y) => {
+                // If we're in Ready state, start encoding first
+                if matches!(self.sam2_state, SAM2State::Ready) {
+                    log::info!(
+                        "SAM2: First positive point ({}, {}), starting background encoding...",
+                        x,
+                        y
+                    );
+                    // Store the pending point to add after encoding completes
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.sam2_pending_first_point = Some((false, x, y)); // false = positive
+                    }
+                    self.handle_sam2_message_impl(SAM2Message::StartEncoding);
+                    // Note: encoding now happens in background, point will be added
+                    // when EncodingComplete is received
+                    return;
+                }
+
+                // If we're currently encoding, ignore additional points
+                if matches!(self.sam2_state, SAM2State::Encoding { .. }) {
+                    log::debug!("SAM2: Ignoring point - encoding in progress");
+                    return;
+                }
+
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    session.push_prompts_undo();
+                    session.prompts.add_positive_point(x, y);
+                    log::debug!("SAM2 added positive point: ({}, {})", x, y);
+                }
+                // Trigger decoder to compute new mask
+                self.run_sam2_decoder();
+            }
+
+            SAM2Message::AddNegativePoint(x, y) => {
+                // If we're in Ready state, start encoding first
+                if matches!(self.sam2_state, SAM2State::Ready) {
+                    log::info!(
+                        "SAM2: First negative point ({}, {}), starting background encoding...",
+                        x,
+                        y
+                    );
+                    // Store the pending point to add after encoding completes
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.sam2_pending_first_point = Some((true, x, y)); // true = negative
+                    }
+                    self.handle_sam2_message_impl(SAM2Message::StartEncoding);
+                    // Note: encoding now happens in background, point will be added
+                    // when EncodingComplete is received
+                    return;
+                }
+
+                // If we're currently encoding, ignore additional points
+                if matches!(self.sam2_state, SAM2State::Encoding { .. }) {
+                    log::debug!("SAM2: Ignoring point - encoding in progress");
+                    return;
+                }
+
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    session.push_prompts_undo();
+                    session.prompts.add_negative_point(x, y);
+                    log::debug!("SAM2 added negative point: ({}, {})", x, y);
+                }
+                // Trigger decoder to compute new mask
+                self.run_sam2_decoder();
+            }
+
+            SAM2Message::RemovePoint(index) => {
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    session.push_prompts_undo();
+                    if session.prompts.remove_point(index) {
+                        log::debug!("SAM2 removed point at index: {}", index);
+                    }
+                }
+                // Trigger decoder to compute new mask
+                self.run_sam2_decoder();
+            }
+
+            SAM2Message::RemovePointAt(x, y) => {
+                let mut removed = false;
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    // Check if there's a point to remove first before pushing undo
+                    // Use a tolerance of 10 pixels for point removal
+                    let tolerance = 10.0;
+                    let has_point_nearby = session
+                        .prompts
+                        .positive_points
+                        .iter()
+                        .chain(session.prompts.negative_points.iter())
+                        .any(|(px, py)| {
+                            let dx = x - px;
+                            let dy = y - py;
+                            dx * dx + dy * dy <= tolerance * tolerance
+                        });
+
+                    if has_point_nearby {
+                        session.push_prompts_undo();
+                        if let Some(index) = session.prompts.find_and_remove_point(x, y, tolerance)
+                        {
+                            log::debug!(
+                                "SAM2 removed point near ({}, {}) at index: {}",
+                                x,
+                                y,
+                                index
+                            );
+                            removed = true;
+                        }
+                    }
+                }
+                // Trigger decoder to compute new mask if point was removed
+                if removed {
+                    self.run_sam2_decoder();
+                }
+            }
+
+            SAM2Message::SetBoundingBox(x, y, width, height) => {
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    session.push_prompts_undo();
+                    session.prompts.set_bounding_box(x, y, width, height);
+                    log::debug!(
+                        "SAM2 set bounding box: ({}, {}, {}, {})",
+                        x,
+                        y,
+                        width,
+                        height
+                    );
+                }
+                // Trigger decoder to compute new mask
+                self.run_sam2_decoder();
+            }
+
+            SAM2Message::ClearBoundingBox => {
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    if session.prompts.bounding_box.is_some() {
+                        session.push_prompts_undo();
+                        session.prompts.clear_bounding_box();
+                        log::debug!("SAM2 cleared bounding box");
+                    }
+                }
+                // Trigger decoder to compute new mask
+                self.run_sam2_decoder();
+            }
+
+            SAM2Message::ClearPrompts => {
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    if session.has_prompts() {
+                        session.push_prompts_undo();
+                        session.prompts.clear();
+                        session.mask = None;
+                        log::debug!("SAM2 cleared all prompts");
+                    }
+                }
+            }
+
+            SAM2Message::MaskComputed(mask) => {
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    log::debug!(
+                        "SAM2 mask computed: {}x{}, score: {:.2}",
+                        mask.width,
+                        mask.height,
+                        mask.score
+                    );
+                    session.mask = Some(mask);
+                    session.computing = false;
+                }
+            }
+
+            SAM2Message::MaskFailed(error) => {
+                log::error!("SAM2 mask computation failed: {}", error);
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    session.computing = false;
+                }
+            }
+
+            SAM2Message::UndoPrompts => {
+                let mut needs_decode = false;
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    if session.undo_prompts() {
+                        log::debug!("SAM2 undid prompt change");
+                        needs_decode = session.has_prompts();
+                    }
+                }
+                // Trigger decoder to compute new mask if there are prompts
+                if needs_decode {
+                    self.run_sam2_decoder();
+                }
+            }
+
+            SAM2Message::RedoPrompts => {
+                let mut needs_decode = false;
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    if session.redo_prompts() {
+                        log::debug!("SAM2 redid prompt change");
+                        needs_decode = session.has_prompts();
+                    }
+                }
+                // Trigger decoder to compute new mask if there are prompts
+                if needs_decode {
+                    self.run_sam2_decoder();
+                }
+            }
+
+            SAM2Message::AcceptMask => {
+                if let SAM2State::Active { session } = &self.sam2_state {
+                    if let Some(mask) = &session.mask {
+                        if !mask.contour.is_empty() {
+                            // Use the session's image path, not current_image_path()
+                            // This ensures the annotation is saved to the correct image
+                            // even if the user navigated away during mask computation
+                            let session_path = session.image_path.clone();
+                            let contour = mask.contour.clone();
+                            let category = self.selected_category;
+
+                            log::info!(
+                                "SAM2 accepting mask as polygon with {} vertices for {:?}",
+                                contour.len(),
+                                session_path
+                            );
+
+                            // Push undo point before creating annotation
+                            self.push_annotation_undo_point();
+
+                            // Create polygon annotation from mask contour
+                            if let Some(image_data) = self.image_data_store.get_mut(&session_path) {
+                                let annotation = crate::model::Annotation::new(
+                                    image_data.next_annotation_id,
+                                    crate::model::AnnotationShape::Polygon { vertices: contour },
+                                    category,
+                                );
+                                image_data.next_annotation_id += 1;
+                                image_data.annotations.push(annotation);
+                                self.auto_save.mark_dirty();
+                            }
+
+                            // Clear the session prompts and history for next segmentation
+                            if let SAM2State::Active { session } = &mut self.sam2_state {
+                                session.prompts.clear();
+                                session.mask = None;
+                                session.clear_prompts_history();
+                            }
+                        } else {
+                            log::warn!("SAM2 mask has no contour, cannot accept");
+                        }
+                    } else {
+                        log::warn!("SAM2 has no mask to accept");
+                    }
+                }
+            }
+
+            SAM2Message::CancelSession => {
+                if let SAM2State::Active { session } = &mut self.sam2_state {
+                    session.prompts.clear();
+                    session.mask = None;
+                    session.clear_prompts_history();
+                    log::info!("SAM2 session cancelled");
+                }
+            }
+        }
+    }
+
+    /// Runs the SAM2 decoder to compute a new mask from current prompts.
+    #[cfg(feature = "sam2")]
+    fn run_sam2_decoder(&mut self) {
+        use crate::sam2::SAM2State;
+
+        // Only run on native platform for now (WASM needs WebGPU/tract backend)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Check if we have a decoder and an active session with prompts
+            let decoder = match self.sam2_decoder.as_mut() {
+                Some(d) => d,
+                None => {
+                    log::warn!("SAM2 decoder not loaded, skipping decode");
+                    return;
+                }
+            };
+
+            // Get session data (embeddings, prompts)
+            let (embeddings, positive_points, negative_points, bounding_box) =
+                match &self.sam2_state {
+                    SAM2State::Active { session } => {
+                        if session.prompts.positive_points.is_empty()
+                            && session.prompts.negative_points.is_empty()
+                            && session.prompts.bounding_box.is_none()
+                        {
+                            log::debug!("SAM2: No prompts, clearing mask");
+                            // Clear mask if no prompts
+                            if let SAM2State::Active { session } = &mut self.sam2_state {
+                                session.mask = None;
+                            }
+                            return;
+                        }
+                        (
+                            session.embeddings.clone(),
+                            session.prompts.positive_points.clone(),
+                            session.prompts.negative_points.clone(),
+                            session.prompts.bounding_box,
+                        )
+                    }
+                    _ => {
+                        log::debug!("SAM2: No active session, skipping decode");
+                        return;
+                    }
+                };
+
+            log::info!(
+                "SAM2: Running decoder with {} positive, {} negative points",
+                positive_points.len(),
+                negative_points.len()
+            );
+
+            // Run the decoder
+            let start = std::time::Instant::now();
+            match decoder.decode(
+                &embeddings,
+                &positive_points,
+                &negative_points,
+                bounding_box,
+                None, // No previous mask for now
+            ) {
+                Ok(mask) => {
+                    let elapsed = start.elapsed();
+                    log::info!(
+                        "SAM2: Mask computed in {:?}, score={:.2}, {} contour vertices",
+                        elapsed,
+                        mask.score,
+                        mask.contour.len()
+                    );
+
+                    // Update the session with the new mask
+                    if let SAM2State::Active { session } = &mut self.sam2_state {
+                        session.mask = Some(mask);
+                    }
+                }
+                Err(e) => {
+                    log::error!("SAM2 decoder failed: {}", e);
+                }
+            }
+        }
+
+        // WASM: Run decoder asynchronously via JavaScript onnxruntime-web
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Check if we have a decoder loaded
+            if self.sam2_decoder.is_none() {
+                log::warn!("SAM2 decoder not loaded, skipping decode");
+                return;
+            }
+
+            // Get session data (embeddings, prompts)
+            let (embeddings, positive_points, negative_points, bounding_box) =
+                match &self.sam2_state {
+                    SAM2State::Active { session } => {
+                        if session.prompts.positive_points.is_empty()
+                            && session.prompts.negative_points.is_empty()
+                            && session.prompts.bounding_box.is_none()
+                        {
+                            log::debug!("SAM2 WASM: No prompts, clearing mask");
+                            // Clear mask if no prompts
+                            if let SAM2State::Active { session } = &mut self.sam2_state {
+                                session.mask = None;
+                            }
+                            return;
+                        }
+                        (
+                            session.embeddings.clone(),
+                            session.prompts.positive_points.clone(),
+                            session.prompts.negative_points.clone(),
+                            session.prompts.bounding_box,
+                        )
+                    }
+                    _ => {
+                        log::debug!("SAM2 WASM: No active session, skipping decode");
+                        return;
+                    }
+                };
+
+            log::info!(
+                "SAM2 WASM: Running async decoder with {} positive, {} negative points",
+                positive_points.len(),
+                negative_points.len()
+            );
+
+            // Spawn async decoding task
+            wasm_bindgen_futures::spawn_local(Self::run_wasm_decoder(
+                embeddings,
+                positive_points,
+                negative_points,
+                bounding_box,
+            ));
+        }
+    }
 }
 
 // ============================================================================
@@ -3001,6 +4201,17 @@ impl Application for HvatApp {
                 log::info!("Folder loaded with {} images", project.images.len());
                 // Clear GPU cache when folder changes
                 self.gpu_cache.clear();
+
+                // Reset SAM2 state when loading a new folder
+                #[cfg(feature = "sam2")]
+                {
+                    use crate::sam2::SAM2State;
+                    if !matches!(self.sam2_state, SAM2State::Disabled | SAM2State::Ready) {
+                        log::info!("SAM2: Resetting session for new folder");
+                        self.sam2_state = SAM2State::Ready;
+                    }
+                }
+
                 self.project = Some(project);
                 self.pending_image_load = true;
             }
@@ -3009,6 +4220,16 @@ impl Application for HvatApp {
                     project.prev();
                     self.pending_image_load = true;
                     log::info!("Previous image: {}", project.current_name());
+
+                    // Reset SAM2 state when switching images
+                    #[cfg(feature = "sam2")]
+                    {
+                        use crate::sam2::SAM2State;
+                        if !matches!(self.sam2_state, SAM2State::Disabled | SAM2State::Ready) {
+                            log::info!("SAM2: Resetting session for image navigation");
+                            self.sam2_state = SAM2State::Ready;
+                        }
+                    }
                 }
             }
             Message::NextImage => {
@@ -3016,6 +4237,16 @@ impl Application for HvatApp {
                     project.next();
                     self.pending_image_load = true;
                     log::info!("Next image: {}", project.current_name());
+
+                    // Reset SAM2 state when switching images
+                    #[cfg(feature = "sam2")]
+                    {
+                        use crate::sam2::SAM2State;
+                        if !matches!(self.sam2_state, SAM2State::Disabled | SAM2State::Ready) {
+                            log::info!("SAM2: Resetting session for image navigation");
+                            self.sam2_state = SAM2State::Ready;
+                        }
+                    }
                 }
             }
             Message::ToggleSettings => {
@@ -3513,6 +4744,22 @@ impl Application for HvatApp {
                             project.current_index = index;
                             self.pending_image_load = true;
                             log::info!("File explorer: selected '{}' (index {})", file_path, index);
+
+                            // Reset SAM2 state when switching images
+                            #[cfg(feature = "sam2")]
+                            {
+                                use crate::sam2::SAM2State;
+                                if !matches!(
+                                    self.sam2_state,
+                                    SAM2State::Disabled | SAM2State::Ready
+                                ) {
+                                    log::info!(
+                                        "SAM2: Resetting session for file explorer selection"
+                                    );
+                                    self.sam2_state = SAM2State::Ready;
+                                }
+                            }
+
                             break;
                         }
                     }
@@ -3532,6 +4779,16 @@ impl Application for HvatApp {
                         project.current_index = index;
                         self.pending_image_load = true;
                         log::info!("Thumbnail: selected image {}", index);
+
+                        // Reset SAM2 state when switching images
+                        #[cfg(feature = "sam2")]
+                        {
+                            use crate::sam2::SAM2State;
+                            if !matches!(self.sam2_state, SAM2State::Disabled | SAM2State::Ready) {
+                                log::info!("SAM2: Resetting session for thumbnail selection");
+                                self.sam2_state = SAM2State::Ready;
+                            }
+                        }
                     }
                 }
             }
@@ -4131,6 +5388,12 @@ impl Application for HvatApp {
                     }
                 }
             }
+            // SAM2 AI-Assisted Segmentation (feature-gated)
+            #[cfg(feature = "sam2")]
+            Message::SAM2(sam2_msg) => {
+                log::debug!("SAM2 message: {:?}", sam2_msg);
+                Self::handle_sam2_message_impl(self, sam2_msg);
+            }
         }
     }
 
@@ -4175,6 +5438,270 @@ impl Application for HvatApp {
                 log::info!("Processing config from async import");
                 self.apply_config_from_json(&json);
                 needs_rebuild = true;
+            }
+        }
+
+        // Check for SAM2 model loading completion (native only)
+        #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+        let sam2_loading = {
+            use crate::sam2::SAM2State;
+            // Only check if we're in the loading state
+            let is_loading = matches!(
+                self.sam2_state,
+                SAM2State::Encoding { ref image_path } if image_path.to_str() == Some("__loading_models__")
+            );
+
+            if is_loading {
+                // Non-blocking check for loaded models
+                if let Ok(result) = self.sam2_model_channel.1.try_recv() {
+                    match result {
+                        Ok((encoder, decoder)) => {
+                            log::info!("SAM2: Models loaded successfully in background");
+                            self.sam2_encoder = Some(encoder);
+                            self.sam2_decoder = Some(decoder);
+                            self.sam2_state = SAM2State::Ready;
+                            needs_rebuild = true;
+
+                            // Auto-start encoding for current image if one is loaded
+                            if self.project.is_some() && self.hyperspectral.is_some() {
+                                log::info!("SAM2: Auto-starting encoding after native model load");
+                                self.handle_sam2_message_impl(
+                                    crate::sam2::SAM2Message::StartEncoding,
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("SAM2: Background model loading failed: {}", e);
+                            self.sam2_state = SAM2State::Error {
+                                message: format!("Failed to load models: {}", e),
+                            };
+                            needs_rebuild = true;
+                        }
+                    }
+                    false // No longer loading
+                } else {
+                    true // Still loading, need to keep polling
+                }
+            } else {
+                false
+            }
+        };
+        #[cfg(not(all(feature = "sam2", not(target_arch = "wasm32"))))]
+        let sam2_loading = false;
+
+        // Check for SAM2 model loading completion (WASM)
+        #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+        {
+            use crate::sam2::SAM2State;
+            if let Ok(mut pending) = pending_sam2_state().lock() {
+                if let Some(result) = pending.take() {
+                    match result {
+                        Sam2LoadResult::Success(encoder, decoder) => {
+                            log::info!("SAM2 WASM: Models loaded successfully");
+                            self.sam2_encoder = Some(encoder);
+                            self.sam2_decoder = Some(decoder);
+                            self.sam2_state = SAM2State::Ready;
+                            self.sam2_loading_in_progress = false;
+                            needs_rebuild = true;
+
+                            // Auto-start encoding for current image if one is loaded
+                            if self.project.is_some() && self.hyperspectral.is_some() {
+                                log::info!("SAM2: Auto-starting encoding after WASM model load");
+                                self.handle_sam2_message_impl(
+                                    crate::sam2::SAM2Message::StartEncoding,
+                                );
+                            }
+                        }
+                        Sam2LoadResult::Error(e) => {
+                            log::error!("SAM2 WASM: Model loading failed: {}", e);
+                            self.sam2_state = SAM2State::Error {
+                                message: format!("Failed to load models: {}", e),
+                            };
+                            self.sam2_loading_in_progress = false;
+                            needs_rebuild = true;
+                        }
+                        Sam2LoadResult::Progress(progress) => {
+                            self.sam2_state = SAM2State::DownloadingModels { progress };
+                            // Put it back since we need to keep checking
+                            // Actually no - the async task will send more progress updates
+                            needs_rebuild = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for SAM2 encoding completion (WASM)
+        #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+        {
+            use crate::sam2::SAM2State;
+            if let Ok(mut pending) = pending_sam2_encode_state().lock() {
+                if let Some(result) = pending.take() {
+                    match result {
+                        Sam2EncodeResult::Success(embeddings) => {
+                            log::info!("SAM2 WASM: Encoding complete, creating session");
+                            let path = self.current_image_path();
+                            let image_size = self.image_size;
+
+                            // Create the active session
+                            let session =
+                                crate::sam2::SAM2Session::new(path, embeddings, image_size);
+
+                            self.sam2_state = SAM2State::Active { session };
+                            needs_rebuild = true;
+                        }
+                        Sam2EncodeResult::Error(e) => {
+                            log::error!("SAM2 WASM: Encoding failed: {}", e);
+                            self.sam2_state = SAM2State::Error {
+                                message: format!("Encoding failed: {}", e),
+                            };
+                            needs_rebuild = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for SAM2 decoding completion (WASM)
+        #[cfg(all(feature = "sam2", target_arch = "wasm32"))]
+        {
+            use crate::sam2::SAM2State;
+            if let Ok(mut pending) = pending_sam2_decode_state().lock() {
+                if let Some(result) = pending.take() {
+                    match result {
+                        Sam2DecodeResult::Success(mask) => {
+                            log::info!("SAM2 WASM: Decoding complete");
+                            // Update session with new mask
+                            if let SAM2State::Active { ref mut session } = self.sam2_state {
+                                session.mask = Some(mask);
+                                session.computing = false;
+                            }
+                            needs_rebuild = true;
+                        }
+                        Sam2DecodeResult::Error(e) => {
+                            log::error!("SAM2 WASM: Decoding failed: {}", e);
+                            // Don't transition to error state, just log it
+                            // The session can continue with the existing mask
+                            needs_rebuild = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for SAM2 encoding completion (native only)
+        #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+        let sam2_encoding = {
+            use crate::sam2::SAM2State;
+            // Only check if we're in the encoding state (but not the special model loading marker)
+            let is_encoding = matches!(
+                &self.sam2_state,
+                SAM2State::Encoding { image_path } if image_path.to_str() != Some("__loading_models__")
+            );
+
+            if is_encoding {
+                // Non-blocking check for encoding result
+                if let Ok(result) = self.sam2_encoding_channel.1.try_recv() {
+                    match result {
+                        Ok(embeddings) => {
+                            log::info!("SAM2: Encoding complete in background, creating session");
+                            let path = self.current_image_path();
+                            let image_size = self.image_size;
+
+                            // Create the active session
+                            let mut session =
+                                crate::sam2::SAM2Session::new(path, embeddings, image_size);
+
+                            // Add the pending first point if any
+                            if let Some((is_negative, x, y)) = self.sam2_pending_first_point.take()
+                            {
+                                if is_negative {
+                                    session.prompts.add_negative_point(x, y);
+                                    log::debug!(
+                                        "SAM2: Added pending negative point: ({}, {})",
+                                        x,
+                                        y
+                                    );
+                                } else {
+                                    session.prompts.add_positive_point(x, y);
+                                    log::debug!(
+                                        "SAM2: Added pending positive point: ({}, {})",
+                                        x,
+                                        y
+                                    );
+                                }
+                            }
+
+                            self.sam2_state = SAM2State::Active { session };
+
+                            // Reload encoder for future use (it was consumed by the thread)
+                            // This is done asynchronously via the model channel
+                            log::info!("SAM2: Reloading encoder for future use...");
+                            let encoder_path =
+                                std::path::PathBuf::from("sam2_hiera_tiny.encoder.onnx");
+                            let decoder_path =
+                                std::path::PathBuf::from("sam2_hiera_tiny.decoder.onnx");
+                            let sender = self.sam2_model_channel.0.clone();
+                            std::thread::spawn(move || {
+                                let encoder = match crate::sam2::SAM2Encoder::load(&encoder_path) {
+                                    Ok(e) => e,
+                                    Err(e) => {
+                                        log::error!("Failed to reload SAM2 encoder: {}", e);
+                                        return;
+                                    }
+                                };
+                                let decoder = match crate::sam2::SAM2Decoder::load(&decoder_path) {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        log::error!("Failed to reload SAM2 decoder: {}", e);
+                                        return;
+                                    }
+                                };
+                                // Ignoring result since we'll pick it up later
+                                let _ = sender.send(Ok((encoder, decoder)));
+                            });
+
+                            // Trigger decoder to compute mask for the first point
+                            self.run_sam2_decoder();
+                            needs_rebuild = true;
+                        }
+                        Err(e) => {
+                            log::error!("SAM2: Background encoding failed: {}", e);
+                            self.sam2_state = SAM2State::Error {
+                                message: format!("Encoding failed: {}", e),
+                            };
+                            self.sam2_pending_first_point = None;
+                            needs_rebuild = true;
+                        }
+                    }
+                    false // No longer encoding
+                } else {
+                    true // Still encoding, need to keep polling
+                }
+            } else {
+                false
+            }
+        };
+        #[cfg(not(all(feature = "sam2", not(target_arch = "wasm32"))))]
+        let sam2_encoding = false;
+
+        // Check if we received a reloaded encoder from background (after encoding completed)
+        #[cfg(all(feature = "sam2", not(target_arch = "wasm32")))]
+        {
+            if !sam2_loading && !sam2_encoding {
+                // Only check for reloaded encoder if we're not already loading/encoding
+                if let Ok(result) = self.sam2_model_channel.1.try_recv() {
+                    match result {
+                        Ok((encoder, decoder)) => {
+                            log::info!("SAM2: Encoder/decoder reloaded for future use");
+                            self.sam2_encoder = Some(encoder);
+                            self.sam2_decoder = Some(decoder);
+                        }
+                        Err(e) => {
+                            log::warn!("SAM2: Failed to reload encoder/decoder: {}", e);
+                        }
+                    }
+                }
             }
         }
 
@@ -4247,6 +5774,9 @@ impl Application for HvatApp {
 
         if needs_rebuild {
             TickResult::NeedsRebuild
+        } else if sam2_loading || sam2_encoding {
+            // SAM2 models are loading or encoding in background, keep polling
+            TickResult::ScheduleTick
         } else if tooltip_pending {
             // Tooltip is pending but not visible yet - request idle timer to show it
             // The framework will fire Event::IdleTimer after this duration of inactivity

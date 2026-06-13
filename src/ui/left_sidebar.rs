@@ -151,6 +151,34 @@ fn tool_tooltip(tool: AnnotationTool, hotkey: &str) -> TooltipContent {
                 hotkey
             ),
         ),
+        #[cfg(feature = "sam2")]
+        AnnotationTool::SAM2Segment => TooltipContent::rich(
+            "SAM2 Segment Tool",
+            format!(
+                "Hotkey: {}\n\nAI-assisted segmentation using SAM2.\n\
+                Left click for positive points (include).\n\
+                Shift+click for negative points (exclude).\n\
+                Right-click to remove points.\n\
+                Drag to draw bounding box.\n\
+                Enter to accept, Escape to cancel.",
+                hotkey
+            ),
+        ),
+    }
+}
+
+/// Get SAM2 status text for display
+#[cfg(feature = "sam2")]
+fn sam2_status_text(state: &crate::sam2::SAM2State) -> &'static str {
+    match state {
+        crate::sam2::SAM2State::Disabled => "Disabled",
+        crate::sam2::SAM2State::DownloadingWorker { .. } => "Downloading worker...",
+        crate::sam2::SAM2State::DownloadingModels { .. } => "Downloading models...",
+        crate::sam2::SAM2State::Loading => "Loading...",
+        crate::sam2::SAM2State::Ready => "Ready",
+        crate::sam2::SAM2State::Encoding { .. } => "Encoding image...",
+        crate::sam2::SAM2State::Active { .. } => "Active",
+        crate::sam2::SAM2State::Error { .. } => "Error",
     }
 }
 
@@ -240,11 +268,16 @@ impl HvatApp {
         // Tools Collapsible
         let tools_s = tools_state.clone();
         let keybindings_for_tools = keybindings.clone();
+        #[cfg(feature = "sam2")]
+        let sam2_enabled = self.sam2_enabled;
+        #[cfg(feature = "sam2")]
+        let sam2_state = self.sam2_state.clone();
         let collapsible_tools = Collapsible::new("Annotation Tools")
             .state(&tools_s)
             .width(Length::Fill(1.0))
             .on_toggle(Message::ToolsToggled)
             .content(move |c| {
+                // Standard annotation tools
                 for tool in AnnotationTool::all() {
                     let is_selected = *tool == selected_tool;
                     let tool_copy = *tool;
@@ -272,6 +305,61 @@ impl HvatApp {
                             |id| Message::TooltipClear(id),
                         )
                         .on_click(Message::ToolSelected(tool_copy));
+                }
+
+                // SAM2 AI-Assisted Segmentation section (feature-gated)
+                #[cfg(feature = "sam2")]
+                {
+                    c.text(""); // Separator
+                    c.text("AI Segmentation").size(FONT_SIZE_SECONDARY);
+
+                    // SAM2 enable checkbox
+                    let checkbox_label = if sam2_enabled {
+                        "[x] Enable SAM2"
+                    } else {
+                        "[ ] Enable SAM2"
+                    };
+                    c.button(checkbox_label)
+                        .width(Length::Fill(1.0))
+                        .padding(BUTTON_PADDING_COMPACT)
+                        .on_click(Message::SAM2(crate::sam2::SAM2Message::ToggleEnabled(
+                            !sam2_enabled,
+                        )));
+
+                    // Show status when enabled
+                    if sam2_enabled {
+                        let status = sam2_status_text(&sam2_state);
+                        c.text(format!("Status: {}", status)).size(FONT_SIZE_SMALL);
+
+                        // Show error message if in error state
+                        if let crate::sam2::SAM2State::Error { message } = &sam2_state {
+                            c.text(format!("Error: {}", message)).size(FONT_SIZE_SMALL);
+                        }
+
+                        // Show SAM2Segment tool button when ready
+                        if sam2_state.is_ready() {
+                            let is_sam2_selected = selected_tool == AnnotationTool::SAM2Segment;
+                            let sam2_label = if is_sam2_selected {
+                                "> SAM2 Segment < (S)"
+                            } else {
+                                "SAM2 Segment (S)"
+                            };
+
+                            let tooltip_content = tool_tooltip(AnnotationTool::SAM2Segment, "S");
+
+                            c.button(sam2_label)
+                                .width(Length::Fill(1.0))
+                                .tooltip(
+                                    "tool_sam2_segment",
+                                    tooltip_content,
+                                    |id, content, bounds, pos| {
+                                        Message::TooltipRequest(id, content, bounds, pos)
+                                    },
+                                    |id| Message::TooltipClear(id),
+                                )
+                                .on_click(Message::ToolSelected(AnnotationTool::SAM2Segment));
+                        }
+                    }
                 }
             });
         sidebar_ctx.add(Element::new(collapsible_tools));

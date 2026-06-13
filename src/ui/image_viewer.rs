@@ -40,6 +40,8 @@ impl HvatApp {
         let overlays = self.build_overlays();
         let interaction_mode = match self.selected_tool {
             AnnotationTool::Select => InteractionMode::Annotate, // Select also needs pointer events
+            #[cfg(feature = "sam2")]
+            AnnotationTool::SAM2Segment => InteractionMode::Annotate, // SAM2 needs pointer events
             _ if self.selected_tool.is_drawing_tool() => InteractionMode::Annotate,
             _ => InteractionMode::View,
         };
@@ -99,7 +101,95 @@ impl HvatApp {
             });
         }
 
+        // Add SAM2 point overlays if SAM2 is active
+        #[cfg(feature = "sam2")]
+        self.add_sam2_overlays(&mut overlays);
+
+        log::info!(
+            "build_overlays: returning {} overlays total",
+            overlays.len()
+        );
         overlays
+    }
+
+    /// Add SAM2 point overlays (positive = green, negative = red).
+    #[cfg(feature = "sam2")]
+    fn add_sam2_overlays(&self, overlays: &mut Vec<AnnotationOverlay>) {
+        use crate::sam2::SAM2State;
+
+        // Debug: Log current SAM2 state
+        log::info!(
+            "SAM2 overlay check: state={:?}",
+            std::mem::discriminant(&self.sam2_state)
+        );
+
+        if let SAM2State::Active { session } = &self.sam2_state {
+            // Only render SAM2 overlays if the session is for the current image
+            let current_path = self.current_image_path();
+            if session.image_path != current_path {
+                log::debug!("SAM2 session is for different image, not rendering overlays");
+                return;
+            }
+
+            log::info!(
+                "SAM2 Active: {} positive, {} negative points",
+                session.prompts.positive_points.len(),
+                session.prompts.negative_points.len()
+            );
+            // Add positive points (green)
+            for (x, y) in &session.prompts.positive_points {
+                log::info!("SAM2: Adding overlay for positive point at ({}, {})", x, y);
+                overlays.push(AnnotationOverlay {
+                    shape: OverlayShape::Point { x: *x, y: *y },
+                    color: [0.0, 0.8, 0.2, 1.0], // Green
+                    line_width: 3.0,
+                    selected: false,
+                });
+            }
+
+            // Add negative points (red)
+            for (x, y) in &session.prompts.negative_points {
+                overlays.push(AnnotationOverlay {
+                    shape: OverlayShape::Point { x: *x, y: *y },
+                    color: [0.9, 0.2, 0.2, 1.0], // Red
+                    line_width: 3.0,
+                    selected: false,
+                });
+            }
+
+            // Render mask contour if available
+            if let Some(mask) = &session.mask {
+                if !mask.contour.is_empty() {
+                    log::debug!(
+                        "SAM2: Rendering mask contour with {} vertices, score={:.2}",
+                        mask.contour.len(),
+                        mask.score
+                    );
+                    // Render the mask contour as a semi-transparent filled polygon
+                    overlays.push(AnnotationOverlay {
+                        shape: OverlayShape::Polygon {
+                            vertices: mask.contour.clone(),
+                            closed: true,
+                        },
+                        color: [0.2, 0.6, 1.0, 0.4], // Blue semi-transparent
+                        line_width: 2.0,
+                        selected: true, // Highlight the mask
+                    });
+                }
+            }
+
+            // Log the number of SAM2 points for debugging
+            let total =
+                session.prompts.positive_points.len() + session.prompts.negative_points.len();
+            if total > 0 {
+                log::trace!(
+                    "SAM2: Rendering {} points ({} positive, {} negative)",
+                    total,
+                    session.prompts.positive_points.len(),
+                    session.prompts.negative_points.len()
+                );
+            }
+        }
     }
 
     /// Get preview overlay for current drawing state.

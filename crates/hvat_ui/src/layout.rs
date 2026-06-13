@@ -18,10 +18,14 @@ impl Bounds {
     };
 
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        debug_assert!(width >= 0.0, "Bounds width cannot be negative: {}", width);
         debug_assert!(
-            height >= 0.0,
-            "Bounds height cannot be negative: {}",
+            width >= 0.0 && !width.is_nan(),
+            "Bounds width cannot be negative or NaN: {}",
+            width
+        );
+        debug_assert!(
+            height >= 0.0 && !height.is_nan(),
+            "Bounds height cannot be negative or NaN: {}",
             height
         );
         Self {
@@ -152,14 +156,26 @@ impl Size {
     };
 
     pub fn new(width: f32, height: f32) -> Self {
-        debug_assert!(width >= 0.0, "Size width cannot be negative: {}", width);
-        debug_assert!(height >= 0.0, "Size height cannot be negative: {}", height);
+        debug_assert!(
+            width >= 0.0 && !width.is_nan(),
+            "Size width cannot be negative or NaN: {}",
+            width
+        );
+        debug_assert!(
+            height >= 0.0 && !height.is_nan(),
+            "Size height cannot be negative or NaN: {}",
+            height
+        );
         Self { width, height }
     }
 
     /// Create a square size
     pub fn square(size: f32) -> Self {
-        debug_assert!(size >= 0.0, "Square size cannot be negative: {}", size);
+        debug_assert!(
+            size >= 0.0 && !size.is_nan(),
+            "Square size cannot be negative or NaN: {}",
+            size
+        );
         Self {
             width: size,
             height: size,

@@ -140,6 +140,9 @@ pub enum AnnotationTool {
     Polygon,
     /// Point annotation tool
     Point,
+    /// SAM2 AI-assisted segmentation tool (requires sam2 feature)
+    #[cfg(feature = "sam2")]
+    SAM2Segment,
 }
 
 impl Default for AnnotationTool {
@@ -156,10 +159,12 @@ impl AnnotationTool {
             AnnotationTool::BoundingBox => "Bounding Box",
             AnnotationTool::Polygon => "Polygon",
             AnnotationTool::Point => "Point",
+            #[cfg(feature = "sam2")]
+            AnnotationTool::SAM2Segment => "SAM2 Segment",
         }
     }
 
-    /// Get all available annotation tools.
+    /// Get all available annotation tools (without SAM2).
     pub fn all() -> &'static [AnnotationTool] {
         &[
             AnnotationTool::Select,
@@ -169,9 +174,26 @@ impl AnnotationTool {
         ]
     }
 
+    /// Get all available annotation tools including SAM2 if enabled.
+    #[cfg(feature = "sam2")]
+    pub fn all_with_sam2() -> &'static [AnnotationTool] {
+        &[
+            AnnotationTool::Select,
+            AnnotationTool::BoundingBox,
+            AnnotationTool::Polygon,
+            AnnotationTool::Point,
+            AnnotationTool::SAM2Segment,
+        ]
+    }
+
     /// Check if this tool is a drawing tool (not Select).
     pub fn is_drawing_tool(&self) -> bool {
-        !matches!(self, AnnotationTool::Select)
+        match self {
+            AnnotationTool::Select => false,
+            #[cfg(feature = "sam2")]
+            AnnotationTool::SAM2Segment => false, // SAM2 is interactive, not pure drawing
+            _ => true,
+        }
     }
 }
 

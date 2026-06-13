@@ -1,23 +1,35 @@
 [workspace]
 members = ["crates/*"]
+# Exclude hvat_e2e from main repo - it lives in the private testing fork
+exclude = ["crates/hvat_e2e"]
 resolver = "2"
 
 [package]
 name = "hvat"
 version = "0.1.0"
 edition = "2024"
-license = "AGPL-3.0"
+license = "MIT"
 authors = ["fjodborg <github.com/fjodborg>"]
 include = ["LICENSE", "**/*.rs", "Cargo.toml"]
 default-run = "hvat-native"
+
+[features]
+default = []
+# SAM2 feature enables ONNX-based segmentation
+# - Native: uses ort (ONNX Runtime) with download-binaries
+# - WASM: uses onnxruntime-web via JavaScript (sam2-onnx.js)
+# Note: ort is optional and only used on native
+sam2 = ["ort"]
 
 [dependencies]
 hvat_ui = { path = "crates/hvat_ui" }
 hvat_gpu = { path = "crates/hvat_gpu" }
 
+
 # Core module dependencies
-ndarray = "0.17"
-ndarray-npy = { version = "0.10", default-features = false }
+# Using ndarray 0.16 to match ort's dependency (avoids version mismatch errors)
+ndarray = "0.16"
+ndarray-npy = { version = "0.9", default-features = false }
 image = "0.25"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -32,6 +44,8 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 js-sys = "0.3"
+# getrandom needs js feature for WASM (used by tract backend)
+getrandom = { version = "0.2", features = ["js"] }
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
@@ -69,9 +83,14 @@ web-sys = { version = "0.3", features = [
     "DedicatedWorkerGlobalScope",
     "MessageEvent",
     "console",
+    # Fetch API for SAM2 model loading
+    "Request",
+    "Response",
+    "Headers",
 ] }
 winit = "0.29"
 wgpu = "27"
+# Note: WASM SAM2 uses onnxruntime-web via JavaScript (see sam2-onnx.js)
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = "0.3"
@@ -80,6 +99,12 @@ winit = "0.29"
 wgpu = "27"
 rfd = "0.15"
 dirs = "5.0"
+# Native SAM2: use ONNX Runtime with auto-downloaded binaries
+ort = { version = "2.0.0-rc.10", optional = true, default-features = false, features = [
+    "std",
+    "ndarray",
+    "download-binaries",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.rfd]
 version = "0.15"
@@ -99,10 +124,27 @@ path = "src/main.rs"
 name = "image-decoder-worker"
 path = "src/bin/image_decoder_worker.rs"
 
+# SAM2 encoder Web Worker - WASM only, optional (requires sam2 feature)
+# Used for background SAM2 image encoding - downloads only when user enables SAM2
+[[bin]]
+name = "sam2-encoder-worker"
+path = "src/bin/sam2_encoder_worker.rs"
+required-features = ["sam2"]
+
 # Production release: fully optimized, small binary (slowest to compile)
 # Build with: cargo build --release
 [profile.release]
 opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+# Production release: fully optimized for small binary (slowest to compile)
+# Build with: cargo build --profile release-small
+[profile.release-small]
+inherits = "release"
+opt-level = "z"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"

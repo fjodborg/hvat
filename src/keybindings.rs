@@ -104,6 +104,8 @@ impl KeyBindings {
             AnnotationTool::BoundingBox => self.tool_bbox,
             AnnotationTool::Polygon => self.tool_polygon,
             AnnotationTool::Point => self.tool_point,
+            #[cfg(feature = "sam2")]
+            AnnotationTool::SAM2Segment => KeyCode::S, // Fixed to S key
         }
     }
 
@@ -119,6 +121,11 @@ impl KeyBindings {
             AnnotationTool::BoundingBox => self.tool_bbox = key,
             AnnotationTool::Polygon => self.tool_polygon = key,
             AnnotationTool::Point => self.tool_point = key,
+            #[cfg(feature = "sam2")]
+            AnnotationTool::SAM2Segment => {
+                // SAM2Segment key is fixed to S, cannot be changed
+                log::warn!("SAM2Segment hotkey is fixed to S key");
+            }
         }
     }
 

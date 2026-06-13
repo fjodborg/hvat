@@ -57,6 +57,8 @@ pub struct ImagePointerEvent {
     pub kind: PointerEventKind,
     /// Which mouse button triggered this event
     pub button: MouseButton,
+    /// Keyboard modifiers active during this event
+    pub modifiers: crate::event::KeyModifiers,
     /// Updated viewer state (app should use this to persist pointer_state)
     pub viewer_state: ImageViewerState,
 }
@@ -358,6 +360,10 @@ impl<M> ImageViewer<M> {
         if self.texture_width == 0 || self.texture_height == 0 {
             return *widget_bounds;
         }
+        // Guard against zero-sized widget bounds to prevent NaN propagation
+        if widget_bounds.width <= 0.0 || widget_bounds.height <= 0.0 {
+            return *widget_bounds;
+        }
 
         // Get the four corners of the image in screen coordinates
         let (x1, y1) = self.image_to_screen(0.0, 0.0, widget_bounds);
@@ -483,6 +489,12 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
     }
 
     fn draw(&self, renderer: &mut Renderer, bounds: Bounds) {
+        log::info!(
+            "ImageViewer::draw - overlays count: {}, bounds: {:?}",
+            self.overlays.len(),
+            bounds
+        );
+
         // Draw background
         renderer.fill_rect(bounds, Color::rgb(0.1, 0.1, 0.12));
 
@@ -517,6 +529,11 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
         // Clip annotation overlays to the actual image bounds on screen
         // This prevents annotations from rendering outside the visible image area
         let image_screen_bounds = self.calculate_image_screen_bounds(&bounds);
+        log::info!(
+            "ImageViewer::draw - clip bounds: {:?}, widget bounds: {:?}",
+            image_screen_bounds,
+            bounds
+        );
         renderer.push_clip(image_screen_bounds);
 
         // Draw annotation overlays
@@ -632,6 +649,13 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                 }
                 OverlayShape::Point { x, y } => {
                     let (screen_x, screen_y) = self.image_to_screen(*x, *y, &bounds);
+                    log::info!(
+                        "Drawing Point: image ({}, {}) -> screen ({}, {})",
+                        x,
+                        y,
+                        screen_x,
+                        screen_y
+                    );
                     let radius = 6.0;
 
                     let point_bounds = Bounds::new(
@@ -902,6 +926,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_y: position.1,
                             kind: PointerEventKind::DragStart,
                             button: MouseButton::Left,
+                            modifiers: event.modifiers(),
                             viewer_state: self.state.clone(),
                         })
                         .into();
@@ -933,6 +958,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_y: position.1,
                             kind: PointerEventKind::DragEnd,
                             button: MouseButton::Left,
+                            modifiers: event.modifiers(),
                             viewer_state: self.state.clone(),
                         })
                         .into();
@@ -968,6 +994,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_y: position.1,
                             kind: PointerEventKind::Click,
                             button: MouseButton::Right,
+                            modifiers: event.modifiers(),
                             viewer_state: self.state.clone(),
                         })
                         .into();
@@ -1036,6 +1063,7 @@ impl<M: 'static> Widget<M> for ImageViewer<M> {
                             screen_y: position.1,
                             kind: PointerEventKind::DragMove,
                             button: MouseButton::Left,
+                            modifiers: event.modifiers(),
                             viewer_state: self.state.clone(),
                         })
                         .into();

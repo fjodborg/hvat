@@ -338,6 +338,10 @@ impl ImageViewerState {
         if tex_w == 0 || tex_h == 0 {
             return 1.0;
         }
+        // Guard against zero view dimensions to prevent NaN from division by zero
+        if view_w <= 0.0 || view_h <= 0.0 {
+            return 1.0;
+        }
         let image_aspect = tex_w as f32 / tex_h as f32;
         let view_aspect = view_w / view_h;
 

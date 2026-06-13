@@ -294,11 +294,12 @@ impl<M: 'static> Scrollable<M> {
             (bounds.height - self.padding.vertical() - if show_h { scrollbar_width } else { 0.0 })
                 .max(0.0);
 
+        // Clamp to non-negative to avoid panics when bounds are too small
         Bounds::new(
             bounds.x + self.padding.left,
             bounds.y + self.padding.top,
-            width,
-            height,
+            width.max(0.0),
+            height.max(0.0),
         )
     }
 
@@ -318,7 +319,8 @@ impl<M: 'static> Scrollable<M> {
         let width = (base_width - if needs_v { scrollbar_width } else { 0.0 }).max(0.0);
         let height = (base_height - if needs_h { scrollbar_width } else { 0.0 }).max(0.0);
 
-        Size::new(width, height)
+        // Clamp to non-negative to avoid panics when bounds are too small
+        Size::new(width.max(0.0), height.max(0.0))
     }
 
     /// Calculate content bounds for drawing (applies scroll offset)

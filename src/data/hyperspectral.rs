@@ -3,6 +3,7 @@
 use crate::data::LoaderRegistry;
 
 /// CPU-side hyperspectral data, used for initial upload to GPU.
+#[derive(Clone)]
 pub struct HyperspectralData {
     /// Band data as flattened f32 arrays (one per band)
     pub bands: Vec<Vec<f32>>,

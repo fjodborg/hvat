@@ -11,6 +11,8 @@ mod keybindings;
 pub mod licenses;
 mod message;
 mod model;
+#[cfg(feature = "sam2")]
+pub mod sam2;
 mod state;
 mod test_image;
 mod ui;

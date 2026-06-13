@@ -286,4 +286,8 @@ pub enum Message {
     ConfirmDialogConfirm,
     /// Confirmation dialog cancelled (user clicked cancel or pressed Escape)
     ConfirmDialogCancel,
+    // SAM2 AI-Assisted Segmentation (feature-gated)
+    /// SAM2 message (requires sam2 feature)
+    #[cfg(feature = "sam2")]
+    SAM2(crate::sam2::SAM2Message),
 }
