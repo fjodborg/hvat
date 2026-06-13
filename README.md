@@ -1,4 +1,4 @@
-# hvat (Deprecated) 
+# hvat (Deprecated) [successor](https://github.com/fjodborg/hvat_open) 
 
 > **This project is no longer actively maintained.**
 > See the [successor](https://github.com/fjodborg/hvat_open) project.
