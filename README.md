@@ -1,7 +1,7 @@
-# hvat (Deprecated) [successor](https://github.com/fjodborg/hvat_open) 
+# hvat (Deprecated) [successor](https://github.com/fjodborg/HaviLAB) 
 
 > **This project is no longer actively maintained.**
-> See the [successor](https://github.com/fjodborg/hvat_open) project.
+> See the [successor](https://github.com/fjodborg/HaviLAB) project.
 
 ---
 
@@ -14,7 +14,7 @@ This version of HVAT is deprecated for two reasons:
 
 It has been replaced by a classical frontend and backend architecture with transparent communication on the frontend side and open, swappable backends. Please go to the new project instead:
 
-**New project (in active development): [New github project](https://github.com/fjodborg/hvat_open)**
+**New project (in active development): [New github project](https://github.com/fjodborg/HaviLAB)**
 
 ---
 
